@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/contribution-contract.schema.json",
+  "title": "Reviewworthy Contribution Contract",
+  "type": "object",
+  "required": ["contract_version", "contribution_id", "problem", "non_goals", "scope", "invariants", "design", "alternatives", "validation_plan", "risks", "success_criteria", "max_diff_lines"],
+  "properties": {
+    "contract_version": { "const": "0.1" },
+    "contribution_id": { "type": "string", "minLength": 1 },
+    "problem": { "type": "string" },
+    "non_goals": { "type": "array", "items": { "type": "string" } },
+    "scope": { "type": "object", "required": ["files"], "properties": { "files": { "type": "array", "items": { "type": "string" } }, "modules": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": true },
+    "invariants": { "type": "array", "items": { "type": "string" } },
+    "design": { "type": "string" },
+    "alternatives": { "type": "array" },
+    "validation_plan": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "success_criteria": { "type": "array", "items": { "type": "string" } },
+    "max_diff_lines": { "type": "integer", "minimum": 1 },
+    "approval": { "type": "object" }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/ai-assistance.schema.json",
+  "title": "Reviewworthy AI assistance and disclosure record",
+  "type": "object",
+  "required": ["used", "stages", "disclosure"],
+  "properties": {
+    "used": { "type": "boolean" },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "level", "human_verified"],
+        "properties": {
+          "name": { "enum": ["repository_orientation", "candidate_triage", "design", "implementation", "verification", "narrative", "review_response"] },
+          "level": { "enum": ["assisted", "generated", "reviewed"] },
+          "human_verified": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "disclosure": {
+      "type": "object",
+      "required": ["text", "locations", "human_confirmed"],
+      "properties": {
+        "text": { "type": "string" },
+        "locations": { "type": "array", "items": { "enum": ["pr_body", "commit_message", "commit_trailer", "issue_body", "checklist", "other"] } },
+        "human_confirmed": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

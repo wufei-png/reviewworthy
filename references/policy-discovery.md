@@ -12,10 +12,13 @@ The first schema supports:
 [ai]
 allowed = true
 disclosure_required = true
+disclosure_locations = ["pr_body"]
+disclosure_stages = ["implementation", "verification"]
 
 [contribution]
 issue_required = false
 discovery_evidence_allowed = true
+good_first_issue_ai_allowed = true
 
 [pr]
 human_narrative_required = true

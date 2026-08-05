@@ -11,6 +11,7 @@
     "contract",
     "policy",
     "review",
+    "ai_assistance",
     "diff",
     "verification",
     "materials",
@@ -33,7 +34,34 @@
       "properties": { "kind": { "enum": ["issue", "signal", "discovery-evidence"] } },
       "additionalProperties": true
     },
-    "contract": { "type": "object" },
+    "contract": {
+      "type": "object",
+      "properties": {
+        "contract_version": { "const": "0.1" },
+        "contribution_id": { "type": "string" },
+        "risks": { "type": "array" }
+      },
+      "additionalProperties": true
+    },
+    "ai_assistance": {
+      "type": "object",
+      "required": ["used", "stages", "disclosure"],
+      "properties": {
+        "used": { "type": "boolean" },
+        "stages": { "type": "array" },
+        "disclosure": {
+          "type": "object",
+          "required": ["text", "locations", "human_confirmed"],
+          "properties": {
+            "text": { "type": "string" },
+            "locations": { "type": "array" },
+            "human_confirmed": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "policy": { "type": "object" },
     "review": {
       "type": "object",
@@ -46,7 +74,27 @@
     "materials": { "type": "object" },
     "results": { "type": "array", "minItems": 7 },
     "understanding": { "type": "object" },
-    "narrative": { "type": "object" }
+    "narrative": {
+      "type": "object",
+      "properties": {
+        "ai_disclosure": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "required": ["text", "locations", "human_confirmed"],
+              "properties": {
+                "text": { "type": "string" },
+                "locations": { "type": "array" },
+                "human_confirmed": { "type": "boolean" }
+              },
+              "additionalProperties": true
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

@@ -13,10 +13,17 @@ The repository currently provides an alpha, standard-library-only Python CLI wit
 ```text
 reviewworthy packet init --output .reviewworthy/contribution.json
 reviewworthy policy inspect [REPOSITORY]
+reviewworthy brief create --output .reviewworthy/project-brief.json
+reviewworthy brief render .reviewworthy/project-brief.json --output project-brief.md
 reviewworthy candidate search --repo OWNER/REPO --query "keyword"
+reviewworthy candidate init --repository OWNER/REPO
+reviewworthy candidate validate .reviewworthy/candidates.json
+reviewworthy contract init --output .reviewworthy/contribution-contract.json
 reviewworthy risk assess MANIFEST.json
 reviewworthy packet validate .reviewworthy/contribution.json
 reviewworthy action check .reviewworthy/contribution.json
+reviewworthy disclosure render --packet .reviewworthy/contribution.json
+reviewworthy eval run
 reviewworthy remote plan ...
 reviewworthy remote create ... --confirm-operation-id rw-...
 ```
@@ -77,6 +84,11 @@ The first release does not create review comments, close PRs, merge changes, or 
 
 - [Domain language](./CONTEXT.md)
 - [Agent Skill](./SKILL.md)
+- [Project brief and orientation](./references/onboarding-contract.md)
+- [Candidate evidence matrix](./references/candidate-scoring.md)
+- [Contribution Contract](./references/contribution-contract.md)
+- [AI disclosure](./references/ai-disclosure.md)
+- [Fixture evaluations](./references/evaluation.md)
 - [Policy discovery reference](./references/policy-discovery.md)
 - [Understanding gate reference](./references/understanding-gate.md)
 - [Remote write reference](./references/remote-writes.md)
@@ -84,4 +96,4 @@ The first release does not create review comments, close PRs, merge changes, or 
 
 ## Status
 
-This is an early open-source foundation released under the [MIT License](./LICENSE). GitHub discovery, project briefing, candidate menus, and richer provider adapters remain next slices; the current code focuses on the deterministic evidence contract and safe boundaries those features will use.
+This is an early open-source foundation released under the [MIT License](./LICENSE). The current slice adds deterministic project facts, evidence-first candidate menus, standalone Contribution Contracts, policy-aware disclosure records, and provider-free fixture evaluations. Richer provider adapters and deeper project-specific onboarding remain later slices.

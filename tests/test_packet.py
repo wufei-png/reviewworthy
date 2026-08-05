@@ -47,7 +47,7 @@ class PacketValidationTests(unittest.TestCase):
     def test_missing_policy_posture_uses_conservative_remote_fallback(self) -> None:
         packet = valid_packet()
         packet["policy"].pop("posture")
-        packet["narrative"]["ai_disclosure"] = ""
+        packet["ai_assistance"]["disclosure"] = {"text": "", "locations": [], "human_confirmed": False}
         packet["materials"]["material_snapshot"] = material_snapshot(packet)
         packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
 

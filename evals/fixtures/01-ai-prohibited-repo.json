@@ -1,0 +1,10 @@
+{
+  "id": "ai-prohibited-repo",
+  "kind": "policy",
+  "files": {
+    "README.md": "AI assistance is prohibited for contributions.\n"
+  },
+  "assert": {
+    "ai_assistance": "prohibited"
+  }
+}

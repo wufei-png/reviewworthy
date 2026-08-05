@@ -1,0 +1,39 @@
+{
+  "id": "duplicate-existing-pr",
+  "kind": "candidate",
+  "menu": {
+    "menu_version": "0.1",
+    "repository": "example/project",
+    "project_brief": ".reviewworthy/project-brief.json",
+    "candidates": [
+      {
+        "id": "candidate-001",
+        "title": "Fix the reported input regression",
+        "basis": {
+          "kind": "discovery-evidence",
+          "references": [],
+          "evidence": ["Reproduced with the documented command."]
+        },
+        "duplicate_search": {
+          "checked": true,
+          "query": "input regression",
+          "matches": [
+            {"kind": "pull_request", "number": 17, "url": "https://github.com/example/project/pull/17"}
+          ]
+        },
+        "value": {"kind": "bug-fix", "summary": "The existing PR already addresses the reported failure."},
+        "scope": {"files": ["src/input.py"], "modules": ["input boundary"]},
+        "review_cost": "small",
+        "verifiability": "high",
+        "risk": ["behavior change"],
+        "recommendation": "do_not_contribute"
+      }
+    ],
+    "selection": {"selected_id": "", "confirmed": false}
+  },
+  "assert": {
+    "valid": true,
+    "recommendation": "do_not_contribute",
+    "candidate_id": "candidate-001"
+  }
+}

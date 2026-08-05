@@ -1,0 +1,11 @@
+{
+  "id": "stale-understanding",
+  "kind": "packet",
+  "refresh_materials": false,
+  "mutations": [
+    {"path": "diff.additions", "value": 99}
+  ],
+  "assert": {
+    "blocker": "stale_assessment"
+  }
+}

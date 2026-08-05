@@ -1,0 +1,9 @@
+{
+  "id": "scope-expansion",
+  "kind": "action",
+  "changed_files": ["src/example.py", "src/unapproved.py"],
+  "assert": {
+    "conclusion": "failure",
+    "violation": "out_of_scope_files"
+  }
+}

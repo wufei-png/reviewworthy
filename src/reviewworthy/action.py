@@ -44,6 +44,8 @@ def check_packet(path: Path, changed_files: list[str] | None = None) -> dict[str
     unknowns: list[str] = []
 
     policy = packet.get("policy", {})
+    if not isinstance(policy, dict):
+        policy = {}
     if not policy:
         unknowns.append("Policy result is absent; Action does not infer permission.")
     elif not policy.get("authoritative_claims") or policy.get("posture") == "conservative":
@@ -52,8 +54,14 @@ def check_packet(path: Path, changed_files: list[str] | None = None) -> dict[str
     if policy.get("conflicts"):
         violations.append({"code": "policy_conflict", "message": "Policy sources conflict."})
 
-    provided_files = changed_files if changed_files is not None else packet.get("diff", {}).get("changed_files")
-    scope = packet.get("contract", {}).get("scope", {})
+    diff_record = packet.get("diff", {})
+    if not isinstance(diff_record, dict):
+        diff_record = {}
+    contract = packet.get("contract", {})
+    if not isinstance(contract, dict):
+        contract = {}
+    provided_files = changed_files if changed_files is not None else diff_record.get("changed_files")
+    scope = contract.get("scope", {})
     scoped_files = set(scope.get("files", [])) if isinstance(scope, dict) else set()
     if provided_files and scoped_files:
         extra = sorted(set(provided_files) - scoped_files)
@@ -62,8 +70,8 @@ def check_packet(path: Path, changed_files: list[str] | None = None) -> dict[str
     elif not provided_files:
         unknowns.append("Changed-file evidence was not provided; scope cannot be checked.")
 
-    diff = packet.get("diff", {})
-    budget = packet.get("contract", {}).get("max_diff_lines")
+    diff = diff_record
+    budget = contract.get("max_diff_lines")
     if budget is not None and isinstance(diff, dict) and "additions" in diff and "deletions" in diff:
         changed_lines = int(diff.get("additions", 0)) + int(diff.get("deletions", 0))
         if changed_lines > int(budget):

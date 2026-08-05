@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/candidate-menu.schema.json",
+  "title": "Reviewworthy evidence-first candidate menu",
+  "type": "object",
+  "required": ["menu_version", "repository", "candidates", "selection"],
+  "properties": {
+    "menu_version": { "const": "0.1" },
+    "repository": { "type": "string", "minLength": 1 },
+    "project_brief": { "type": "string" },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "basis", "duplicate_search", "value", "scope", "review_cost", "verifiability", "risk", "recommendation"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "basis": { "type": "object", "required": ["kind"], "properties": { "kind": { "enum": ["issue", "signal", "discovery-evidence"] } }, "additionalProperties": true },
+          "duplicate_search": { "type": "object", "required": ["checked", "matches"], "properties": { "checked": { "const": true }, "matches": { "type": "array" } }, "additionalProperties": true },
+          "value": { "type": "object" },
+          "scope": { "type": "object" },
+          "review_cost": { "enum": ["small", "medium", "large", "unknown"] },
+          "verifiability": { "enum": ["high", "medium", "low", "unknown"] },
+          "risk": { "type": "array", "items": { "type": "string" } },
+          "recommendation": { "enum": ["plan_directly", "seek_maintainer_signal", "issue_only", "do_not_contribute"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "selection": { "type": "object", "required": ["selected_id", "confirmed"] }
+  },
+  "additionalProperties": true
+}

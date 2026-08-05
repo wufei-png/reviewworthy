@@ -8,7 +8,9 @@
       "type": "object",
       "properties": {
         "allowed": { "type": "boolean" },
-        "disclosure_required": { "type": "boolean" }
+        "disclosure_required": { "type": "boolean" },
+        "disclosure_locations": { "type": "array", "items": { "enum": ["pr_body", "commit_message", "commit_trailer", "issue_body", "checklist", "other"] } },
+        "disclosure_stages": { "type": "array", "items": { "enum": ["repository_orientation", "candidate_triage", "design", "implementation", "verification", "narrative", "review_response"] } }
       },
       "additionalProperties": false
     },
@@ -16,7 +18,8 @@
       "type": "object",
       "properties": {
         "issue_required": { "type": "boolean" },
-        "discovery_evidence_allowed": { "type": "boolean" }
+        "discovery_evidence_allowed": { "type": "boolean" },
+        "good_first_issue_ai_allowed": { "type": "boolean" }
       },
       "additionalProperties": false
     },

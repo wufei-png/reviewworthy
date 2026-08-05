@@ -46,6 +46,22 @@ _Avoid_: implementation prompt, task prompt
 The reviewable set of policy findings, project understanding, contribution contract, change evidence, validation evidence, disclosure, and human-approved narrative for one contribution.
 _Avoid_: agent transcript, PR dump
 
+**Project brief**:
+A deterministic source manifest and a set of explicitly Skill/contributor-owned understanding sections for the selected repository and contribution context.
+_Avoid_: AI-generated architecture summary, repository dump
+
+**Candidate menu**:
+A bounded set of possible contributions whose basis, duplicate-work evidence, value, scope, review cost, verifiability, risk, and recommended action are visible together.
+_Avoid_: opportunity score, AI confidence ranking
+
+**Evidence matrix**:
+The candidate-menu fields used to compare work without collapsing maintainer demand, review cost, and verifiability into one numeric score.
+_Avoid_: quality score, confidence score
+
+**AI-assistance record**:
+A structured record of where AI assisted, how the contributor verified the result, and where the resulting disclosure is placed.
+_Avoid_: line-by-line authorship ledger
+
 ## Gates and policy
 
 **Understanding gate**:
@@ -79,6 +95,10 @@ _Avoid_: quiz score, authorship proof
 **Contribution policy**:
 The project-specific rules governing acceptable contribution paths, required evidence, AI assistance, disclosure, and remote actions.
 _Avoid_: generic AI policy, repository etiquette
+
+**Disclosure location**:
+The policy-approved public or repository record where AI assistance is disclosed, such as a PR Body, commit message, commit trailer, issue Body, or checklist.
+_Avoid_: universal AI trailer
 
 **Policy conflict**:
 An unresolved incompatibility between project statements about how a contribution may be made or published; it is a safety condition that requires clarification rather than an implicit permission.

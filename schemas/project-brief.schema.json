@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/project-brief.schema.json",
+  "title": "Reviewworthy deterministic project brief",
+  "type": "object",
+  "required": ["brief_version", "generated_by", "status", "repository", "sources", "tooling", "policy", "human_sections", "source_manifest_sha256"],
+  "properties": {
+    "brief_version": { "const": "0.1" },
+    "generated_by": { "const": "reviewworthy" },
+    "status": { "const": "source-manifest-only" },
+    "repository": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "minLength": 1 } }, "additionalProperties": true },
+    "focus": { "type": "array", "items": { "type": "string" } },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind", "sha256", "bytes"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^(?!/).+" },
+          "kind": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tooling": { "type": "object" },
+    "policy": { "type": "object" },
+    "human_sections": { "type": "object" },
+    "source_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": true
+}

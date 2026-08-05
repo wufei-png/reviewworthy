@@ -1,0 +1,12 @@
+{
+  "id": "unverifiable-result",
+  "kind": "risk",
+  "manifest": {
+    "requested_review_depth": "standard",
+    "verifiable": false
+  },
+  "assert": {
+    "hard_stop": "unverifiable",
+    "review_depth": "standard"
+  }
+}

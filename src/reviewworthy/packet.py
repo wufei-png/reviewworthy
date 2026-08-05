@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
 from .util import sha256_json
 
 
@@ -63,6 +64,8 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
         "entry": {"mode": mode, "source": ""},
         "basis": {"kind": "issue" if mode == "issue-backed" else "discovery-evidence", "references": [], "evidence": []},
         "contract": {
+            "contract_version": "0.1",
+            "contribution_id": contribution_id,
             "problem": "",
             "non_goals": [],
             "scope": {"files": []},
@@ -70,12 +73,17 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
             "design": "",
             "alternatives": [],
             "validation_plan": [],
+            "risks": [],
             "success_criteria": [],
             "max_diff_lines": 400,
         },
         "policy": {"authoritative_claims": {}, "conflicts": [], "posture": "conservative"},
         "review": {"depth": "standard", "signals": [], "hard_stops": []},
-        "ai_assistance": {"used": True, "stages": []},
+        "ai_assistance": {
+            "used": True,
+            "stages": [],
+            "disclosure": {"text": "", "locations": [], "human_confirmed": False},
+        },
         "diff": {"changed_files": [], "additions": 0, "deletions": 0},
         "verification": {"commands": [], "evidence": []},
         "materials": {},
@@ -90,7 +98,6 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
             "final_preview_confirmed": False,
             "human_expression_required": False,
             "human_expression": "",
-            "ai_disclosure": "",
         },
     }
     packet["materials"]["material_snapshot"] = material_snapshot(packet)
@@ -112,6 +119,7 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "contract",
         "policy",
         "review",
+        "ai_assistance",
         "diff",
         "verification",
         "materials",
@@ -153,6 +161,38 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         _error(errors, "invalid_review_depth", "review.depth must be standard or heightened", "review.depth")
     if isinstance(review, dict) and not isinstance(review.get("hard_stops", []), list):
         _error(errors, "invalid_hard_stops", "review.hard_stops must be a list", "review.hard_stops")
+
+    ai_assistance = packet.get("ai_assistance", {})
+    if not isinstance(ai_assistance, dict):
+        _error(errors, "invalid_ai_assistance", "ai_assistance must be an object", "ai_assistance")
+    else:
+        if not isinstance(ai_assistance.get("used"), bool):
+            _error(errors, "invalid_ai_used", "ai_assistance.used must be boolean", "ai_assistance.used")
+        stages = ai_assistance.get("stages", [])
+        if not isinstance(stages, list):
+            _error(errors, "invalid_ai_stages", "ai_assistance.stages must be a list", "ai_assistance.stages")
+        else:
+            for index, stage in enumerate(stages):
+                if not isinstance(stage, dict):
+                    _error(errors, "invalid_ai_stage", "Each AI-assistance stage must be an object", f"ai_assistance.stages[{index}]")
+                    continue
+                if stage.get("name") not in DISCLOSURE_STAGES:
+                    _error(errors, "invalid_ai_stage_name", "AI-assistance stage name is not supported", f"ai_assistance.stages[{index}].name")
+                if stage.get("level") not in ASSISTANCE_LEVELS:
+                    _error(errors, "invalid_ai_stage_level", "AI-assistance stage level is not supported", f"ai_assistance.stages[{index}].level")
+                if not isinstance(stage.get("human_verified"), bool):
+                    _error(errors, "invalid_ai_stage_verification", "AI-assistance stage human_verified must be boolean", f"ai_assistance.stages[{index}].human_verified")
+        disclosure = ai_assistance.get("disclosure")
+        if disclosure is not None:
+            if not isinstance(disclosure, dict):
+                _error(errors, "invalid_ai_disclosure", "ai_assistance.disclosure must be an object", "ai_assistance.disclosure")
+            else:
+                if not isinstance(disclosure.get("text"), str):
+                    _error(errors, "invalid_ai_disclosure_text", "ai_assistance.disclosure.text must be a string", "ai_assistance.disclosure.text")
+                if not isinstance(disclosure.get("locations"), list):
+                    _error(errors, "invalid_ai_disclosure_locations", "ai_assistance.disclosure.locations must be a list", "ai_assistance.disclosure.locations")
+                if not isinstance(disclosure.get("human_confirmed"), bool):
+                    _error(errors, "invalid_ai_disclosure_confirmation", "ai_assistance.disclosure.human_confirmed must be boolean", "ai_assistance.disclosure.human_confirmed")
 
     policy = packet.get("policy", {})
     if not isinstance(policy, dict):
@@ -244,8 +284,11 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     blockers = list(validation["errors"])
 
     review = packet.get("review", {})
-    for stop in review.get("hard_stops", []) if isinstance(review, dict) else []:
-        blockers.append({"code": "hard_stop", "message": stop.get("reason", str(stop)), "path": "review.hard_stops"})
+    for stop in review.get("hard_stops", []) if isinstance(review, dict) and isinstance(review.get("hard_stops", []), list) else []:
+        if isinstance(stop, dict):
+            blockers.append({"code": "hard_stop", "message": str(stop.get("reason", stop)), "path": "review.hard_stops"})
+        else:
+            blockers.append({"code": "hard_stop", "message": str(stop), "path": "review.hard_stops"})
 
     policy = packet.get("policy", {})
     if isinstance(policy, dict) and policy.get("conflicts"):
@@ -262,15 +305,16 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
             )
 
     policy_claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
+    if not isinstance(policy_claims, dict):
+        policy_claims = {}
     policy_posture = policy.get("posture") if isinstance(policy, dict) else None
     if policy_posture not in {"explicit", "conservative"}:
         policy_posture = "conservative"
     narrative = packet.get("narrative", {})
-    if (
-        policy_claims.get("disclosure_required") is True
-        or policy_posture == "conservative"
-    ) and not str(narrative.get("ai_disclosure", "")).strip():
-        blockers.append({"code": "missing_ai_disclosure", "message": "AI-assistance disclosure is required by policy or Conservative mode.", "path": "narrative.ai_disclosure"})
+    if not isinstance(narrative, dict):
+        narrative = {}
+    for disclosure_error in disclosure_errors(packet):
+        blockers.append(disclosure_error)
     if policy_claims.get("ai_assistance") == "prohibited":
         ai_used = packet.get("ai_assistance", {}).get("used") if isinstance(packet.get("ai_assistance", {}), dict) else None
         if ai_used is not False:
@@ -288,6 +332,12 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
         blockers.append({"code": "discovery_evidence_disallowed", "message": "Repository policy does not allow Discovery evidence as the contribution basis.", "path": "basis.kind"})
     if policy_claims.get("human_pr_narrative_required") is True and not str(narrative.get("human_expression", "")).strip():
         blockers.append({"code": "missing_human_expression", "message": "The repository policy requires human-owned PR motivation and trade-offs.", "path": "narrative.human_expression"})
+    if policy_claims.get("good_first_issue_ai_allowed") is False:
+        basis = packet.get("basis", {})
+        labels = basis.get("labels", []) if isinstance(basis, dict) else []
+        ai_assistance = packet.get("ai_assistance", {})
+        if any(str(label).lower() in {"good first issue", "good-first-issue"} for label in labels) and isinstance(ai_assistance, dict) and ai_assistance.get("used") is not False:
+            blockers.append({"code": "good_first_issue_ai_disallowed", "message": "The repository does not allow AI-assisted work on good-first-issue items.", "path": "basis.labels"})
 
     assessment = packet.get("understanding", {}).get("assessment", {}) if isinstance(packet.get("understanding", {}), dict) else {}
     if assessment.get("status") != "passed":

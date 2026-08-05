@@ -20,10 +20,13 @@ CLAIM_KEYS = (
     "ai_assistance",
     "issue_required",
     "disclosure_required",
+    "disclosure_locations",
+    "disclosure_stages",
     "human_pr_narrative_required",
     "security_private_reporting",
     "draft_pr_required",
     "discovery_evidence_allowed",
+    "good_first_issue_ai_allowed",
 )
 
 
@@ -76,6 +79,16 @@ def _claims_from_document(text: str, path: Path, root: Path) -> dict[str, Any]:
     ):
         claims["disclosure_required"] = True
 
+        locations: list[str] = []
+        if _first_match(lowered, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}(?:pr|pull request)[^.!?\n]{0,50}(?:body|description)",)):
+            locations.append("pr_body")
+        if _first_match(lowered, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}(?:commit message|commit)",)):
+            locations.append("commit_message")
+        if _first_match(lowered, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}commit[- ]trailer",)):
+            locations.append("commit_trailer")
+        if locations:
+            claims["disclosure_locations"] = sorted(set(locations))
+
     if _first_match(
         lowered,
         (
@@ -105,6 +118,22 @@ def _claims_from_document(text: str, path: Path, root: Path) -> dict[str, Any]:
         ),
     ):
         claims["discovery_evidence_allowed"] = True
+
+    if _first_match(
+        lowered,
+        (
+            r"good[- ]first[- ]issue[^.!?\n]{0,120}(?:ai|artificial intelligence)[^.!?\n]{0,60}(?:not allowed|prohibited|forbidden|must not)",
+            r"(?:ai|artificial intelligence)[^.!?\n]{0,120}good[- ]first[- ]issue[^.!?\n]{0,60}(?:not allowed|prohibited|forbidden|must not)",
+        ),
+    ):
+        claims["good_first_issue_ai_allowed"] = False
+    elif _first_match(
+        lowered,
+        (
+            r"good[- ]first[- ]issue[^.!?\n]{0,120}(?:ai|artificial intelligence)[^.!?\n]{0,60}(?:allowed|permitted)",
+        ),
+    ):
+        claims["good_first_issue_ai_allowed"] = True
 
     return claims
 
@@ -168,6 +197,11 @@ def _structured_claims(data: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(allowed, str) and allowed in {"allowed", "prohibited", "unknown"}:
             claims["ai_assistance"] = allowed
 
+        for key, claim_key in (("disclosure_locations", "disclosure_locations"), ("disclosure_stages", "disclosure_stages")):
+            value = _nested(ai, (key,), ("disclosure", key.removeprefix("disclosure_")))
+            if isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value):
+                claims[claim_key] = sorted(set(value))
+
     mappings: dict[str, tuple[tuple[str, ...], ...]] = {
         "issue_required": (("contribution", "issue_required"), ("issue_required",)),
         "disclosure_required": (("ai", "disclosure_required"), ("disclosure_required",)),
@@ -175,6 +209,7 @@ def _structured_claims(data: dict[str, Any]) -> dict[str, Any]:
         "security_private_reporting": (("security", "private_reporting_required"), ("security_private_reporting",)),
         "draft_pr_required": (("pr", "draft_required"), ("draft_pr_required",)),
         "discovery_evidence_allowed": (("contribution", "discovery_evidence_allowed"), ("discovery_evidence_allowed",)),
+        "good_first_issue_ai_allowed": (("contribution", "good_first_issue_ai_allowed"), ("good_first_issue_ai_allowed",)),
     }
     for key, paths in mappings.items():
         value = _nested(data, *paths)
@@ -247,6 +282,14 @@ def inspect_policy(root: Path) -> dict[str, Any]:
             }
         )
 
+    posture = "conservative" if unknown or conflicts else "explicit"
+    disclosure_locations = authoritative.get("disclosure_locations")
+    if not isinstance(disclosure_locations, list) or not disclosure_locations:
+        disclosure_locations = ["pr_body"] if authoritative.get("disclosure_required") is True or posture == "conservative" else []
+    disclosure_stages = authoritative.get("disclosure_stages")
+    if not isinstance(disclosure_stages, list):
+        disclosure_stages = []
+
     return {
         "repository": str(root),
         "sources": [source.__dict__ for source in document_sources]
@@ -256,6 +299,11 @@ def inspect_policy(root: Path) -> dict[str, Any]:
         "unknown_claims": sorted(set(unknown)),
         "conflicts": conflicts,
         "hard_stops": [{"code": "policy_conflict", "reason": "Policy sources contradict each other."}] if conflicts else [],
-        "posture": "conservative" if unknown or conflicts else "explicit",
+        "posture": posture,
+        "disclosure": {
+            "required": authoritative.get("disclosure_required") is True or posture == "conservative",
+            "locations": disclosure_locations,
+            "stages": disclosure_stages,
+        },
         "result": "blocked" if conflicts else "passed",
     }

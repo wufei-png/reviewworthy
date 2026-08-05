@@ -30,6 +30,7 @@ class ActionCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             packet = valid_packet()
             packet["policy"] = {}
+            packet["ai_assistance"]["disclosure"] = {"text": "", "locations": [], "human_confirmed": False}
             packet["materials"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
             path = Path(directory) / "packet.json"

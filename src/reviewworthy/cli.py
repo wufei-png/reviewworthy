@@ -10,6 +10,11 @@ from typing import Any
 
 from . import __version__
 from .action import check_packet
+from .brief import build_project_brief, render_project_brief, validate_project_brief
+from .candidate import render_candidate_menu, skeleton_menu, validate_candidate_menu
+from .contract import render_contract, skeleton_contract, validate_contract
+from .disclosure import render_disclosure
+from .evals import run_evals
 from .github import GhClient, GhError, build_operation, load_operation_receipt, operation_receipt_path, save_operation_receipt
 from .packet import readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
@@ -35,6 +40,20 @@ def _load_object(path: Path) -> dict[str, Any]:
     return value
 
 
+def _write_json(path: Path, value: dict[str, Any], force: bool = False) -> None:
+    if path.exists() and not force:
+        raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_text(path: Path, value: str, force: bool = False) -> None:
+    if path.exists() and not force:
+        raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value, encoding="utf-8")
+
+
 def _common_json(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", dest="as_json", help="Print machine-readable JSON")
 
@@ -49,6 +68,23 @@ def _build_parser() -> argparse.ArgumentParser:
     policy_inspect = policy_commands.add_parser("inspect")
     policy_inspect.add_argument("path", nargs="?", default=".")
     _common_json(policy_inspect)
+
+    brief = commands.add_parser("brief", help="Create or validate deterministic project-brief facts")
+    brief_commands = brief.add_subparsers(dest="brief_command", required=True)
+    brief_create = brief_commands.add_parser("create", help="Collect repository facts for Skill-owned orientation")
+    brief_create.add_argument("--root", type=Path, default=Path("."))
+    brief_create.add_argument("--output", type=Path, default=Path(".reviewworthy/project-brief.json"))
+    brief_create.add_argument("--focus", action="append", default=[])
+    brief_create.add_argument("--force", action="store_true")
+    _common_json(brief_create)
+    brief_validate = brief_commands.add_parser("validate")
+    brief_validate.add_argument("path", type=Path)
+    _common_json(brief_validate)
+    brief_render = brief_commands.add_parser("render", help="Render a validated brief as Markdown")
+    brief_render.add_argument("path", type=Path)
+    brief_render.add_argument("--output", type=Path, required=True)
+    brief_render.add_argument("--force", action="store_true")
+    _common_json(brief_render)
 
     risk = commands.add_parser("risk", help="Assess deterministic review-depth signals")
     risk_commands = risk.add_subparsers(dest="risk_command", required=True)
@@ -82,6 +118,51 @@ def _build_parser() -> argparse.ArgumentParser:
     candidate_search.add_argument("--query", required=True)
     candidate_search.add_argument("--kind", choices=("issue", "pull_request", "both"), default="both")
     _common_json(candidate_search)
+    candidate_init = candidate_commands.add_parser("init", help="Create an empty evidence-first candidate menu")
+    candidate_init.add_argument("--repository", required=True)
+    candidate_init.add_argument("--project-brief", default="")
+    candidate_init.add_argument("--output", type=Path, default=Path(".reviewworthy/candidates.json"))
+    candidate_init.add_argument("--force", action="store_true")
+    _common_json(candidate_init)
+    candidate_validate = candidate_commands.add_parser("validate")
+    candidate_validate.add_argument("path", type=Path)
+    _common_json(candidate_validate)
+    candidate_render = candidate_commands.add_parser("render")
+    candidate_render.add_argument("path", type=Path)
+    candidate_render.add_argument("--output", type=Path, required=True)
+    candidate_render.add_argument("--force", action="store_true")
+    _common_json(candidate_render)
+
+    contract = commands.add_parser("contract", help="Create or validate a Contribution Contract")
+    contract_commands = contract.add_subparsers(dest="contract_command", required=True)
+    contract_init = contract_commands.add_parser("init")
+    contract_init.add_argument("--contribution-id", default="contribution-001")
+    contract_init.add_argument("--output", type=Path, default=Path(".reviewworthy/contribution-contract.json"))
+    contract_init.add_argument("--force", action="store_true")
+    _common_json(contract_init)
+    contract_validate = contract_commands.add_parser("validate")
+    contract_validate.add_argument("path", type=Path)
+    _common_json(contract_validate)
+    contract_render = contract_commands.add_parser("render")
+    contract_render.add_argument("path", type=Path)
+    contract_render.add_argument("--output", type=Path, required=True)
+    contract_render.add_argument("--force", action="store_true")
+    _common_json(contract_render)
+
+    disclosure = commands.add_parser("disclosure", help="Render a policy-aware AI-assistance disclosure")
+    disclosure_commands = disclosure.add_subparsers(dest="disclosure_command", required=True)
+    disclosure_render = disclosure_commands.add_parser("render")
+    disclosure_render.add_argument("--packet", type=Path, required=True)
+    disclosure_render.add_argument("--location")
+    disclosure_render.add_argument("--output", type=Path)
+    disclosure_render.add_argument("--force", action="store_true")
+    _common_json(disclosure_render)
+
+    evaluations = commands.add_parser("eval", help="Run standard-library fixture evaluations")
+    evaluation_commands = evaluations.add_subparsers(dest="eval_command", required=True)
+    eval_run = evaluation_commands.add_parser("run")
+    eval_run.add_argument("path", type=Path, nargs="?", default=Path("evals/fixtures"))
+    _common_json(eval_run)
 
     remote = commands.add_parser("remote", help="Plan or explicitly execute a GitHub write")
     remote_commands = remote.add_subparsers(dest="remote_command", required=True)
@@ -120,6 +201,21 @@ def main(argv: list[str] | None = None) -> int:
             _print(result, args.as_json)
             return 1 if result["hard_stops"] else 0
 
+        if args.command == "brief":
+            if args.brief_command == "create":
+                brief_value = build_project_brief(args.root, args.focus)
+                _write_json(args.output, brief_value, args.force)
+                _print({"created": str(args.output), "source_manifest_sha256": brief_value["source_manifest_sha256"]}, args.as_json)
+                return 0
+            brief_value = _load_object(args.path)
+            if args.brief_command == "validate":
+                result = validate_project_brief(brief_value)
+                _print(result, args.as_json)
+                return 0 if result["valid"] else 1
+            _write_text(args.output, render_project_brief(brief_value), args.force)
+            _print({"rendered": str(args.output), "source_manifest_sha256": brief_value.get("source_manifest_sha256")}, args.as_json)
+            return 0
+
         if args.command == "risk":
             result = assess_manifest(_load_object(args.manifest))
             _print(result, args.as_json)
@@ -145,16 +241,60 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if result["conclusion"] == "failure" else 0
 
         if args.command == "candidate":
-            kind = "pr" if args.kind == "pull_request" else args.kind
-            matches = GhClient().search_candidates(args.repo, args.query, kind)
-            result = {
-                "repository": args.repo,
-                "query": args.query,
-                "matches": matches,
-                "recommendation": "stop_and_review_duplicates" if matches else "no_matching_work_found",
-            }
+            if args.candidate_command == "search":
+                kind = "pr" if args.kind == "pull_request" else args.kind
+                matches = GhClient().search_candidates(args.repo, args.query, kind)
+                result = {
+                    "repository": args.repo,
+                    "query": args.query,
+                    "matches": matches,
+                    "recommendation": "stop_and_review_duplicates" if matches else "no_matching_work_found",
+                }
+                _print(result, args.as_json)
+                return 0
+            if args.candidate_command == "init":
+                menu = skeleton_menu(args.repository)
+                menu["project_brief"] = args.project_brief
+                _write_json(args.output, menu, args.force)
+                _print({"created": str(args.output), "repository": args.repository}, args.as_json)
+                return 0
+            menu = _load_object(args.path)
+            if args.candidate_command == "validate":
+                result = validate_candidate_menu(menu)
+                _print(result, args.as_json)
+                return 0 if result["valid"] else 1
+            _write_text(args.output, render_candidate_menu(menu), args.force)
+            _print({"rendered": str(args.output), "candidate_count": len(menu.get("candidates", []))}, args.as_json)
+            return 0
+
+        if args.command == "contract":
+            if args.contract_command == "init":
+                contract_value = skeleton_contract(args.contribution_id)
+                _write_json(args.output, contract_value, args.force)
+                _print({"created": str(args.output), "contribution_id": args.contribution_id}, args.as_json)
+                return 0
+            contract_value = _load_object(args.path)
+            if args.contract_command == "validate":
+                result = validate_contract(contract_value)
+                _print(result, args.as_json)
+                return 0 if result["valid"] else 1
+            _write_text(args.output, render_contract(contract_value), args.force)
+            _print({"rendered": str(args.output), "contribution_id": contract_value.get("contribution_id")}, args.as_json)
+            return 0
+
+        if args.command == "disclosure":
+            packet = _load_object(args.packet)
+            result = render_disclosure(packet, args.location)
+            if args.output:
+                _write_text(args.output, result["text"] + "\n", args.force)
+                result["output"] = str(args.output)
             _print(result, args.as_json)
             return 0
+
+        if args.command == "eval":
+            result = run_evals(args.path)
+            _print(result, args.as_json)
+            return 0 if result["result"] == "passed" else 1
 
         if args.command == "remote":
             packet, operation = _remote_operation(args)

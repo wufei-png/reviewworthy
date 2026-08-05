@@ -26,6 +26,14 @@ def valid_packet() -> dict:
             "posture": "explicit",
         },
         "review": {"depth": "standard", "signals": [], "hard_stops": []},
+        "ai_assistance": {
+            "used": True,
+            "stages": [
+                {"name": "implementation", "level": "assisted", "human_verified": True},
+                {"name": "verification", "level": "reviewed", "human_verified": True},
+            ],
+            "disclosure": {"text": "AI assistance was reviewed by the contributor.", "locations": ["pr_body"], "human_confirmed": True},
+        },
         "diff": {"changed_files": ["src/example.py"], "additions": 3, "deletions": 1},
         "verification": {"commands": ["python -m unittest"], "evidence": ["exit 0"]},
         "materials": {},

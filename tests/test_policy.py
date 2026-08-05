@@ -61,3 +61,19 @@ class PolicyInspectionTests(unittest.TestCase):
 
             self.assertIsNone(result["authoritative_claims"]["issue_required"])
             self.assertIsNone(result["authoritative_claims"]["disclosure_required"])
+
+    def test_structured_disclosure_policy_is_normalized_with_locations_and_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("A small example project.\n", encoding="utf-8")
+            config_dir = root / ".reviewworthy"
+            config_dir.mkdir()
+            (config_dir / "policy.toml").write_text(
+                "[ai]\nallowed = true\ndisclosure_required = true\ndisclosure_locations = ['commit_trailer']\ndisclosure_stages = ['verification']\n",
+                encoding="utf-8",
+            )
+
+            result = inspect_policy(root)
+
+            self.assertEqual(result["authoritative_claims"]["disclosure_locations"], ["commit_trailer"])
+            self.assertEqual(result["disclosure"]["stages"], ["verification"])
