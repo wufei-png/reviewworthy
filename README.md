@@ -69,6 +69,8 @@ Remote writes are opt-in and use a two-step local protocol:
 
 The operation ID is embedded in a hidden Body marker. Before creating an Issue or Pull Request, Reviewworthy searches for the marker. An uncertain network result must be reconciled before retrying; the tool never blindly creates a duplicate.
 
+After a successful create, an ignored local operation receipt under `.reviewworthy/local/operations/` also protects immediate retries during GitHub's read-after-write delay.
+
 The first release does not create review comments, close PRs, merge changes, or use an LLM as an Action gatekeeper.
 
 ## Documents

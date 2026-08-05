@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from subprocess import CompletedProcess
+import tempfile
 import unittest
 
-from reviewworthy.github import GhClient, build_operation
+from reviewworthy.github import GhClient, build_operation, load_operation_receipt, operation_receipt_path, save_operation_receipt
 
 from helpers import valid_packet
 
@@ -62,3 +64,11 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual([match["number"] for match in matches], [2])
         self.assertIn("--paginate", calls[0])
         self.assertIn("--slurp", calls[0])
+
+    def test_operation_receipt_round_trip(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix input", "Body", "main")
+        with tempfile.TemporaryDirectory() as directory:
+            path = operation_receipt_path(Path(directory) / ".reviewworthy" / "contribution.json", operation.operation_id)
+            save_operation_receipt(path, operation, "https://github.com/example/project/issues/7")
+            receipt = load_operation_receipt(path, operation)
+            self.assertEqual(receipt["remote"], "https://github.com/example/project/issues/7")

@@ -5,10 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+from pathlib import Path
 from subprocess import CompletedProcess, run
 from typing import Any, Callable
 
-from .util import canonical_json
+from .util import canonical_json, utc_now
 
 
 class GhError(RuntimeError):
@@ -69,6 +70,48 @@ def build_operation(
     marked_body = body.rstrip() + f"\n\n{marker}"
     permissions = ("issues:write",) if kind == "issue" else ("contents:read", "pull-requests:write")
     return RemoteOperation(operation_id, marker, kind, repo, title, marked_body, permissions, base, head)
+
+
+def operation_receipt_path(packet_path: Path, operation_id: str) -> Path:
+    """Return ignored local state used to bridge GitHub read-after-write delay."""
+
+    return packet_path.parent / "local" / "operations" / f"{operation_id}.json"
+
+
+def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GhError(f"Operation receipt is unreadable; reconcile before retrying: {path}: {exc}") from exc
+    if not isinstance(receipt, dict) or any(
+        receipt.get(key) != expected
+        for key, expected in {
+            "operation_id": operation.operation_id,
+            "marker": operation.marker,
+            "repo": operation.repo,
+            "kind": operation.kind,
+        }.items()
+    ):
+        raise GhError(f"Operation receipt does not match the rendered operation; reconcile before retrying: {path}")
+    return receipt
+
+
+def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str) -> None:
+    receipt = {
+        "operation_id": operation.operation_id,
+        "marker": operation.marker,
+        "repo": operation.repo,
+        "kind": operation.kind,
+        "remote": remote,
+        "recorded_at": utc_now(),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise GhError(f"Remote write succeeded but operation receipt could not be saved; reconcile before retrying: {path}: {exc}") from exc
 
 
 class GhClient:

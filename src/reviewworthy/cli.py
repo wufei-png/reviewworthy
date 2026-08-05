@@ -10,7 +10,7 @@ from typing import Any
 
 from . import __version__
 from .action import check_packet
-from .github import GhClient, GhError, build_operation
+from .github import GhClient, GhError, build_operation, load_operation_receipt, operation_receipt_path, save_operation_receipt
 from .packet import readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
 from .risk import assess_manifest
@@ -172,12 +172,22 @@ def main(argv: list[str] | None = None) -> int:
                 _print(payload, args.as_json)
                 return 1
 
-            client = GhClient()
-            existing = client.find_existing(operation)
-            if existing:
-                payload.update({"outcome": "already_exists", "existing": existing})
+            receipt_path = operation_receipt_path(args.packet, operation.operation_id)
+            payload["receipt_path"] = str(receipt_path)
+            receipt = load_operation_receipt(receipt_path, operation)
+            if receipt:
+                payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": receipt["remote"]})
             else:
-                payload.update({"outcome": "created", "remote": client.create(operation)})
+                client = GhClient()
+                existing = client.find_existing(operation)
+                if existing:
+                    remote = existing[0].get("url") or existing[0].get("html_url") or ""
+                    save_operation_receipt(receipt_path, operation, remote)
+                    payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+                else:
+                    remote = client.create(operation)
+                    save_operation_receipt(receipt_path, operation, remote)
+                    payload.update({"outcome": "created", "remote": remote})
             _print(payload, args.as_json)
             return 0
 

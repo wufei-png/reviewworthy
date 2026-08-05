@@ -11,3 +11,5 @@ The operation ID is embedded in the Body as:
 ```
 
 Before creating an Issue or Pull Request, the `gh` adapter searches existing objects for the marker. If the previous result is uncertain, it stops for reconciliation rather than retrying blindly.
+
+After a successful create, the CLI stores an ignored local operation receipt under `.reviewworthy/local/operations/`. This receipt bridges GitHub's short read-after-write delay: an immediate retry returns `already_exists` without issuing a second create request. A malformed or mismatched receipt is a reconciliation error, not permission to retry.
