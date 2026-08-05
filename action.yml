@@ -1,0 +1,28 @@
+name: Reviewworthy deterministic contribution checks
+description: Check a Contribution Packet without mutating the pull request
+inputs:
+  packet:
+    description: Path to the Contribution Packet JSON
+    required: false
+    default: .reviewworthy/contribution.json
+  changed-files:
+    description: Newline-separated changed files to check against the approved scope
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Run Reviewworthy Action checks
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}/src
+        REVIEWWORTHY_PACKET: ${{ inputs.packet }}
+        REVIEWWORTHY_CHANGED_FILES: ${{ inputs.changed-files }}
+      run: |
+        args=(action check "$REVIEWWORTHY_PACKET" --json)
+        while IFS= read -r changed_file; do
+          if [[ -n "$changed_file" ]]; then
+            args+=(--changed-file "$changed_file")
+          fi
+        done <<< "$REVIEWWORTHY_CHANGED_FILES"
+        python3 -m reviewworthy "${args[@]}"

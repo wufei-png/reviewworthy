@@ -1,0 +1,66 @@
+"""Deterministic review-depth signals and independent hard-stop detection."""
+
+from __future__ import annotations
+
+from pathlib import PurePosixPath
+from typing import Any
+
+
+def _add_signal(signals: list[dict[str, str]], code: str, reason: str) -> None:
+    signals.append({"code": code, "reason": reason})
+
+
+def _add_hard_stop(stops: list[dict[str, str]], code: str, reason: str) -> None:
+    if not any(stop["code"] == code for stop in stops):
+        stops.append({"code": code, "reason": reason})
+
+
+def assess_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    signals: list[dict[str, str]] = []
+    hard_stops: list[dict[str, str]] = []
+
+    requested = manifest.get("requested_review_depth", "standard")
+    if requested not in {"standard", "heightened"}:
+        raise ValueError("requested_review_depth must be standard or heightened")
+
+    if manifest.get("security_issue"):
+        _add_hard_stop(hard_stops, "security_issue", "Security issues must use the private reporting path.")
+    if manifest.get("policy_conflict"):
+        _add_hard_stop(hard_stops, "policy_conflict", "Contradictory contribution-policy sources require clarification.")
+    if manifest.get("irreversible_change"):
+        _add_hard_stop(hard_stops, "irreversible_change", "The change is marked as irreversible and needs a separate decision.")
+    if manifest.get("verifiable") is False:
+        _add_hard_stop(hard_stops, "unverifiable", "The contribution cannot currently be verified by the stated evidence.")
+
+    if manifest.get("public_api"):
+        _add_signal(signals, "public_api", "Changes a public API or externally consumed contract.")
+    if manifest.get("data_security_impact"):
+        _add_signal(signals, "data_security_impact", "Touches data handling, permissions, or security-sensitive behavior.")
+    if manifest.get("behavior_change"):
+        _add_signal(signals, "behavior_change", "Changes observable behavior beyond a purely internal refactor.")
+    if manifest.get("low_verifiability"):
+        _add_signal(signals, "low_verifiability", "Evidence is available but difficult to reproduce or observe.")
+
+    changed_files = [str(value) for value in manifest.get("changed_files", [])]
+    sensitive_patterns = (".github/workflows/", "migrations/", "auth", "permission", "security", "credential")
+    if any(any(pattern in path.lower() for pattern in sensitive_patterns) for path in changed_files):
+        _add_signal(signals, "sensitive_path", "Changed files include a sensitive or operational path.")
+
+    diff = manifest.get("diff", {})
+    if isinstance(diff, dict):
+        additions = int(diff.get("additions", 0) or 0)
+        deletions = int(diff.get("deletions", 0) or 0)
+        max_lines = int(manifest.get("max_diff_lines", 400) or 400)
+        if additions + deletions > max_lines:
+            _add_signal(signals, "large_diff", f"Diff has {additions + deletions} changed lines, over the {max_lines}-line review budget.")
+
+    user_escalated = bool(manifest.get("user_escalated"))
+    depth = "heightened" if requested == "heightened" or user_escalated or signals else "standard"
+    return {
+        "review_depth": depth,
+        "signals": signals,
+        "hard_stops": hard_stops,
+        "user_escalated": user_escalated,
+        "requested_review_depth": requested,
+        "changed_files": changed_files,
+    }

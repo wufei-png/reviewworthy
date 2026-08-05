@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/contribution-packet.schema.json",
+  "title": "Reviewworthy Contribution Packet",
+  "type": "object",
+  "required": [
+    "packet_version",
+    "contribution_id",
+    "entry",
+    "basis",
+    "contract",
+    "policy",
+    "review",
+    "diff",
+    "verification",
+    "materials",
+    "results",
+    "understanding",
+    "narrative"
+  ],
+  "properties": {
+    "packet_version": { "const": "0.1" },
+    "contribution_id": { "type": "string", "minLength": 1 },
+    "entry": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": { "mode": { "enum": ["issue-backed", "discovery"] } },
+      "additionalProperties": true
+    },
+    "basis": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "enum": ["issue", "signal", "discovery-evidence"] } },
+      "additionalProperties": true
+    },
+    "contract": { "type": "object" },
+    "policy": { "type": "object" },
+    "review": {
+      "type": "object",
+      "required": ["depth"],
+      "properties": { "depth": { "enum": ["standard", "heightened"] } },
+      "additionalProperties": true
+    },
+    "diff": { "type": "object" },
+    "verification": { "type": "object" },
+    "materials": { "type": "object" },
+    "results": { "type": "array", "minItems": 7 },
+    "understanding": { "type": "object" },
+    "narrative": { "type": "object" }
+  },
+  "additionalProperties": true
+}

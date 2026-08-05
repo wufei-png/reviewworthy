@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import json
+from subprocess import CompletedProcess
+import unittest
+
+from reviewworthy.github import GhClient, build_operation
+
+from helpers import valid_packet
+
+
+class GitHubOperationTests(unittest.TestCase):
+    def test_operation_marker_and_id_are_stable_for_same_rendered_request(self) -> None:
+        packet = valid_packet()
+        first = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input")
+        second = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input")
+        self.assertEqual(first.operation_id, second.operation_id)
+        self.assertIn(first.marker, first.body)
+        self.assertEqual(first.permissions, ("contents:read", "pull-requests:write"))
+
+    def test_changed_body_changes_confirmation_id(self) -> None:
+        packet = valid_packet()
+        first = build_operation(packet, "example/project", "issue", "Fix input", "Body")
+        second = build_operation(packet, "example/project", "issue", "Fix input", "Changed Body")
+        self.assertNotEqual(first.operation_id, second.operation_id)
+
+    def test_operation_requires_pr_head(self) -> None:
+        with self.assertRaises(ValueError):
+            build_operation(valid_packet(), "example/project", "pull_request", "Fix", "Body")
+
+    def test_candidate_search_is_read_only_and_normalizes_issue_and_pr_kind(self) -> None:
+        calls = []
+
+        def fake_runner(argv, **kwargs):
+            calls.append(argv)
+            current_kind = argv[1]
+            body = [{"number": 1, "url": "https://github.com/example/project/issues/1", "title": "Same", "body": "", "state": "OPEN"}]
+            return CompletedProcess(argv, 0, json.dumps(body), "")
+
+        matches = GhClient(fake_runner).search_candidates("example/project", "same", "both")
+        self.assertEqual({match["kind"] for match in matches}, {"issue", "pull_request"})
+        self.assertEqual(len(calls), 2)
+
+    def test_find_existing_reads_all_pages_and_filters_issue_kind(self) -> None:
+        packet = valid_packet()
+        operation = build_operation(packet, "example/project", "issue", "Fix input", "Body")
+        calls = []
+
+        def fake_runner(argv, **kwargs):
+            calls.append(argv)
+            pages = [
+                [{"number": 1, "html_url": "https://github.com/example/project/issues/1", "title": "Other", "body": "", "state": "open"}],
+                [
+                    {"number": 2, "html_url": "https://github.com/example/project/issues/2", "title": "Existing", "body": operation.marker, "state": "open"},
+                    {"number": 3, "html_url": "https://github.com/example/project/pull/3", "title": "PR", "body": operation.marker, "state": "open", "pull_request": {}},
+                ],
+            ]
+            return CompletedProcess(argv, 0, json.dumps(pages), "")
+
+        matches = GhClient(fake_runner).find_existing(operation)
+
+        self.assertEqual([match["number"] for match in matches], [2])
+        self.assertIn("--paginate", calls[0])
+        self.assertIn("--slurp", calls[0])

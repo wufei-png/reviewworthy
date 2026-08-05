@@ -1,0 +1,180 @@
+"""Explicit, idempotent GitHub writes through the user's authenticated gh CLI."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+from subprocess import CompletedProcess, run
+from typing import Any, Callable
+
+from .util import canonical_json
+
+
+class GhError(RuntimeError):
+    """The gh CLI could not complete a requested operation."""
+
+
+@dataclass(frozen=True)
+class RemoteOperation:
+    operation_id: str
+    marker: str
+    kind: str
+    repo: str
+    title: str
+    body: str
+    permissions: tuple[str, ...]
+    base: str | None = None
+    head: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "operation_id": self.operation_id,
+            "marker": self.marker,
+            "kind": self.kind,
+            "repo": self.repo,
+            "title": self.title,
+            "body": self.body,
+            "permissions": list(self.permissions),
+            "base": self.base,
+            "head": self.head,
+        }
+
+
+def build_operation(
+    packet: dict[str, Any],
+    repo: str,
+    kind: str,
+    title: str,
+    body: str,
+    base: str | None = None,
+    head: str | None = None,
+) -> RemoteOperation:
+    if kind not in {"issue", "pull_request"}:
+        raise ValueError("kind must be issue or pull_request")
+    if kind == "pull_request" and not head:
+        raise ValueError("head is required for a pull_request")
+    payload = {
+        "contribution_id": packet.get("contribution_id"),
+        "repo": repo,
+        "kind": kind,
+        "title": title,
+        "body": body,
+        "base": base,
+        "head": head,
+    }
+    digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
+    operation_id = f"rw-{digest}"
+    marker = f"<!-- reviewworthy:operation-id={operation_id} -->"
+    marked_body = body.rstrip() + f"\n\n{marker}"
+    permissions = ("issues:write",) if kind == "issue" else ("contents:read", "pull-requests:write")
+    return RemoteOperation(operation_id, marker, kind, repo, title, marked_body, permissions, base, head)
+
+
+class GhClient:
+    def __init__(self, runner: Callable[..., CompletedProcess[str]] = run):
+        self._runner = runner
+
+    def _invoke(self, args: list[str]) -> str:
+        completed = self._runner(["gh", *args], capture_output=True, text=True, check=False)
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "gh command failed").strip()
+            raise GhError(detail)
+        return completed.stdout or ""
+
+    def _json(self, args: list[str]) -> Any:
+        output = self._invoke(args)
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise GhError(f"gh returned invalid JSON: {exc}") from exc
+
+    def find_existing(self, operation: RemoteOperation) -> list[dict[str, Any]]:
+        pages = self._json(
+            [
+                "api",
+                "--paginate",
+                "--slurp",
+                "--method",
+                "GET",
+                f"repos/{operation.repo}/issues",
+                "-f",
+                "state=all",
+                "-f",
+                "per_page=100",
+            ]
+        )
+        if not isinstance(pages, list):
+            raise GhError("gh paginated issue response was not a list")
+        items: list[dict[str, Any]] = []
+        for page in pages:
+            if not isinstance(page, list):
+                raise GhError("gh paginated issue response contained a non-list page")
+            for item in page:
+                if not isinstance(item, dict):
+                    continue
+                is_pr = "pull_request" in item
+                if operation.kind == "pull_request" and not is_pr:
+                    continue
+                if operation.kind == "issue" and is_pr:
+                    continue
+                normalized = {
+                    "number": item.get("number"),
+                    "url": item.get("html_url") or item.get("url"),
+                    "title": item.get("title"),
+                    "body": item.get("body", ""),
+                    "state": item.get("state"),
+                }
+                if operation.marker in str(normalized["body"]):
+                    items.append(normalized)
+        return items
+
+    def search_candidates(self, repo: str, query: str, kind: str = "both") -> list[dict[str, Any]]:
+        """Search Issues/PRs for duplicate-work evidence without mutating GitHub."""
+
+        kinds = ("issue", "pr") if kind == "both" else (kind,)
+        matches: list[dict[str, Any]] = []
+        for current_kind in kinds:
+            items = self._json(
+                [
+                    current_kind,
+                    "list",
+                    "--repo",
+                    repo,
+                    "--state",
+                    "all",
+                    "--search",
+                    query,
+                    "--limit",
+                    "100",
+                    "--json",
+                    "number,url,title,body,state",
+                ]
+            )
+            if not isinstance(items, list):
+                raise GhError(f"gh {current_kind} search response was not a list")
+            for item in items:
+                if isinstance(item, dict):
+                    matches.append({"kind": "pull_request" if current_kind == "pr" else "issue", **item})
+        return matches
+
+    def create(self, operation: RemoteOperation) -> str:
+        if operation.kind == "issue":
+            return self._invoke(
+                ["issue", "create", "--repo", operation.repo, "--title", operation.title, "--body", operation.body]
+            ).strip()
+        args = [
+            "pr",
+            "create",
+            "--repo",
+            operation.repo,
+            "--title",
+            operation.title,
+            "--body",
+            operation.body,
+            "--base",
+            operation.base or "main",
+            "--head",
+            operation.head or "",
+        ]
+        return self._invoke(args).strip()
