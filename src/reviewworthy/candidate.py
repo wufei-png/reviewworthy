@@ -126,7 +126,10 @@ def render_candidate_menu(menu: dict[str, Any]) -> str:
                 basis=basis.get("kind", "unknown"),
                 duplicate=duplicate_text,
                 value=str(value.get("summary", "")).replace("|", "\\|"),
-                scope=", ".join(scope.get("files", [])) or "not bounded",
+                scope=", ".join(
+                    [f"file:{item}" for item in scope.get("files", [])]
+                    + [f"module:{item}" for item in scope.get("modules", [])]
+                ) or "not bounded",
                 cost=candidate["review_cost"],
                 verify=candidate["verifiability"],
                 risk=", ".join(candidate["risk"]) or "none recorded",

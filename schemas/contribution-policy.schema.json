@@ -7,7 +7,7 @@
     "ai": {
       "type": "object",
       "properties": {
-        "allowed": { "type": "boolean" },
+        "allowed": { "oneOf": [{ "type": "boolean" }, { "const": "unknown" }] },
         "disclosure_required": { "type": "boolean" },
         "disclosure_locations": { "type": "array", "items": { "enum": ["pr_body", "commit_message", "commit_trailer", "issue_body", "checklist", "other"] } },
         "disclosure_stages": { "type": "array", "items": { "enum": ["repository_orientation", "candidate_triage", "design", "implementation", "verification", "narrative", "review_response"] } }

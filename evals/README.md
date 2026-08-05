@@ -2,7 +2,7 @@
 
 These eight fixtures exercise deterministic workflow boundaries without a network provider or an LLM:
 
-- policy prohibition;
+- policy prohibition, including the concrete readiness blocker;
 - duplicate-work disposition;
 - Issue-required contributions;
 - good-first-issue AI restrictions;

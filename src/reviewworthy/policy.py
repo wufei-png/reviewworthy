@@ -73,8 +73,9 @@ def _claims_from_document(text: str, path: Path, root: Path) -> dict[str, Any]:
     if _first_match(
         lowered,
         (
-            r"(?:must|should|required|please)[^.!?\n]{0,50}(?:disclos|declare|mention)[^.!?\n]{0,50}(?:ai|artificial intelligence)",
-            r"(?:disclos|declare|mention)[^.!?\n]{0,50}(?:ai|artificial intelligence)[^.!?\n]{0,50}(?:required|must)",
+            r"(?:must|should|required|please)[^.!?\n]{0,50}(?:disclos|declare|mention)[^.!?\n]{0,50}(?:\bai\b|artificial intelligence)",
+            r"(?:disclos|declare|mention)[^.!?\n]{0,50}(?:\bai\b|artificial intelligence)[^.!?\n]{0,50}(?:required|must)",
+            r"(?:\bai\b|artificial intelligence)[^.!?\n]{0,50}(?:must|should|required)[^.!?\n]{0,50}(?:disclos|declare|mention)",
         ),
     ):
         claims["disclosure_required"] = True
@@ -82,7 +83,7 @@ def _claims_from_document(text: str, path: Path, root: Path) -> dict[str, Any]:
         locations: list[str] = []
         if _first_match(lowered, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}(?:pr|pull request)[^.!?\n]{0,50}(?:body|description)",)):
             locations.append("pr_body")
-        if _first_match(lowered, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}(?:commit message|commit)",)):
+        if _first_match(lowered, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}(?:commit[ -]+message|commit(?![ -]+trailer))",)):
             locations.append("commit_message")
         if _first_match(lowered, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}commit[- ]trailer",)):
             locations.append("commit_trailer")
@@ -263,12 +264,22 @@ def inspect_policy(root: Path) -> dict[str, Any]:
     for key in CLAIM_KEYS:
         values = {str(item["value"]): item["value"] for item in document_claims.get(key, [])}
         if len(values) == 1:
-            authoritative[key] = next(iter(values.values()))
+            value = next(iter(values.values()))
+            if value == "unknown":
+                authoritative[key] = None
+                unknown.append(key)
+            else:
+                authoritative[key] = value
         elif len(values) > 1:
             authoritative[key] = None
             unknown.append(key)
         elif key in structured_claims:
-            authoritative[key] = structured_claims[key]
+            value = structured_claims[key]
+            if value == "unknown":
+                authoritative[key] = None
+                unknown.append(key)
+            else:
+                authoritative[key] = value
         else:
             authoritative[key] = None
             unknown.append(key)

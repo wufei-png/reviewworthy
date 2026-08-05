@@ -6,6 +6,8 @@ Repository-authored human-facing documents are the semantic authority. Reviewwor
 
 If two sources disagree, emit `policy_conflict` and stop remote writes. If a claim is absent, use Conservative mode rather than inferring permission.
 
+The structured AI `allowed` claim may be `true`, `false`, or `"unknown"`; `"unknown"` is normalized to Conservative mode and never treated as permission.
+
 The first schema supports:
 
 ```toml

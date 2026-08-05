@@ -10,6 +10,8 @@ def valid_packet() -> dict:
         "entry": {"mode": "issue-backed", "source": "https://github.com/example/project/issues/1"},
         "basis": {"kind": "issue", "references": ["https://github.com/example/project/issues/1"]},
         "contract": {
+            "contract_version": "0.1",
+            "contribution_id": "contrib-test-001",
             "problem": "A reproducible test failure needs a narrow fix.",
             "non_goals": ["No unrelated refactor"],
             "scope": {"files": ["src/example.py"]},
@@ -17,8 +19,10 @@ def valid_packet() -> dict:
             "design": "Guard the invalid input at the existing boundary.",
             "alternatives": [{"option": "Refactor the caller", "rejected_because": "Larger review surface."}],
             "validation_plan": ["Run the focused unit test."],
+            "risks": ["A caller may rely on the old exception path."],
             "success_criteria": ["The regression test passes."],
             "max_diff_lines": 20,
+            "approval": {"status": "approved", "human_confirmed": True},
         },
         "policy": {
             "authoritative_claims": {"disclosure_required": False},
@@ -58,5 +62,6 @@ def valid_packet() -> dict:
         },
     }
     packet["materials"]["material_snapshot"] = material_snapshot(packet)
+    packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
     packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
     return packet

@@ -24,8 +24,8 @@
         "additionalProperties": false
       }
     },
-    "tooling": { "type": "object" },
-    "policy": { "type": "object" },
+    "tooling": { "type": "object", "required": ["files", "test_paths", "entrypoint_hints"], "properties": { "files": { "type": "array" }, "test_paths": { "type": "array" }, "entrypoint_hints": { "type": "array" } }, "additionalProperties": true },
+    "policy": { "type": "object", "required": ["result", "posture", "unknown_claims", "hard_stops"], "properties": { "result": { "type": "string" }, "posture": { "type": "string" }, "unknown_claims": { "type": "array" }, "hard_stops": { "type": "array" } }, "additionalProperties": true },
     "human_sections": { "type": "object" },
     "source_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   },

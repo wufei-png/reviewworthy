@@ -64,15 +64,22 @@ def validate_contract(contract: dict[str, Any]) -> dict[str, Any]:
         for key in ("files", "modules"):
             if key in scope and not isinstance(scope[key], list):
                 error("invalid_scope_list", f"scope.{key} must be a list", f"scope.{key}")
+            elif key in scope and not all(isinstance(item, str) for item in scope[key]):
+                error("invalid_scope_item", f"scope.{key} items must be strings", f"scope.{key}")
         if not scope.get("files") and not scope.get("modules"):
             error("empty_scope", "At least one file or module must be bounded", "scope")
     if not isinstance(contract.get("alternatives"), list):
         error("invalid_alternatives", "alternatives must be a list", "alternatives")
-    if not isinstance(contract.get("max_diff_lines"), int) or contract.get("max_diff_lines", 0) <= 0:
+    if not isinstance(contract.get("max_diff_lines"), int) or isinstance(contract.get("max_diff_lines"), bool) or contract.get("max_diff_lines", 0) <= 0:
         error("invalid_diff_budget", "max_diff_lines must be a positive integer", "max_diff_lines")
     approval = contract.get("approval")
     if approval is not None and not isinstance(approval, dict):
         error("invalid_approval", "approval must be an object", "approval")
+    elif isinstance(approval, dict):
+        if approval.get("status") not in {"not_run", "approved", "rejected"}:
+            error("invalid_approval_status", "approval.status must be not_run, approved, or rejected", "approval.status")
+        if not isinstance(approval.get("human_confirmed"), bool):
+            error("invalid_approval_confirmation", "approval.human_confirmed must be boolean", "approval.human_confirmed")
     return {"valid": not errors, "errors": errors}
 
 

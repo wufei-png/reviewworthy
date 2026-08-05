@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.cli import main
+from reviewworthy.github import GhError
 
 from helpers import valid_packet
 
@@ -112,3 +113,38 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(first_code, 0)
             self.assertEqual(second_code, 0)
             self.assertEqual(fake_client.create.call_count, 1)
+
+    def test_uncertain_remote_write_does_not_retry_create(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packet_path = root / "packet.json"
+            body_path = root / "body.md"
+            packet = valid_packet()
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+            args = [
+                "remote", "create", "--packet", str(packet_path), "--repo", "example/project", "--kind", "issue",
+                "--title", packet["narrative"]["title"], "--body-file", str(body_path), "--confirm-operation-id", "", "--json",
+            ]
+            plan_output = io.StringIO()
+            with redirect_stdout(plan_output):
+                main(["remote", "plan", *args[2:-3], "--json"])
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            args[args.index("--confirm-operation-id") + 1] = operation_id
+            fake_client = unittest.mock.MagicMock()
+            fake_client.find_existing.return_value = []
+            fake_client.create.return_value = "https://github.com/example/project/issues/7"
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), patch(
+                "reviewworthy.cli.save_operation_receipt", side_effect=GhError("receipt failure")
+            ):
+                with redirect_stdout(io.StringIO()):
+                    first_code = main(args)
+                with redirect_stdout(io.StringIO()):
+                    second_code = main(args)
+
+            receipt_path = root / "local" / "operations" / f"{operation_id}.json"
+            self.assertEqual(first_code, 2)
+            self.assertEqual(second_code, 2)
+            self.assertEqual(fake_client.create.call_count, 1)
+            self.assertEqual(json.loads(receipt_path.read_text())["status"], "pending")

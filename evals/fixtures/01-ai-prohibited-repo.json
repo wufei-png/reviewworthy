@@ -5,6 +5,7 @@
     "README.md": "AI assistance is prohibited for contributions.\n"
   },
   "assert": {
-    "ai_assistance": "prohibited"
+    "ai_assistance": "prohibited",
+    "readiness_blocker": "ai_assistance_prohibited"
   }
 }

@@ -8,6 +8,7 @@ from reviewworthy.brief import build_project_brief, render_project_brief, valida
 from reviewworthy.candidate import render_candidate_menu, skeleton_menu, validate_candidate_menu
 from reviewworthy.contract import skeleton_contract, validate_contract
 from reviewworthy.disclosure import disclosure_errors, render_disclosure
+from reviewworthy.util import sha256_json
 
 
 class ArtifactTests(unittest.TestCase):
@@ -50,10 +51,48 @@ class ArtifactTests(unittest.TestCase):
         self.assertIn("numeric_score_not_allowed", codes)
         self.assertIn("duplicate_work_recommendation_mismatch", codes)
 
+    def test_candidate_render_includes_module_only_scope(self) -> None:
+        menu = skeleton_menu("example/project")
+        menu["candidates"] = [{
+            "id": "candidate-002",
+            "title": "Module work",
+            "basis": {"kind": "signal", "references": ["https://example/2"]},
+            "duplicate_search": {"checked": True, "matches": []},
+            "value": {"summary": "A bounded module improvement"},
+            "scope": {"modules": ["input boundary"]},
+            "review_cost": "small",
+            "verifiability": "high",
+            "risk": [],
+            "recommendation": "plan_directly",
+        }]
+
+        rendered = render_candidate_menu(menu)
+
+        self.assertIn("module:input boundary", rendered)
+
     def test_contract_skeleton_is_explicitly_incomplete(self) -> None:
         result = validate_contract(skeleton_contract("contract-001"))
         self.assertFalse(result["valid"])
         self.assertIn("empty_contract_text", {error["code"] for error in result["errors"]})
+
+    def test_contract_bool_diff_budget_is_invalid(self) -> None:
+        contract = skeleton_contract("contract-002")
+        contract.update({
+            "problem": "A bounded problem",
+            "design": "A bounded design",
+            "non_goals": [],
+            "invariants": [],
+            "alternatives": [],
+            "validation_plan": [],
+            "risks": [],
+            "success_criteria": [],
+            "scope": {"files": ["src/example.py"]},
+            "max_diff_lines": True,
+        })
+
+        result = validate_contract(contract)
+
+        self.assertIn("invalid_diff_budget", {error["code"] for error in result["errors"]})
 
     def test_disclosure_locations_and_stages_are_policy_bound(self) -> None:
         packet = {
@@ -77,6 +116,60 @@ class ArtifactTests(unittest.TestCase):
         codes = {error["code"] for error in disclosure_errors(packet)}
         self.assertIn("missing_disclosure_location", codes)
         self.assertIn("missing_disclosure_stage", codes)
+        with self.assertRaises(ValueError):
+            render_disclosure(packet, "pr_body")
         rendered = render_disclosure(packet, "commit_trailer")
         self.assertEqual(rendered["location"], "commit_trailer")
         self.assertIn("Assistance was reviewed", rendered["text"])
+
+        packet["ai_assistance"]["used"] = False
+        self.assertEqual(disclosure_errors(packet), [])
+        self.assertEqual(render_disclosure(packet)["text"], "")
+
+    def test_disclosure_rejects_policy_disallowed_record_location(self) -> None:
+        packet = {
+            "policy": {"posture": "explicit", "authoritative_claims": {"disclosure_required": True, "disclosure_locations": ["commit_trailer"]}},
+            "ai_assistance": {
+                "used": True,
+                "stages": [],
+                "disclosure": {"text": "Reviewed.", "locations": ["commit_trailer", "pr_body"], "human_confirmed": True},
+            },
+        }
+
+        self.assertIn("disallowed_disclosure_location", {error["code"] for error in disclosure_errors(packet)})
+
+    def test_optional_disclosure_without_allowed_location_renders_empty(self) -> None:
+        packet = {
+            "policy": {"posture": "explicit", "authoritative_claims": {"disclosure_required": False}},
+            "ai_assistance": {"used": True, "stages": [], "disclosure": {"text": "", "locations": [], "human_confirmed": False}},
+        }
+
+        rendered = render_disclosure(packet)
+
+        self.assertFalse(rendered["required"])
+        self.assertIsNone(rendered["location"])
+        self.assertEqual(rendered["text"], "")
+
+    def test_brief_validator_rejects_renderer_missing_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            brief = build_project_brief(Path(directory))
+            brief.pop("tooling")
+            brief.pop("policy")
+            brief["source_manifest_sha256"] = sha256_json({"sources": brief["sources"], "tooling": {}, "policy": {}})
+
+            result = validate_project_brief(brief)
+
+            codes = {error["code"] for error in result["errors"]}
+            self.assertIn("missing_tooling", codes)
+            self.assertIn("missing_policy", codes)
+
+    def test_brief_freshness_check_detects_repository_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("Initial project.\n", encoding="utf-8")
+            brief = build_project_brief(root)
+            (root / "README.md").write_text("Changed project.\n", encoding="utf-8")
+
+            result = validate_project_brief(brief, root)
+
+            self.assertIn("stale_source_manifest", {error["code"] for error in result["errors"]})

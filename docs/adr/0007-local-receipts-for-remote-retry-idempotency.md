@@ -1,6 +1,6 @@
 # Persist local receipts for remote-write retry idempotency
 
-Remote marker lookup is necessary but not sufficient because GitHub can temporarily lag a successful create in list/API responses. After a successful Issue or Pull Request creation, Reviewworthy persists an ignored local receipt keyed by the rendered operation ID; an immediate retry returns the recorded remote result without issuing a second create request. A missing, malformed, or mismatched receipt is a reconciliation error rather than permission to retry blindly.
+Remote marker lookup is necessary but not sufficient because GitHub can temporarily lag a successful create in list/API responses. Reviewworthy persists a pending local operation record immediately before a create, then replaces it with an ignored local receipt after a successful Issue or Pull Request creation. An immediate retry returns the recorded remote result without issuing a second create request. A pending, missing, malformed, incomplete, or mismatched record is a reconciliation error rather than permission to retry blindly.
 
 ## Considered Options
 

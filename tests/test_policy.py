@@ -77,3 +77,40 @@ class PolicyInspectionTests(unittest.TestCase):
 
             self.assertEqual(result["authoritative_claims"]["disclosure_locations"], ["commit_trailer"])
             self.assertEqual(result["disclosure"]["stages"], ["verification"])
+
+    def test_human_commit_trailer_policy_does_not_add_commit_message(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("Contributors must disclose AI assistance in the commit trailer.\n", encoding="utf-8")
+
+            result = inspect_policy(root)
+
+            self.assertEqual(result["authoritative_claims"]["disclosure_locations"], ["commit_trailer"])
+
+    def test_release_trailer_without_ai_does_not_create_disclosure_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("Contributors must disclose the release trailer.\n", encoding="utf-8")
+
+            result = inspect_policy(root)
+
+            self.assertIsNone(result["authoritative_claims"]["disclosure_required"])
+
+    def test_unknown_structured_ai_policy_enters_conservative_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_dir = root / ".reviewworthy"
+            config_dir.mkdir()
+            (config_dir / "policy.toml").write_text(
+                "[ai]\nallowed = 'unknown'\ndisclosure_required = false\ndisclosure_locations = ['pr_body']\ndisclosure_stages = []\n"
+                "[contribution]\nissue_required = false\ndiscovery_evidence_allowed = true\ngood_first_issue_ai_allowed = true\n"
+                "[pr]\nhuman_narrative_required = false\ndraft_required = false\n"
+                "[security]\nprivate_reporting_required = false\n",
+                encoding="utf-8",
+            )
+
+            result = inspect_policy(root)
+
+            self.assertIsNone(result["authoritative_claims"]["ai_assistance"])
+            self.assertIn("ai_assistance", result["unknown_claims"])
+            self.assertEqual(result["posture"], "conservative")

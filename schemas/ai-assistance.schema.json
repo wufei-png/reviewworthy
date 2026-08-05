@@ -30,5 +30,11 @@
       "additionalProperties": true
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "used": { "const": false } } },
+      "then": { "properties": { "stages": { "maxItems": 0 } } }
+    }
+  ],
   "additionalProperties": true
 }

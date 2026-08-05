@@ -94,7 +94,9 @@ def _base_packet() -> dict[str, Any]:
         "human_expression_required": False,
         "human_expression": "",
     }
+    packet["contract"]["approval"] = {"status": "approved", "human_confirmed": True}
     packet["materials"]["material_snapshot"] = material_snapshot(packet)
+    packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
     packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
     return packet
 
@@ -119,6 +121,13 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
                     target.write_text(str(content), encoding="utf-8")
                 actual = inspect_policy(root)
             checks = [("authoritative_claims.ai_assistance", _get_path(actual, "authoritative_claims.ai_assistance"), expected.get("ai_assistance"))]
+            if expected.get("readiness_blocker"):
+                packet = _base_packet()
+                packet["policy"]["authoritative_claims"]["ai_assistance"] = actual["authoritative_claims"]["ai_assistance"]
+                packet["materials"]["material_snapshot"] = material_snapshot(packet)
+                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                blocker_codes = {item["code"] for item in readiness_blockers(packet)}
+                checks.append(("readiness_blocker", expected["readiness_blocker"] in blocker_codes, True))
         elif kind == "candidate":
             actual = validate_candidate_menu(fixture["menu"])
             candidate_id = fixture["menu"]["candidates"][0]["id"]

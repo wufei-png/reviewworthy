@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .contract import CONTRACT_FIELDS, CONTRACT_VERSION
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
 from .util import sha256_json
 
@@ -76,6 +77,7 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
             "risks": [],
             "success_criteria": [],
             "max_diff_lines": 400,
+            "approval": {"status": "not_run", "human_confirmed": False},
         },
         "policy": {"authoritative_claims": {}, "conflicts": [], "posture": "conservative"},
         "review": {"depth": "standard", "signals": [], "hard_stops": []},
@@ -89,7 +91,7 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
         "materials": {},
         "results": [result_record(node, "not_run") for node in REQUIRED_NODES],
         "understanding": {
-            "orientation": {"status": "not_run", "summary": ""},
+            "orientation": {"status": "not_run", "summary": "", "material_snapshot": ""},
             "assessment": {"status": "not_run", "questions": [], "answers": []},
         },
         "narrative": {
@@ -101,6 +103,7 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
         },
     }
     packet["materials"]["material_snapshot"] = material_snapshot(packet)
+    packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
     packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
     return packet
 
@@ -150,17 +153,50 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(contract, dict):
         _error(errors, "invalid_contract", "contract must be an object", "contract")
     else:
-        for key in ("problem", "non_goals", "scope", "invariants", "design", "validation_plan", "success_criteria"):
+        if contract.get("contract_version") != CONTRACT_VERSION:
+            _error(errors, "unsupported_contract_version", "contract_version must be 0.1", "contract.contract_version")
+        if not isinstance(contract.get("contribution_id"), str) or not contract.get("contribution_id", "").strip():
+            _error(errors, "missing_contract_contribution_id", "contract.contribution_id is required", "contract.contribution_id")
+        elif contract.get("contribution_id") != packet.get("contribution_id"):
+            _error(errors, "contribution_id_mismatch", "contract.contribution_id must match packet.contribution_id", "contract.contribution_id")
+        for key in CONTRACT_FIELDS:
             if key not in contract:
                 _error(errors, "missing_contract_field", f"Contribution contract field is missing: {key}", f"contract.{key}")
-        if isinstance(contract.get("scope"), dict) and not isinstance(contract["scope"].get("files", []), list):
-            _error(errors, "invalid_scope", "contract.scope.files must be a list", "contract.scope.files")
+        for list_key in ("non_goals", "invariants", "alternatives", "validation_plan", "risks", "success_criteria"):
+            if list_key in contract and not isinstance(contract[list_key], list):
+                _error(errors, "invalid_contract_list", f"contract.{list_key} must be a list", f"contract.{list_key}")
+        if not isinstance(contract.get("max_diff_lines"), int) or isinstance(contract.get("max_diff_lines"), bool) or contract.get("max_diff_lines", 0) <= 0:
+            _error(errors, "invalid_diff_budget", "contract.max_diff_lines must be a positive integer", "contract.max_diff_lines")
+        approval = contract.get("approval")
+        if approval is not None:
+            if not isinstance(approval, dict):
+                _error(errors, "invalid_approval", "contract.approval must be an object", "contract.approval")
+            else:
+                if approval.get("status") not in {"not_run", "approved", "rejected"}:
+                    _error(errors, "invalid_approval_status", "contract.approval.status must be not_run, approved, or rejected", "contract.approval.status")
+                if not isinstance(approval.get("human_confirmed"), bool):
+                    _error(errors, "invalid_approval_confirmation", "contract.approval.human_confirmed must be boolean", "contract.approval.human_confirmed")
+        scope = contract.get("scope")
+        if isinstance(scope, dict):
+            for scope_key in ("files", "modules"):
+                scope_value = scope.get(scope_key, [])
+                if not isinstance(scope_value, list):
+                    _error(errors, "invalid_scope", f"contract.scope.{scope_key} must be a list", f"contract.scope.{scope_key}")
+                elif not all(isinstance(item, str) for item in scope_value):
+                    _error(errors, "invalid_scope_item", f"contract.scope.{scope_key} items must be strings", f"contract.scope.{scope_key}")
+            if not scope.get("files") and not scope.get("modules"):
+                _error(errors, "empty_scope", "At least one file or module must be bounded", "contract.scope")
 
     review = packet.get("review", {})
     if not isinstance(review, dict) or review.get("depth") not in {"standard", "heightened"}:
         _error(errors, "invalid_review_depth", "review.depth must be standard or heightened", "review.depth")
     if isinstance(review, dict) and not isinstance(review.get("hard_stops", []), list):
         _error(errors, "invalid_hard_stops", "review.hard_stops must be a list", "review.hard_stops")
+    if isinstance(review, dict):
+        if not isinstance(review.get("signals", []), list):
+            _error(errors, "invalid_review_signals", "review.signals must be a list", "review.signals")
+        elif review.get("signals") and review.get("depth") == "standard":
+            _error(errors, "review_depth_too_low", "Risk signals require heightened review depth", "review.depth")
 
     ai_assistance = packet.get("ai_assistance", {})
     if not isinstance(ai_assistance, dict):
@@ -172,6 +208,8 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(stages, list):
             _error(errors, "invalid_ai_stages", "ai_assistance.stages must be a list", "ai_assistance.stages")
         else:
+            if ai_assistance.get("used") is False and stages:
+                _error(errors, "ai_usage_record_conflict", "ai_assistance.used=false cannot include AI-assistance stages", "ai_assistance.stages")
             for index, stage in enumerate(stages):
                 if not isinstance(stage, dict):
                     _error(errors, "invalid_ai_stage", "Each AI-assistance stage must be an object", f"ai_assistance.stages[{index}]")
@@ -182,8 +220,10 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
                     _error(errors, "invalid_ai_stage_level", "AI-assistance stage level is not supported", f"ai_assistance.stages[{index}].level")
                 if not isinstance(stage.get("human_verified"), bool):
                     _error(errors, "invalid_ai_stage_verification", "AI-assistance stage human_verified must be boolean", f"ai_assistance.stages[{index}].human_verified")
-        disclosure = ai_assistance.get("disclosure")
-        if disclosure is not None:
+        if "disclosure" not in ai_assistance:
+            _error(errors, "missing_ai_disclosure_record", "ai_assistance.disclosure is required", "ai_assistance.disclosure")
+        else:
+            disclosure = ai_assistance.get("disclosure")
             if not isinstance(disclosure, dict):
                 _error(errors, "invalid_ai_disclosure", "ai_assistance.disclosure must be an object", "ai_assistance.disclosure")
             else:
@@ -201,6 +241,15 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
     diff = packet.get("diff", {})
     if not isinstance(diff, dict):
         _error(errors, "invalid_diff", "diff must be an object", "diff")
+    else:
+        changed_files = diff.get("changed_files", [])
+        if not isinstance(changed_files, list):
+            _error(errors, "invalid_changed_files", "diff.changed_files must be a list", "diff.changed_files")
+        elif not all(isinstance(item, str) for item in changed_files):
+            _error(errors, "invalid_changed_file", "diff.changed_files items must be strings", "diff.changed_files")
+        for count_key in ("additions", "deletions"):
+            if count_key in diff and (not isinstance(diff[count_key], int) or isinstance(diff[count_key], bool) or diff[count_key] < 0):
+                _error(errors, "invalid_diff_count", f"diff.{count_key} must be a non-negative integer", f"diff.{count_key}")
 
     verification = packet.get("verification", {})
     if not isinstance(verification, dict):
@@ -273,17 +322,138 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
             _error(errors, "missing_pr_body", "Final PR Body is required", "narrative.body")
         if narrative.get("final_preview_confirmed") is not True:
             _error(errors, "narrative_not_confirmed", "Final PR title and Body must be previewed and confirmed", "narrative.final_preview_confirmed")
-        if narrative.get("human_expression_required") and not str(narrative.get("human_expression", "")).strip():
+        if (narrative.get("human_expression_required") or (isinstance(review, dict) and review.get("depth") == "heightened")) and not str(narrative.get("human_expression", "")).strip():
             _error(errors, "missing_human_expression", "This contribution requires human-authored motivation/trade-offs/risk", "narrative.human_expression")
 
     return {"valid": not errors, "errors": errors, "result_nodes": sorted(result_by_node)}
+
+
+def deterministic_evidence_checks(
+    packet: dict[str, Any],
+    changed_files: list[str] | None = None,
+    *,
+    strict: bool = False,
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Check file scope and diff budget without inferring missing evidence."""
+
+    violations: list[dict[str, str]] = []
+    unknowns: list[str] = []
+
+    def add_unknown(code: str, message: str, path: str) -> None:
+        if strict:
+            violations.append({"code": code, "message": message, "path": path})
+        else:
+            unknowns.append(message)
+
+    diff_record = packet.get("diff", {})
+    if not isinstance(diff_record, dict):
+        diff_record = {}
+    contract = packet.get("contract", {})
+    if not isinstance(contract, dict):
+        contract = {}
+
+    provided_files = changed_files if changed_files is not None else diff_record.get("changed_files")
+    if not isinstance(provided_files, list):
+        add_unknown("scope_unverifiable", "Changed-file evidence is not a list; scope cannot be checked.", "diff.changed_files")
+        provided_files = []
+    else:
+        invalid_files = [item for item in provided_files if not isinstance(item, str)]
+        if invalid_files:
+            add_unknown("invalid_changed_files", "Changed-file evidence contains non-string values; scope cannot be checked reliably.", "diff.changed_files")
+        provided_files = [item for item in provided_files if isinstance(item, str)]
+
+    scope = contract.get("scope", {})
+    if not isinstance(scope, dict):
+        scope = {}
+    scoped_files = {item for item in scope.get("files", []) if isinstance(item, str)}
+    scoped_modules = {item for item in scope.get("modules", []) if isinstance(item, str)}
+    if provided_files and scoped_files:
+        extra = sorted(set(provided_files) - scoped_files)
+        if extra:
+            violations.append({"code": "out_of_scope_files", "message": f"Changed files are outside the approved scope: {extra}", "path": "contract.scope.files"})
+    elif provided_files and scoped_modules:
+        add_unknown(
+            "scope_unverifiable",
+            "Scope is module-based; changed-file evidence cannot be checked without a module-to-file mapping.",
+            "contract.scope.modules",
+        )
+    else:
+        add_unknown("scope_unverifiable", "Changed-file evidence was not provided; scope cannot be checked.", "diff.changed_files")
+
+    budget = contract.get("max_diff_lines")
+    if "max_diff_lines" not in contract:
+        add_unknown("missing_diff_budget", "contract.max_diff_lines is required; the scope budget cannot be checked.", "contract.max_diff_lines")
+    elif "additions" in diff_record and "deletions" in diff_record:
+        additions = diff_record.get("additions")
+        deletions = diff_record.get("deletions")
+        if isinstance(budget, int) and not isinstance(budget, bool) and isinstance(additions, int) and isinstance(deletions, int):
+            changed_lines = additions + deletions
+            if changed_lines > budget:
+                violations.append({"code": "diff_budget_exceeded", "message": f"Diff has {changed_lines} changed lines; budget is {budget}.", "path": "contract.max_diff_lines"})
+        else:
+            add_unknown("diff_budget_unverifiable", "Diff line counts or the scope budget are not valid integers; the budget cannot be checked.", "diff")
+    else:
+        add_unknown("diff_budget_unverifiable", "Diff line counts are missing; the scope budget cannot be checked.", "diff")
+
+    return violations, unknowns
+
+
+def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> list[dict[str, str]]:
+    """Return only deterministic violations from known policy claims."""
+
+    policy = packet.get("policy", {})
+    if not isinstance(policy, dict):
+        return []
+    violations: list[dict[str, str]] = []
+    if policy.get("conflicts"):
+        violations.append({"code": "policy_conflict", "message": "Policy sources conflict.", "path": "policy.conflicts"})
+
+    claims = policy.get("authoritative_claims", {})
+    if not isinstance(claims, dict):
+        claims = {}
+    if enforce_disclosure:
+        violations.extend(disclosure_errors(packet))
+
+    ai_assistance = packet.get("ai_assistance", {})
+    ai_used = ai_assistance.get("used") if isinstance(ai_assistance, dict) else None
+    if claims.get("ai_assistance") == "prohibited" and ai_used is not False:
+        violations.append({"code": "ai_assistance_prohibited", "message": "The repository policy prohibits AI assistance for this contribution.", "path": "ai_assistance.used"})
+    if claims.get("issue_required") is True:
+        basis = packet.get("basis", {})
+        basis_kind = basis.get("kind") if isinstance(basis, dict) else None
+        if basis_kind != "issue":
+            violations.append({"code": "issue_required", "message": "The repository policy requires an Issue-backed contribution.", "path": "basis.kind"})
+
+    entry = packet.get("entry", {})
+    basis = packet.get("basis", {})
+    if claims.get("discovery_evidence_allowed") is False and (
+        (isinstance(entry, dict) and entry.get("mode") == "discovery")
+        or (isinstance(basis, dict) and basis.get("kind") == "discovery-evidence")
+    ):
+        violations.append({"code": "discovery_evidence_disallowed", "message": "Repository policy does not allow Discovery evidence as the contribution basis.", "path": "basis.kind"})
+
+    narrative = packet.get("narrative", {})
+    if not isinstance(narrative, dict):
+        narrative = {}
+    if claims.get("human_pr_narrative_required") is True and not str(narrative.get("human_expression", "")).strip():
+        violations.append({"code": "missing_human_expression", "message": "The repository policy requires human-owned PR motivation and trade-offs.", "path": "narrative.human_expression"})
+    if claims.get("good_first_issue_ai_allowed") is False:
+        labels = basis.get("labels", []) if isinstance(basis, dict) else []
+        if any(str(label).lower() in {"good first issue", "good-first-issue"} for label in labels) and ai_used is not False:
+            violations.append({"code": "good_first_issue_ai_disallowed", "message": "The repository does not allow AI-assisted work on good-first-issue items.", "path": "basis.labels"})
+    return violations
 
 
 def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     validation = validate_packet(packet)
     blockers = list(validation["errors"])
 
+    evidence_violations, _unknowns = deterministic_evidence_checks(packet, strict=True)
+    blockers.extend(evidence_violations)
+
     review = packet.get("review", {})
+    if isinstance(review, dict) and review.get("signals") and review.get("depth") != "heightened":
+        blockers.append({"code": "review_depth_too_low", "message": "Risk signals require heightened review depth.", "path": "review.depth"})
     for stop in review.get("hard_stops", []) if isinstance(review, dict) and isinstance(review.get("hard_stops", []), list) else []:
         if isinstance(stop, dict):
             blockers.append({"code": "hard_stop", "message": str(stop.get("reason", stop)), "path": "review.hard_stops"})
@@ -291,8 +461,6 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
             blockers.append({"code": "hard_stop", "message": str(stop), "path": "review.hard_stops"})
 
     policy = packet.get("policy", {})
-    if isinstance(policy, dict) and policy.get("conflicts"):
-        blockers.append({"code": "policy_conflict", "message": "Policy sources conflict.", "path": "policy.conflicts"})
 
     for result in packet.get("results", []) if isinstance(packet.get("results", []), list) else []:
         if isinstance(result, dict) and result.get("status") != "passed":
@@ -303,43 +471,33 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
                     "path": "results",
                 }
             )
+        elif isinstance(result, dict) and result.get("status") == "passed" and not result.get("evidence"):
+            blockers.append({"code": "missing_result_evidence", "message": f"Passed flow node {result.get('node', '<unknown>')} needs evidence.", "path": "results"})
 
-    policy_claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
-    if not isinstance(policy_claims, dict):
-        policy_claims = {}
-    policy_posture = policy.get("posture") if isinstance(policy, dict) else None
-    if policy_posture not in {"explicit", "conservative"}:
-        policy_posture = "conservative"
-    narrative = packet.get("narrative", {})
-    if not isinstance(narrative, dict):
-        narrative = {}
-    for disclosure_error in disclosure_errors(packet):
-        blockers.append(disclosure_error)
-    if policy_claims.get("ai_assistance") == "prohibited":
-        ai_used = packet.get("ai_assistance", {}).get("used") if isinstance(packet.get("ai_assistance", {}), dict) else None
-        if ai_used is not False:
-            blockers.append({"code": "ai_assistance_prohibited", "message": "The repository policy prohibits AI assistance for this contribution.", "path": "ai_assistance.used"})
-    if policy_claims.get("issue_required") is True:
-        basis_kind = packet.get("basis", {}).get("kind") if isinstance(packet.get("basis", {}), dict) else None
-        if basis_kind != "issue":
-            blockers.append({"code": "issue_required", "message": "The repository policy requires an Issue-backed contribution.", "path": "basis.kind"})
-    entry = packet.get("entry", {})
-    basis = packet.get("basis", {})
-    if policy_claims.get("discovery_evidence_allowed") is False and (
-        (isinstance(entry, dict) and entry.get("mode") == "discovery")
-        or (isinstance(basis, dict) and basis.get("kind") == "discovery-evidence")
+    contract = packet.get("contract", {})
+    approval = contract.get("approval") if isinstance(contract, dict) else None
+    if not isinstance(approval, dict) or approval.get("status") != "approved" or approval.get("human_confirmed") is not True:
+        blockers.append({"code": "contract_not_approved", "message": "The contribution contract needs explicit human approval before remote readiness.", "path": "contract.approval"})
+
+    verification = packet.get("verification", {})
+    if (
+        not isinstance(verification, dict)
+        or not isinstance(verification.get("commands"), list)
+        or not verification.get("commands")
+        or not isinstance(verification.get("evidence"), list)
+        or not verification.get("evidence")
     ):
-        blockers.append({"code": "discovery_evidence_disallowed", "message": "Repository policy does not allow Discovery evidence as the contribution basis.", "path": "basis.kind"})
-    if policy_claims.get("human_pr_narrative_required") is True and not str(narrative.get("human_expression", "")).strip():
-        blockers.append({"code": "missing_human_expression", "message": "The repository policy requires human-owned PR motivation and trade-offs.", "path": "narrative.human_expression"})
-    if policy_claims.get("good_first_issue_ai_allowed") is False:
-        basis = packet.get("basis", {})
-        labels = basis.get("labels", []) if isinstance(basis, dict) else []
-        ai_assistance = packet.get("ai_assistance", {})
-        if any(str(label).lower() in {"good first issue", "good-first-issue"} for label in labels) and isinstance(ai_assistance, dict) and ai_assistance.get("used") is not False:
-            blockers.append({"code": "good_first_issue_ai_disallowed", "message": "The repository does not allow AI-assisted work on good-first-issue items.", "path": "basis.labels"})
+        blockers.append({"code": "missing_verification_evidence", "message": "Remote readiness requires verification commands and evidence.", "path": "verification"})
 
-    assessment = packet.get("understanding", {}).get("assessment", {}) if isinstance(packet.get("understanding", {}), dict) else {}
+    blockers.extend(policy_violations(packet, enforce_disclosure=True))
+
+    understanding = packet.get("understanding", {}) if isinstance(packet.get("understanding", {}), dict) else {}
+    orientation = understanding.get("orientation", {})
+    if not isinstance(orientation, dict) or orientation.get("status") != "passed":
+        blockers.append({"code": "orientation_not_passed", "message": "Understanding Orientation must pass before Assessment and remote readiness.", "path": "understanding.orientation.status"})
+    elif orientation.get("material_snapshot") != material_snapshot(packet):
+        blockers.append({"code": "stale_orientation", "message": "Understanding Orientation is stale.", "path": "understanding.orientation.material_snapshot"})
+    assessment = understanding.get("assessment", {})
     if assessment.get("status") != "passed":
         blockers.append({"code": "assessment_not_passed", "message": "Understanding Assessment has not passed.", "path": "understanding.assessment.status"})
     elif assessment.get("material_snapshot") != material_snapshot(packet):

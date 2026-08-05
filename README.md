@@ -14,6 +14,7 @@ The repository currently provides an alpha, standard-library-only Python CLI wit
 reviewworthy packet init --output .reviewworthy/contribution.json
 reviewworthy policy inspect [REPOSITORY]
 reviewworthy brief create --output .reviewworthy/project-brief.json
+reviewworthy brief validate .reviewworthy/project-brief.json --root .
 reviewworthy brief render .reviewworthy/project-brief.json --output project-brief.md
 reviewworthy candidate search --repo OWNER/REPO --query "keyword"
 reviewworthy candidate init --repository OWNER/REPO
@@ -43,7 +44,7 @@ Discovery evidence may serve as the contribution basis when repository policy al
 
 Every node records a result. Review depth is `standard` or `heightened`; risk signals and user escalation can raise it, never lower it. Security issues, policy conflicts, irreversible changes, and unverifiable results are independent hard-stops.
 
-Understanding is material-bound: Orientation explains the contract, final Diff, verification evidence, and policy result; Assessment asks new questions. A material change invalidates the prior Assessment.
+The contract must be explicitly approved before remote readiness. Verification needs commands and evidence, Orientation must pass before Assessment, and Assessment is material-bound: Orientation explains the contract, final Diff, verification evidence, and policy result; Assessment asks new questions. A material change invalidates the prior Assessment.
 
 ## Local development
 
@@ -65,7 +66,7 @@ reviewworthy policy inspect .
 
 Reviewworthy reads repository-authored policy documents first, including `README`, `CONTRIBUTING`, `SECURITY`, `AGENTS`, `.github` templates, and Markdown under `docs/`. An optional `.reviewworthy/policy.toml` supplies structured claims where documents are silent. Contradictory claims produce a `policy_conflict` hard-stop; they are never silently overridden.
 
-Unknown policy enters Conservative mode. The CLI preserves human approval and disclosure requirements. The Action reports unknown policy without failing by default because it is a read-only reporter, not the project decision-maker.
+Unknown policy, including an explicit `allowed = "unknown"` claim, enters Conservative mode. The CLI preserves human approval and disclosure requirements. The Action reports incomplete/unknown policy without failing by default, except for independently deterministic prohibitions such as an explicit AI prohibition.
 
 ## Remote writes
 
@@ -76,7 +77,7 @@ Remote writes are opt-in and use a two-step local protocol:
 
 The operation ID is embedded in a hidden Body marker. Before creating an Issue or Pull Request, Reviewworthy searches for the marker. An uncertain network result must be reconciled before retrying; the tool never blindly creates a duplicate.
 
-After a successful create, an ignored local operation receipt under `.reviewworthy/local/operations/` also protects immediate retries during GitHub's read-after-write delay.
+For a policy-required Draft PR, the draft state is included in the operation ID and passed to `gh pr create --draft`. A pending local operation record is persisted immediately before a create; if the create or receipt persistence is uncertain, later retries stop for reconciliation instead of issuing another create. After a successful create, the ignored local operation receipt under `.reviewworthy/local/operations/` protects immediate retries during GitHub's read-after-write delay.
 
 The first release does not create review comments, close PRs, merge changes, or use an LLM as an Action gatekeeper.
 

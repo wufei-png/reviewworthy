@@ -42,27 +42,32 @@ def disclosure_requirements(policy: dict[str, Any]) -> dict[str, Any]:
 def disclosure_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
     policy = packet.get("policy", {})
     requirements = disclosure_requirements(policy if isinstance(policy, dict) else {})
+    assistance = packet.get("ai_assistance", {})
+    if isinstance(assistance, dict) and assistance.get("used") is False:
+        return []
     if not requirements["required"]:
         return []
-    assistance = packet.get("ai_assistance", {})
     narrative = packet.get("narrative", {})
     raw_record = assistance.get("disclosure") if isinstance(assistance, dict) and "disclosure" in assistance else narrative.get("ai_disclosure") if isinstance(narrative, dict) else None
     record = _as_disclosure_record(raw_record)
     errors: list[dict[str, str]] = []
     text = record.get("text")
     if not isinstance(text, str) or not text.strip():
-        errors.append({"code": "missing_ai_disclosure", "message": "AI-assistance disclosure text is required.", "path": "narrative.ai_disclosure.text"})
+        errors.append({"code": "missing_ai_disclosure", "message": "AI-assistance disclosure text is required.", "path": "ai_assistance.disclosure.text"})
     locations = record.get("locations", [])
     if not isinstance(locations, list):
         locations = []
     invalid_locations = sorted(set(str(value) for value in locations) - DISCLOSURE_LOCATIONS)
     if invalid_locations:
-        errors.append({"code": "invalid_disclosure_location", "message": f"Unsupported disclosure location(s): {invalid_locations}", "path": "narrative.ai_disclosure.locations"})
+        errors.append({"code": "invalid_disclosure_location", "message": f"Unsupported disclosure location(s): {invalid_locations}", "path": "ai_assistance.disclosure.locations"})
     missing_locations = sorted(set(requirements["locations"]) - set(locations))
     if missing_locations:
-        errors.append({"code": "missing_disclosure_location", "message": f"Disclosure must record these location(s): {missing_locations}", "path": "narrative.ai_disclosure.locations"})
+        errors.append({"code": "missing_disclosure_location", "message": f"Disclosure must record these location(s): {missing_locations}", "path": "ai_assistance.disclosure.locations"})
+    disallowed_locations = sorted(set(locations) - set(requirements["locations"]))
+    if disallowed_locations:
+        errors.append({"code": "disallowed_disclosure_location", "message": f"Disclosure records locations not allowed by policy: {disallowed_locations}", "path": "ai_assistance.disclosure.locations"})
     if record.get("human_confirmed") is not True:
-        errors.append({"code": "disclosure_not_human_confirmed", "message": "The contributor must confirm the disclosure record.", "path": "narrative.ai_disclosure.human_confirmed"})
+        errors.append({"code": "disclosure_not_human_confirmed", "message": "The contributor must confirm the disclosure record.", "path": "ai_assistance.disclosure.human_confirmed"})
 
     assistance = packet.get("ai_assistance", {})
     stages = assistance.get("stages", []) if isinstance(assistance, dict) else []
@@ -79,10 +84,28 @@ def render_disclosure(packet: dict[str, Any], location: str | None = None) -> di
     policy = packet.get("policy", {})
     requirements = disclosure_requirements(policy if isinstance(policy, dict) else {})
     assistance = packet.get("ai_assistance", {})
+    if isinstance(assistance, dict) and assistance.get("used") is False:
+        return {
+            "required": False,
+            "location": None,
+            "allowed_locations": requirements["locations"],
+            "required_stages": requirements["stages"],
+            "text": "",
+        }
     narrative = packet.get("narrative", {})
     raw_record = assistance.get("disclosure") if isinstance(assistance, dict) and "disclosure" in assistance else narrative.get("ai_disclosure") if isinstance(narrative, dict) else None
     record = _as_disclosure_record(raw_record)
     stages = assistance.get("stages", []) if isinstance(assistance, dict) else []
+    if location is not None and location not in requirements["locations"]:
+        raise ValueError(f"Disclosure location is not allowed by policy: {location}")
+    if not requirements["required"] and not requirements["locations"]:
+        return {
+            "required": False,
+            "location": None,
+            "allowed_locations": [],
+            "required_stages": requirements["stages"],
+            "text": "",
+        }
     selected_location = location or (requirements["locations"][0] if requirements["locations"] else "pr_body")
     if selected_location not in DISCLOSURE_LOCATIONS:
         raise ValueError(f"Unsupported disclosure location: {selected_location}")

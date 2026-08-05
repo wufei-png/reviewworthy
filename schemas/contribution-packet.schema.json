@@ -34,34 +34,8 @@
       "properties": { "kind": { "enum": ["issue", "signal", "discovery-evidence"] } },
       "additionalProperties": true
     },
-    "contract": {
-      "type": "object",
-      "properties": {
-        "contract_version": { "const": "0.1" },
-        "contribution_id": { "type": "string" },
-        "risks": { "type": "array" }
-      },
-      "additionalProperties": true
-    },
-    "ai_assistance": {
-      "type": "object",
-      "required": ["used", "stages", "disclosure"],
-      "properties": {
-        "used": { "type": "boolean" },
-        "stages": { "type": "array" },
-        "disclosure": {
-          "type": "object",
-          "required": ["text", "locations", "human_confirmed"],
-          "properties": {
-            "text": { "type": "string" },
-            "locations": { "type": "array" },
-            "human_confirmed": { "type": "boolean" }
-          },
-          "additionalProperties": true
-        }
-      },
-      "additionalProperties": true
-    },
+    "contract": { "$ref": "contribution-contract.schema.json" },
+    "ai_assistance": { "$ref": "ai-assistance.schema.json" },
     "policy": { "type": "object" },
     "review": {
       "type": "object",

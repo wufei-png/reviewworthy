@@ -26,6 +26,22 @@ class PacketValidationTests(unittest.TestCase):
         result = validate_packet(packet)
         self.assertIn("missing_result_record", {error["code"] for error in result["errors"]})
 
+    def test_missing_ai_disclosure_record_is_invalid(self) -> None:
+        packet = valid_packet()
+        packet["ai_assistance"].pop("disclosure")
+
+        result = validate_packet(packet)
+
+        self.assertIn("missing_ai_disclosure_record", {error["code"] for error in result["errors"]})
+
+    def test_ai_used_false_cannot_retain_assistance_stages(self) -> None:
+        packet = valid_packet()
+        packet["ai_assistance"]["used"] = False
+
+        result = validate_packet(packet)
+
+        self.assertIn("ai_usage_record_conflict", {error["code"] for error in result["errors"]})
+
     def test_skeleton_records_all_nodes_and_material_snapshot(self) -> None:
         packet = skeleton_packet("draft-001", "discovery")
         self.assertEqual(len(packet["results"]), 7)
@@ -43,6 +59,75 @@ class PacketValidationTests(unittest.TestCase):
         blockers = readiness_blockers(packet)
 
         self.assertIn("discovery_evidence_disallowed", {blocker["code"] for blocker in blockers})
+
+    def test_remote_readiness_checks_scope_and_diff_budget(self) -> None:
+        packet = valid_packet()
+        packet["diff"] = {"changed_files": ["src/example.py", "src/unapproved.py"], "additions": 99, "deletions": 0}
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        codes = {blocker["code"] for blocker in readiness_blockers(packet)}
+
+        self.assertIn("out_of_scope_files", codes)
+        self.assertIn("diff_budget_exceeded", codes)
+
+    def test_missing_diff_budget_blocks_remote_readiness(self) -> None:
+        packet = valid_packet()
+        packet["contract"].pop("max_diff_lines")
+        packet["diff"].pop("additions")
+        packet["diff"].pop("deletions")
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        codes = {blocker["code"] for blocker in readiness_blockers(packet)}
+
+        self.assertIn("missing_diff_budget", codes)
+
+    def test_contract_approval_is_required_for_remote_readiness(self) -> None:
+        packet = valid_packet()
+        packet["contract"]["approval"] = {"status": "not_run", "human_confirmed": False}
+
+        self.assertIn("contract_not_approved", {blocker["code"] for blocker in readiness_blockers(packet)})
+
+    def test_orientation_must_pass_before_assessment(self) -> None:
+        packet = valid_packet()
+        packet["understanding"]["orientation"]["status"] = "not_run"
+
+        self.assertIn("orientation_not_passed", {blocker["code"] for blocker in readiness_blockers(packet)})
+
+    def test_verification_evidence_is_required_for_remote_readiness(self) -> None:
+        packet = valid_packet()
+        packet["verification"] = {"commands": [], "evidence": []}
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertIn("missing_verification_evidence", {blocker["code"] for blocker in readiness_blockers(packet)})
+
+    def test_risk_signal_cannot_use_standard_depth(self) -> None:
+        packet = valid_packet()
+        packet["review"]["signals"] = ["public_api"]
+
+        self.assertIn("review_depth_too_low", {error["code"] for error in validate_packet(packet)["errors"]})
+
+    def test_heightened_review_requires_human_expression(self) -> None:
+        packet = valid_packet()
+        packet["review"]["depth"] = "heightened"
+        packet["narrative"]["human_expression"] = ""
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertIn("missing_human_expression", {error["code"] for error in validate_packet(packet)["errors"]})
+
+    def test_packet_and_contract_ids_must_match(self) -> None:
+        packet = valid_packet()
+        packet["contract"]["contribution_id"] = "other-contribution"
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertIn("contribution_id_mismatch", {error["code"] for error in validate_packet(packet)["errors"]})
 
     def test_missing_policy_posture_uses_conservative_remote_fallback(self) -> None:
         packet = valid_packet()

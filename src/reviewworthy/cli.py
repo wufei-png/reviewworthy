@@ -15,7 +15,7 @@ from .candidate import render_candidate_menu, skeleton_menu, validate_candidate_
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
-from .github import GhClient, GhError, build_operation, load_operation_receipt, operation_receipt_path, save_operation_receipt
+from .github import GhClient, GhError, build_operation, load_operation_receipt, operation_receipt_path, save_operation_pending, save_operation_receipt
 from .packet import readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
 from .risk import assess_manifest
@@ -79,6 +79,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _common_json(brief_create)
     brief_validate = brief_commands.add_parser("validate")
     brief_validate.add_argument("path", type=Path)
+    brief_validate.add_argument("--root", type=Path, help="Also compare the brief with the current repository source manifest")
     _common_json(brief_validate)
     brief_render = brief_commands.add_parser("render", help="Render a validated brief as Markdown")
     brief_render.add_argument("path", type=Path)
@@ -209,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             brief_value = _load_object(args.path)
             if args.brief_command == "validate":
-                result = validate_project_brief(brief_value)
+                result = validate_project_brief(brief_value, args.root)
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
             _write_text(args.output, render_project_brief(brief_value), args.force)
@@ -325,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
                     save_operation_receipt(receipt_path, operation, remote)
                     payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
                 else:
+                    save_operation_pending(receipt_path, operation)
                     remote = client.create(operation)
                     save_operation_receipt(receipt_path, operation, remote)
                     payload.update({"outcome": "created", "remote": remote})

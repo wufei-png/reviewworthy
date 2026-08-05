@@ -162,7 +162,7 @@ def build_project_brief(root: Path, focus: list[str] | None = None) -> dict[str,
     return brief
 
 
-def validate_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
+def validate_project_brief(brief: dict[str, Any], root: Path | None = None) -> dict[str, Any]:
     errors: list[dict[str, str]] = []
 
     def error(code: str, message: str, path: str) -> None:
@@ -196,11 +196,32 @@ def validate_project_brief(brief: dict[str, Any]) -> dict[str, Any]:
         for key in HUMAN_SECTIONS:
             if key not in human_sections:
                 error("missing_human_section", f"Human section is required: {key}", f"human_sections.{key}")
+    tooling = brief.get("tooling")
+    if not isinstance(tooling, dict):
+        error("missing_tooling", "tooling is required for deterministic rendering", "tooling")
+    else:
+        for key in ("files", "test_paths", "entrypoint_hints"):
+            if not isinstance(tooling.get(key), list):
+                error("invalid_tooling_field", f"tooling.{key} must be a list", f"tooling.{key}")
+    policy = brief.get("policy")
+    if not isinstance(policy, dict):
+        error("missing_policy", "policy is required for deterministic rendering", "policy")
+    else:
+        for key in ("result", "posture"):
+            if not isinstance(policy.get(key), str) or not policy.get(key, "").strip():
+                error("invalid_policy_field", f"policy.{key} must be a non-empty string", f"policy.{key}")
+        for key in ("unknown_claims", "hard_stops"):
+            if not isinstance(policy.get(key), list):
+                error("invalid_policy_field", f"policy.{key} must be a list", f"policy.{key}")
     expected_manifest = sha256_json(
         {"sources": brief.get("sources", []), "tooling": brief.get("tooling", {}), "policy": brief.get("policy", {})}
     )
     if brief.get("source_manifest_sha256") != expected_manifest:
         error("manifest_hash_mismatch", "source_manifest_sha256 does not match deterministic facts", "source_manifest_sha256")
+    if root is not None:
+        current = build_project_brief(root, brief.get("focus", []))
+        if current["source_manifest_sha256"] != brief.get("source_manifest_sha256"):
+            error("stale_source_manifest", "The brief does not match the current repository source manifest", "source_manifest_sha256")
     return {"valid": not errors, "errors": errors}
 
 

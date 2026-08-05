@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 from subprocess import CompletedProcess, run
 from typing import Any, Callable
@@ -27,6 +28,7 @@ class RemoteOperation:
     permissions: tuple[str, ...]
     base: str | None = None
     head: str | None = None
+    draft: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +41,7 @@ class RemoteOperation:
             "permissions": list(self.permissions),
             "base": self.base,
             "head": self.head,
+            "draft": self.draft,
         }
 
 
@@ -63,13 +66,18 @@ def build_operation(
         "body": body,
         "base": base,
         "head": head,
+        "draft": kind == "pull_request" and bool(
+            isinstance(packet.get("policy"), dict)
+            and isinstance(packet["policy"].get("authoritative_claims"), dict)
+            and packet["policy"]["authoritative_claims"].get("draft_pr_required") is True
+        ),
     }
     digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
     operation_id = f"rw-{digest}"
     marker = f"<!-- reviewworthy:operation-id={operation_id} -->"
     marked_body = body.rstrip() + f"\n\n{marker}"
     permissions = ("issues:write",) if kind == "issue" else ("contents:read", "pull-requests:write")
-    return RemoteOperation(operation_id, marker, kind, repo, title, marked_body, permissions, base, head)
+    return RemoteOperation(operation_id, marker, kind, repo, title, marked_body, permissions, base, head, payload["draft"])
 
 
 def operation_receipt_path(packet_path: Path, operation_id: str) -> Path:
@@ -95,23 +103,57 @@ def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, 
         }.items()
     ):
         raise GhError(f"Operation receipt does not match the rendered operation; reconcile before retrying: {path}")
+    if receipt.get("operation") != operation.as_dict():
+        raise GhError(f"Operation receipt payload does not match the rendered operation; reconcile before retrying: {path}")
+    status = receipt.get("status")
+    if status == "pending":
+        raise GhError(f"Operation has an uncertain or pending remote write; reconcile before retrying: {path}")
+    if status != "succeeded":
+        raise GhError(f"Operation receipt has an unsupported status; reconcile before retrying: {path}")
+    if not isinstance(receipt.get("remote"), str) or not receipt["remote"].strip():
+        raise GhError(f"Operation receipt has no valid remote result; reconcile before retrying: {path}")
+    if not isinstance(receipt.get("recorded_at"), str) or not receipt["recorded_at"].strip():
+        raise GhError(f"Operation receipt has no valid timestamp; reconcile before retrying: {path}")
     return receipt
 
 
+def _write_operation_record(path: Path, record: dict[str, Any], failure_message: str) -> None:
+    temporary_path = path.with_name(f".{path.name}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary_path, path)
+    except OSError as exc:
+        raise GhError(f"{failure_message}: {path}: {exc}") from exc
+
+
+def save_operation_pending(path: Path, operation: RemoteOperation) -> None:
+    record = {
+        "operation_id": operation.operation_id,
+        "marker": operation.marker,
+        "repo": operation.repo,
+        "kind": operation.kind,
+        "operation": operation.as_dict(),
+        "status": "pending",
+        "recorded_at": utc_now(),
+    }
+    _write_operation_record(path, record, "Could not persist pending remote-write state")
+
+
 def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str) -> None:
+    if not isinstance(remote, str) or not remote.strip():
+        raise GhError("Remote write returned an empty remote result; reconcile before retrying")
     receipt = {
         "operation_id": operation.operation_id,
         "marker": operation.marker,
         "repo": operation.repo,
         "kind": operation.kind,
+        "operation": operation.as_dict(),
+        "status": "succeeded",
         "remote": remote,
         "recorded_at": utc_now(),
     }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    except OSError as exc:
-        raise GhError(f"Remote write succeeded but operation receipt could not be saved; reconcile before retrying: {path}: {exc}") from exc
+    _write_operation_record(path, receipt, "Remote write succeeded but operation receipt could not be saved; reconcile before retrying")
 
 
 class GhClient:
@@ -220,4 +262,6 @@ class GhClient:
             "--head",
             operation.head or "",
         ]
+        if operation.draft:
+            args.append("--draft")
         return self._invoke(args).strip()

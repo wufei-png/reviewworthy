@@ -12,4 +12,6 @@ The operation ID is embedded in the Body as:
 
 Before creating an Issue or Pull Request, the `gh` adapter searches existing objects for the marker. If the previous result is uncertain, it stops for reconciliation rather than retrying blindly.
 
-After a successful create, the CLI stores an ignored local operation receipt under `.reviewworthy/local/operations/`. This receipt bridges GitHub's short read-after-write delay: an immediate retry returns `already_exists` without issuing a second create request. A malformed or mismatched receipt is a reconciliation error, not permission to retry.
+Remote readiness also requires an approved Contribution Contract, passed Orientation and Assessment, verification commands/evidence, and deterministic scope/budget checks. If policy requires a Draft PR, the operation includes that state and invokes `gh pr create --draft`.
+
+Immediately before a create, the CLI persists a pending operation record. After a successful create it replaces that record with an ignored local operation receipt under `.reviewworthy/local/operations/`. The receipt bridges GitHub's short read-after-write delay: an immediate retry returns `already_exists` without issuing a second create request. A pending, malformed, incomplete, or mismatched record is a reconciliation error, not permission to retry.
