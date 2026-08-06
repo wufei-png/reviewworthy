@@ -54,6 +54,10 @@ _Avoid_: AI-generated architecture summary, repository dump
 A bounded set of possible contributions whose basis, duplicate-work evidence, value, scope, review cost, verifiability, risk, and recommended action are visible together.
 _Avoid_: opportunity score, AI confidence ranking
 
+**Candidate binding**:
+The explicit operation that copies a confirmed Candidate Menu selection and its contribution basis into a Contribution Packet while preserving the menu snapshot. Binding supplies provenance; it does not approve the Contribution Contract.
+_Avoid_: automatic authorization, candidate score
+
 **Evidence matrix**:
 The candidate-menu fields used to compare work without collapsing maintainer demand, review cost, and verifiability into one numeric score.
 _Avoid_: quality score, confidence score
@@ -92,6 +96,14 @@ _Avoid_: answer key, solution dump
 A set of new questions that checks whether the contributor can explain the oriented contribution in their own words. An Assessment is valid only for the exact materials it evaluated and expires when those materials materially change.
 _Avoid_: quiz score, authorship proof
 
+**Public signal verification**:
+Read-only evidence from a supported provider that an external Contribution Signal reference exists publicly. Verification does not infer maintainer approval, endorsement, or lifecycle status.
+_Avoid_: maintainer approval, signal sync
+
+**Understanding record**:
+The structured Orientation or Assessment outcome, evidence, and material snapshot stored in the Contribution Packet. The CLI validates its shape and freshness; the Skill and contributor own the explanation and answers.
+_Avoid_: generated teaching transcript, authorship certificate
+
 **Contribution policy**:
 The project-specific rules governing acceptable contribution paths, required evidence, AI assistance, disclosure, and remote actions.
 _Avoid_: generic AI policy, repository etiquette
@@ -115,3 +127,7 @@ _Avoid_: publish, sync
 **Operation ID**:
 A stable identifier for one approved remote write attempt, used to connect the local contribution packet with remote idempotency checks and reconciliation evidence.
 _Avoid_: request ID, retry token
+
+**Signal publication**:
+An explicitly confirmed Issue write that turns a local Discovery draft into a public external Contribution Signal. It uses the remote-write receipt protocol and does not mean that a maintainer has endorsed the work.
+_Avoid_: automatic outreach, maintainer approval

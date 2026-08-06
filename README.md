@@ -21,9 +21,15 @@ reviewworthy candidate init --repository OWNER/REPO
 reviewworthy candidate validate .reviewworthy/candidates.json
 reviewworthy signal init --kind maintainer-request --reference https://github.com/OWNER/REPO/issues/123 --published
 reviewworthy signal validate .reviewworthy/contribution-signal.json
+reviewworthy signal verify .reviewworthy/contribution-signal.json
+reviewworthy signal publish plan .reviewworthy/contribution-signal.json --repo OWNER/REPO --title "Candidate request" --body-file signal.md
+reviewworthy candidate select .reviewworthy/candidates.json --candidate-id candidate-001 --confirm
+reviewworthy candidate bind --menu .reviewworthy/candidates.json --packet .reviewworthy/contribution.json
 reviewworthy contract init --output .reviewworthy/contribution-contract.json
 reviewworthy risk assess MANIFEST.json
 reviewworthy packet validate .reviewworthy/contribution.json
+reviewworthy understanding record .reviewworthy/contribution.json --phase orientation --status passed --summary "..." --topic contract --topic diff --topic verification --topic policy
+reviewworthy understanding validate .reviewworthy/contribution.json
 reviewworthy action check .reviewworthy/contribution.json
 reviewworthy disclosure render --packet .reviewworthy/contribution.json
 reviewworthy eval run
@@ -42,11 +48,11 @@ Discovery entry ────┘                                      ↓
                          verification → Orientation → Assessment → narrative preview → PR
 ```
 
-Discovery evidence may serve as the contribution basis when repository policy explicitly allows it. A selected Discovery or signal-backed contribution must record a valid Contribution Signal before implementation or remote readiness; it does not need maintainer confirmation. External signals must already reference a public record, while reproducible evidence may remain unpublished.
+Discovery evidence may serve as the contribution basis when repository policy explicitly allows it. A selected Discovery or signal-backed contribution must record a valid Contribution Signal before implementation or remote readiness; it does not need maintainer confirmation. External signals must reference a public record and have a successful verification record, while reproducible evidence may remain unpublished. `signal verify` is read-only by default; `signal verify --record` persists the exact successful check for readiness. `signal publish` is an explicit, idempotent Issue write and never infers maintainer intent.
 
 Every node records a result. Review depth is `standard` or `heightened`; risk signals and user escalation can raise it, never lower it. Security issues, policy conflicts, irreversible changes, and unverifiable results are independent hard-stops.
 
-The contract must be explicitly approved before remote readiness. Verification needs commands and evidence, Orientation must pass before Assessment, and Assessment is material-bound: Orientation explains the contract, final Diff, verification evidence, and policy result; Assessment asks new questions. A material change invalidates the prior Assessment.
+The contract must be explicitly approved before remote readiness. A confirmed Candidate Menu selection can be bound to a Packet with a menu snapshot, but it does not approve the Contract. Verification needs commands and evidence, Orientation must pass before Assessment, and both phases are material-bound: Orientation explains the contract, basis, final Diff, verification evidence, and policy result; Assessment asks new questions. A material change invalidates the prior records.
 
 ## Local development
 
@@ -83,6 +89,8 @@ For a policy-required Draft PR, the draft state is included in the operation ID 
 
 The first release does not create review comments, Discussions, close PRs, merge changes, or use an LLM as an Action gatekeeper. The current signal slice records and gates the evidence; it does not yet wait for or fetch maintainer responses.
 
+The repository also ships a read-only composite Action in [`action.yml`](./action.yml). It runs `reviewworthy action check` against a checked-out Contribution Packet and changed-file list; it does not publish, comment, or infer maintainer approval. If pull-request SHAs are unavailable, it reports scope as unknown instead of trusting Packet-declared changed files.
+
 ## Documents
 
 - [Domain language](./CONTEXT.md)
@@ -100,4 +108,4 @@ The first release does not create review comments, Discussions, close PRs, merge
 
 ## Status
 
-This is an early open-source foundation released under the [MIT License](./LICENSE). The current slice adds deterministic project facts, evidence-first candidate menus, status-bearing Contribution Signals, standalone Contribution Contracts, policy-aware disclosure records, and provider-free fixture evaluations. Maintainer-response waiting, richer provider adapters, and deeper project-specific onboarding remain later slices.
+This is an early open-source foundation released under the [MIT License](./LICENSE). The current slice adds deterministic project facts, evidence-first candidate menus, status-bearing Contribution Signals, read-only GitHub reference verification, explicit Issue publication, candidate-to-packet binding, structured understanding records, a read-only Action wrapper, standalone Contribution Contracts, policy-aware disclosure records, and provider-free fixture evaluations. Maintainer-response inference, Discussion publication, richer provider adapters, and deeper project-specific onboarding remain later slices.

@@ -1,6 +1,6 @@
 # Fixture evaluations
 
-These eight fixtures exercise deterministic workflow boundaries without a network provider or an LLM:
+These ten fixtures exercise deterministic workflow boundaries without a network provider or an LLM:
 
 - policy prohibition, including the concrete readiness blocker;
 - duplicate-work disposition;
@@ -9,8 +9,9 @@ These eight fixtures exercise deterministic workflow boundaries without a networ
 - scope expansion;
 - unverifiable results;
 - stale understanding material;
-- human-owned PR narrative.
+- human-owned PR narrative;
 - Discovery work without a structured Contribution Signal.
+- stale Orientation after the selected basis changes.
 
 Run them with:
 
