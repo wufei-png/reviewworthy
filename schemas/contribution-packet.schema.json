@@ -50,7 +50,19 @@
     "verification": { "type": "object" },
     "materials": { "type": "object" },
     "results": { "type": "array", "minItems": 7 },
-    "understanding": { "type": "object" },
+    "understanding": { "$ref": "understanding.schema.json" },
+    "candidate_selection": {
+      "type": "object",
+      "required": ["candidate_id", "repository", "menu_snapshot", "confirmed"],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 1 },
+        "menu_snapshot": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string" },
+        "confirmed": { "const": true }
+      },
+      "additionalProperties": true
+    },
     "narrative": {
       "type": "object",
       "properties": {

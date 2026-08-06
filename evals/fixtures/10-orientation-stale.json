@@ -1,0 +1,11 @@
+{
+  "id": "stale-orientation",
+  "kind": "packet",
+  "refresh_materials": false,
+  "mutations": [
+    {"path": "basis.references", "value": ["https://github.com/example/project/issues/2"]}
+  ],
+  "assert": {
+    "blocker": "stale_orientation"
+  }
+}

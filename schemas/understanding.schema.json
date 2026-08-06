@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/understanding.schema.json",
+  "title": "Reviewworthy material-bound understanding gate",
+  "type": "object",
+  "required": ["orientation", "assessment"],
+  "properties": {
+    "orientation": {
+      "type": "object",
+      "required": ["status", "summary", "topics", "evidence", "material_snapshot"],
+      "properties": {
+        "status": { "enum": ["passed", "failed", "blocked", "unknown", "not_run"] },
+        "summary": { "type": "string" },
+        "topics": { "type": "array", "items": { "type": "string" } },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "material_snapshot": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "passed" } } },
+          "then": {
+            "properties": {
+              "summary": { "minLength": 1, "pattern": "\\S" },
+              "topics": {
+                "minItems": 4,
+                "allOf": [
+                  { "contains": { "const": "contract" } },
+                  { "contains": { "const": "diff" } },
+                  { "contains": { "const": "verification" } },
+                  { "contains": { "const": "policy" } }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "assessment": {
+      "description": "The deterministic CLI additionally requires questions and answers to have equal cardinality.",
+      "type": "object",
+      "required": ["status", "questions", "answers", "evidence", "material_snapshot"],
+      "properties": {
+        "status": { "enum": ["passed", "failed", "blocked", "unknown", "not_run"] },
+        "questions": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "\\S" } },
+        "answers": { "type": "array", "items": { "type": "string" } },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "material_snapshot": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "passed" } } },
+          "then": {
+            "properties": {
+              "questions": { "minItems": 1 },
+              "answers": { "minItems": 1, "items": { "type": "string", "minLength": 1, "pattern": "\\S" } }
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["assessment"],
+        "properties": {
+          "assessment": {
+            "required": ["status"],
+            "properties": { "status": { "const": "passed" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "orientation": {
+            "required": ["status"],
+            "properties": { "status": { "const": "passed" } }
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

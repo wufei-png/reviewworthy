@@ -46,6 +46,22 @@ class SignalTests(unittest.TestCase):
         self.assertIn("signal_not_published", {error["code"] for error in validate_signal(external)["errors"]})
         self.assertNotIn("signal_not_published", {error["code"] for error in validate_signal(evidence)["errors"]})
 
+    def test_signal_verification_is_bound_to_the_current_reference(self) -> None:
+        signal = skeleton_signal("issue", "https://github.com/example/project/issues/2")
+        signal.update({
+            "published": True,
+            "verification": {
+                "status": "verified",
+                "provider": "github",
+                "reference": "https://github.com/example/project/issues/1",
+                "verified_at": "2026-08-06T00:00:00Z",
+            },
+        })
+
+        result = validate_signal(signal)
+
+        self.assertIn("stale_signal_verification", {error["code"] for error in result["errors"]})
+
     def test_discovery_evidence_requires_reproducible_signal_kind(self) -> None:
         signal = skeleton_signal("issue", "https://github.com/example/project/issues/2")
         signal.update({"status": "confirmed", "published": True, "confirmed_at": "2026-08-06T00:00:00Z"})

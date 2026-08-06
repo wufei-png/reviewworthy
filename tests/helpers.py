@@ -46,11 +46,17 @@ def valid_packet() -> dict:
             for node in REQUIRED_NODES
         ],
         "understanding": {
-            "orientation": {"status": "passed", "summary": "The contract and evidence were explained."},
+            "orientation": {
+                "status": "passed",
+                "summary": "The contract and evidence were explained.",
+                "topics": ["contract", "diff", "verification", "policy"],
+                "evidence": ["Orientation covered the material snapshot."],
+            },
             "assessment": {
                 "status": "passed",
                 "questions": ["What boundary protects the invariant?"],
                 "answers": ["The existing input boundary validates before the old path runs."],
+                "evidence": ["The contributor answered a non-repeating question."],
             },
         },
         "narrative": {

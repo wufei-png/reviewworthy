@@ -99,6 +99,41 @@ class PacketValidationTests(unittest.TestCase):
         self.assertNotIn("signal_not_confirmed", codes)
         self.assertNotIn("signal_unavailable", codes)
 
+    def test_external_signal_requires_recorded_public_verification(self) -> None:
+        packet = valid_packet()
+        packet["basis"] = {
+            "kind": "signal",
+            "references": ["https://github.com/example/project/issues/2"],
+            "evidence": [],
+            "signal": {
+                "signal_version": "0.1",
+                "kind": "issue",
+                "reference": "https://github.com/example/project/issues/2",
+                "status": "pending",
+                "evidence": [],
+                "published": True,
+            },
+        }
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        blockers = readiness_blockers(packet)
+
+        self.assertIn("signal_verification_required", {blocker["code"] for blocker in blockers})
+
+        packet["basis"]["signal"]["verification"] = {
+            "status": "verified",
+            "provider": "github",
+            "reference": packet["basis"]["signal"]["reference"],
+            "verified_at": "2026-08-06T00:00:00Z",
+        }
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertNotIn("signal_verification_required", {blocker["code"] for blocker in readiness_blockers(packet)})
+
     def test_rejected_signal_blocks_remote_readiness(self) -> None:
         packet = valid_packet()
         packet["entry"]["mode"] = "discovery"

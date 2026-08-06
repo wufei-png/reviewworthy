@@ -1,28 +1,50 @@
 name: Reviewworthy deterministic contribution checks
-description: Check a Contribution Packet without mutating the pull request
+description: Run Reviewworthy's read-only Action checks against a Contribution Packet
 inputs:
   packet:
-    description: Path to the Contribution Packet JSON
+    description: Repository-relative Contribution Packet path
     required: false
     default: .reviewworthy/contribution.json
   changed-files:
-    description: Newline-separated changed files to check against the approved scope
+    description: Newline-separated changed files; on pull_request events the action derives them from the event SHAs when omitted
     required: false
-    default: ""
 runs:
   using: composite
   steps:
-    - name: Run Reviewworthy Action checks
+    - name: Run deterministic Reviewworthy checks
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/src
         REVIEWWORTHY_PACKET: ${{ inputs.packet }}
         REVIEWWORTHY_CHANGED_FILES: ${{ inputs.changed-files }}
+        REVIEWWORTHY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        REVIEWWORTHY_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
-        args=(action check "$REVIEWWORTHY_PACKET" --json)
-        while IFS= read -r changed_file; do
-          if [[ -n "$changed_file" ]]; then
-            args+=(--changed-file "$changed_file")
+        set -euo pipefail
+        changed_files="${REVIEWWORTHY_CHANGED_FILES:-}"
+        changed_files_available=false
+        if [[ -n "$changed_files" ]]; then
+          changed_files_available=true
+        fi
+        if [[ -z "$changed_files" && -n "${REVIEWWORTHY_BASE_SHA:-}" && -n "${REVIEWWORTHY_HEAD_SHA:-}" ]]; then
+          if git cat-file -e "$REVIEWWORTHY_BASE_SHA^{commit}" 2>/dev/null && git cat-file -e "$REVIEWWORTHY_HEAD_SHA^{commit}" 2>/dev/null; then
+            if ! changed_files="$(git diff --name-only "$REVIEWWORTHY_BASE_SHA" "$REVIEWWORTHY_HEAD_SHA" 2>/dev/null)"; then
+              echo "Reviewworthy: changed-file evidence could not be derived from the supplied pull-request SHAs." >&2
+              changed_files=""
+            else
+              changed_files_available=true
+            fi
+          else
+            echo "Reviewworthy: pull-request SHAs are not available in this checkout; changed-file scope will be reported as unknown." >&2
           fi
-        done <<< "$REVIEWWORTHY_CHANGED_FILES"
-        python3 -m reviewworthy "${args[@]}"
+        fi
+        args=()
+        while IFS= read -r path; do
+          [[ -n "$path" ]] && args+=(--changed-file "$path")
+        done <<< "$changed_files"
+        if [[ "$changed_files_available" == true ]]; then
+          args+=(--changed-files-provided)
+        else
+          args+=(--changed-files-unavailable)
+        fi
+        python -m reviewworthy action check "$REVIEWWORTHY_PACKET" "${args[@]}"

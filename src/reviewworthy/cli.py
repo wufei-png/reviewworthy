@@ -11,16 +11,26 @@ from typing import Any
 from . import __version__
 from .action import check_packet
 from .brief import build_project_brief, render_project_brief, validate_project_brief
-from .candidate import render_candidate_menu, skeleton_menu, validate_candidate_menu
+from .candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, validate_candidate_menu
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
-from .github import GhClient, GhError, build_operation, load_operation_receipt, operation_receipt_path, save_operation_pending, save_operation_receipt
-from .packet import readiness_blockers, skeleton_packet, validate_packet
+from .github import (
+    GhClient,
+    GhError,
+    build_operation,
+    build_signal_operation,
+    load_operation_receipt,
+    operation_receipt_path,
+    save_operation_pending,
+    save_operation_receipt,
+)
+from .packet import material_snapshot, readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
 from .risk import assess_manifest
 from .signal import SIGNAL_KINDS, SIGNAL_STATUSES, skeleton_signal, validate_signal
-from .util import read_json
+from .understanding import record_understanding, validate_understanding
+from .util import read_json, utc_now
 
 
 def _print(value: Any, as_json: bool) -> None:
@@ -53,6 +63,11 @@ def _write_text(path: Path, value: str, force: bool = False) -> None:
         raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
+
+
+def _replace_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _common_json(parser: argparse.ArgumentParser) -> None:
@@ -88,6 +103,22 @@ def _build_parser() -> argparse.ArgumentParser:
     brief_render.add_argument("--force", action="store_true")
     _common_json(brief_render)
 
+    understanding = commands.add_parser("understanding", help="Record and validate material-bound understanding gates")
+    understanding_commands = understanding.add_subparsers(dest="understanding_command", required=True)
+    understanding_validate = understanding_commands.add_parser("validate")
+    understanding_validate.add_argument("path", type=Path)
+    _common_json(understanding_validate)
+    understanding_record = understanding_commands.add_parser("record")
+    understanding_record.add_argument("path", type=Path)
+    understanding_record.add_argument("--phase", choices=("orientation", "assessment"), required=True)
+    understanding_record.add_argument("--status", choices=("passed", "failed", "blocked", "unknown", "not_run"), required=True)
+    understanding_record.add_argument("--summary", default="")
+    understanding_record.add_argument("--topic", action="append", default=[])
+    understanding_record.add_argument("--evidence", action="append", default=[])
+    understanding_record.add_argument("--question", action="append", default=[])
+    understanding_record.add_argument("--answer", action="append", default=[])
+    _common_json(understanding_record)
+
     risk = commands.add_parser("risk", help="Assess deterministic review-depth signals")
     risk_commands = risk.add_subparsers(dest="risk_command", required=True)
     risk_assess = risk_commands.add_parser("assess")
@@ -111,6 +142,23 @@ def _build_parser() -> argparse.ArgumentParser:
     signal_validate.add_argument("path", type=Path)
     signal_validate.add_argument("--require-confirmed", action="store_true")
     _common_json(signal_validate)
+    signal_verify = signal_commands.add_parser("verify", help="Verify a public reference read-only, or record a successful result with --record")
+    signal_verify.add_argument("path", type=Path)
+    signal_verify.add_argument("--record", action="store_true", help="Persist a successful verification record for remote readiness")
+    _common_json(signal_verify)
+    signal_publish = signal_commands.add_parser("publish", help="Publish an explicit GitHub Issue signal operation")
+    signal_publish_commands = signal_publish.add_subparsers(dest="signal_publish_command", required=True)
+    for name in ("plan", "create"):
+        command = signal_publish_commands.add_parser(name)
+        command.add_argument("path", type=Path)
+        command.add_argument("--repo", required=True, help="owner/name")
+        command.add_argument("--title", required=True)
+        command.add_argument("--body-file", type=Path, required=True)
+        command.add_argument("--output", type=Path, help="Updated signal path for create; defaults to the input path")
+        command.add_argument("--force", action="store_true")
+        if name == "create":
+            command.add_argument("--confirm-operation-id", required=True)
+        _common_json(command)
 
     packet = commands.add_parser("packet", help="Validate a Contribution Packet")
     packet_commands = packet.add_subparsers(dest="packet_command", required=True)
@@ -129,6 +177,8 @@ def _build_parser() -> argparse.ArgumentParser:
     action_check = action_commands.add_parser("check")
     action_check.add_argument("path", type=Path, nargs="?", default=Path(".reviewworthy/contribution.json"))
     action_check.add_argument("--changed-file", action="append", default=[])
+    action_check.add_argument("--changed-files-provided", action="store_true", help="Treat the supplied changed-file list as authoritative, even when empty")
+    action_check.add_argument("--changed-files-unavailable", action="store_true", help="Do not fall back to packet-declared changed files")
     _common_json(action_check)
 
     candidate = commands.add_parser("candidate", help="Collect read-only duplicate-work evidence")
@@ -152,6 +202,20 @@ def _build_parser() -> argparse.ArgumentParser:
     candidate_render.add_argument("--output", type=Path, required=True)
     candidate_render.add_argument("--force", action="store_true")
     _common_json(candidate_render)
+    candidate_select = candidate_commands.add_parser("select", help="Record an explicit candidate selection")
+    candidate_select.add_argument("path", type=Path)
+    candidate_select.add_argument("--candidate-id", required=True)
+    candidate_select.add_argument("--confirm", action="store_true")
+    candidate_select.add_argument("--output", type=Path)
+    candidate_select.add_argument("--force", action="store_true")
+    _common_json(candidate_select)
+    candidate_bind = candidate_commands.add_parser("bind", help="Bind a confirmed candidate basis to a Contribution Packet")
+    candidate_bind.add_argument("--menu", type=Path, required=True)
+    candidate_bind.add_argument("--packet", type=Path, required=True)
+    candidate_bind.add_argument("--candidate-id")
+    candidate_bind.add_argument("--output", type=Path)
+    candidate_bind.add_argument("--force", action="store_true")
+    _common_json(candidate_bind)
 
     contract = commands.add_parser("contract", help="Create or validate a Contribution Contract")
     contract_commands = contract.add_subparsers(dest="contract_command", required=True)
@@ -236,6 +300,38 @@ def main(argv: list[str] | None = None) -> int:
             _print({"rendered": str(args.output), "source_manifest_sha256": brief_value.get("source_manifest_sha256")}, args.as_json)
             return 0
 
+        if args.command == "understanding":
+            packet = _load_object(args.path)
+            if args.understanding_command == "validate":
+                result = validate_understanding(packet.get("understanding"), material_snapshot(packet))
+                _print(result, args.as_json)
+                return 0 if result["valid"] else 1
+            snapshot = material_snapshot(packet)
+            updated = record_understanding(
+                packet,
+                args.phase,
+                args.status,
+                snapshot,
+                summary=args.summary,
+                topics=args.topic,
+                evidence=args.evidence,
+                questions=args.question,
+                answers=args.answer,
+            )
+            results = updated.get("results", [])
+            for result_record in results if isinstance(results, list) else []:
+                if not isinstance(result_record, dict) or result_record.get("node") != "understanding":
+                    continue
+                if args.phase == "assessment" or args.status in {"failed", "blocked", "unknown"}:
+                    result_record["status"] = args.status
+                    result_record["evidence"] = list(args.evidence) or [f"{args.phase}:{args.status}"]
+                    result_record.setdefault("details", {})["phase"] = args.phase
+            _replace_json(args.path, updated)
+            result = validate_understanding(updated.get("understanding"), material_snapshot(updated))
+            result["updated"] = str(args.path)
+            _print(result, args.as_json)
+            return 0 if result["valid"] else 1
+
         if args.command == "risk":
             result = assess_manifest(_load_object(args.manifest))
             _print(result, args.as_json)
@@ -256,10 +352,133 @@ def main(argv: list[str] | None = None) -> int:
                 _write_json(args.output, signal_value, args.force)
                 _print({"created": str(args.output), "kind": args.kind, "status": args.status}, args.as_json)
                 return 0
+            if args.signal_command == "validate":
+                signal_value = _load_object(args.path)
+                result = validate_signal(signal_value, require_confirmed=args.require_confirmed)
+                _print(result, args.as_json)
+                return 0 if result["valid"] else 1
+            if args.signal_command == "verify":
+                signal_value = _load_object(args.path)
+                local = validate_signal(signal_value)
+                structural_errors = [error for error in local["errors"] if error["code"] != "signal_not_published"]
+                if structural_errors:
+                    result = {"valid": False, "verification": "not_run", "errors": structural_errors}
+                elif signal_value.get("kind") == "reproducible-evidence":
+                    unavailable = signal_value.get("status") in {"rejected", "expired"}
+                    result = {
+                        "valid": not unavailable,
+                        "verification": "local_only",
+                        "published": False,
+                        "errors": ([{"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.status"}] if unavailable else []),
+                    }
+                else:
+                    remote = GhClient().verify_public_reference(signal_value["reference"])
+                    errors = list(local["errors"])
+                    if signal_value.get("status") in {"rejected", "expired"}:
+                        errors.append({"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.status"})
+                    result = {
+                        "valid": bool(remote.get("verified")) and not errors,
+                        "verification": "github_public_reference",
+                        "remote": remote,
+                        "errors": errors,
+                    }
+                if args.record and result["valid"]:
+                    updated_signal = dict(signal_value)
+                    if signal_value.get("kind") == "reproducible-evidence":
+                        verification = {
+                            "status": "local_only",
+                            "provider": "local",
+                            "reference": signal_value.get("reference", ""),
+                            "verified_at": utc_now(),
+                        }
+                    else:
+                        remote = result["remote"]
+                        verification = {
+                            "status": "verified",
+                            "provider": remote.get("provider", "github"),
+                            "reference": signal_value["reference"],
+                            "verified_at": utc_now(),
+                        }
+                        for key in ("repository", "record_type", "number", "url", "visibility"):
+                            if remote.get(key) is not None:
+                                verification[key] = remote[key]
+                    updated_signal["verification"] = verification
+                    _replace_json(args.path, updated_signal)
+                    result["recorded"] = str(args.path)
+                _print(result, args.as_json)
+                return 0 if result["valid"] else 1
             signal_value = _load_object(args.path)
-            result = validate_signal(signal_value, require_confirmed=args.require_confirmed)
-            _print(result, args.as_json)
-            return 0 if result["valid"] else 1
+            body = args.body_file.read_text(encoding="utf-8")
+            if not args.title.strip() or not body.strip():
+                raise ValueError("Signal publication requires a non-empty title and body")
+            target = args.output or args.path
+            publication = signal_value.get("publication")
+            if signal_value.get("published") is True:
+                if not isinstance(publication, dict):
+                    raise ValueError("Published signal has no recorded publication identity; reconcile before publishing again")
+                if not isinstance(signal_value.get("publication_subject_id"), str) or not signal_value["publication_subject_id"].strip():
+                    raise ValueError("Published signal has no stable publication subject; reconcile before publishing again")
+                if any(publication.get(key) != expected for key, expected in {"repo": args.repo, "title": args.title, "body": body}.items()):
+                    raise ValueError("Published signal publication inputs differ from the recorded operation")
+            operation = build_signal_operation(signal_value, args.repo, args.title, body)
+            payload = operation.as_dict()
+            if signal_value.get("published") is True and publication.get("operation_id") != operation.operation_id:
+                raise ValueError("Published signal operation identity differs from the rendered operation; reconcile before publishing again")
+            if args.signal_publish_command == "plan":
+                _print(payload, args.as_json)
+                return 0
+            if args.confirm_operation_id != operation.operation_id:
+                raise ValueError("Confirmation operation ID does not match the current signal publication operation")
+            publish_errors = [
+                error
+                for error in validate_signal(signal_value)["errors"]
+                if error["code"] not in {"missing_signal_reference", "signal_not_published"}
+            ]
+            if publish_errors:
+                raise ValueError(f"Signal is not publishable: {publish_errors}")
+            if signal_value.get("status") != "pending":
+                raise ValueError("Only pending signals can be published")
+            if target != args.path and target.exists() and not args.force:
+                existing_target = _load_object(target)
+                existing_publication = existing_target.get("publication")
+                if not (
+                    existing_target.get("published") is True
+                    and existing_target.get("publication_subject_id") == operation.subject_id
+                    and isinstance(existing_publication, dict)
+                    and existing_publication.get("operation_id") == operation.operation_id
+                    and existing_publication.get("repo") == args.repo
+                    and existing_publication.get("title") == args.title
+                    and existing_publication.get("body") == body
+                ):
+                    raise ValueError(f"Refusing to overwrite existing file: {target}; use --force to replace it")
+
+            receipt_path = operation_receipt_path(target, operation.operation_id)
+            payload["receipt_path"] = str(receipt_path)
+            receipt = load_operation_receipt(receipt_path, operation)
+            if receipt:
+                remote = receipt["remote"]
+                payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
+            else:
+                client = GhClient()
+                existing = client.find_existing(operation)
+                if existing:
+                    remote = existing[0].get("url") or existing[0].get("html_url") or ""
+                    save_operation_receipt(receipt_path, operation, remote)
+                    payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+                else:
+                    save_operation_pending(receipt_path, operation)
+                    remote = client.create(operation)
+                    save_operation_receipt(receipt_path, operation, remote)
+                    payload.update({"outcome": "created", "remote": remote})
+            updated_signal = dict(signal_value)
+            updated_signal["reference"] = remote
+            updated_signal["published"] = True
+            updated_signal["publication_subject_id"] = operation.subject_id
+            updated_signal["publication"] = {"operation_id": operation.operation_id, "repo": args.repo, "title": args.title, "body": body}
+            _replace_json(target, updated_signal)
+            payload.update({"signal": str(target), "published": True})
+            _print(payload, args.as_json)
+            return 0
 
         if args.command == "packet":
             if args.packet_command == "init":
@@ -276,7 +495,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["valid"] else 1
 
         if args.command == "action":
-            result = check_packet(args.path, args.changed_file or None)
+            changed_files = args.changed_file if (args.changed_files_provided or args.changed_files_unavailable) else (args.changed_file or None)
+            result = check_packet(args.path, changed_files)
             _print(result, args.as_json)
             return 1 if result["conclusion"] == "failure" else 0
 
@@ -298,7 +518,38 @@ def main(argv: list[str] | None = None) -> int:
                 _write_json(args.output, menu, args.force)
                 _print({"created": str(args.output), "repository": args.repository}, args.as_json)
                 return 0
+            if args.candidate_command == "bind":
+                menu = _load_object(args.menu)
+                packet = _load_object(args.packet)
+                updated = bind_candidate(menu, packet, args.candidate_id)
+                snapshot = material_snapshot(updated)
+                materials = updated.setdefault("materials", {})
+                if not isinstance(materials, dict):
+                    raise ValueError("packet.materials must be an object")
+                materials["material_snapshot"] = snapshot
+                understanding = updated.get("understanding", {})
+                if isinstance(understanding, dict):
+                    for phase in ("orientation", "assessment"):
+                        record = understanding.get(phase)
+                        if isinstance(record, dict) and record.get("status") == "not_run":
+                            record["material_snapshot"] = snapshot
+                target = args.output or args.packet
+                if target != args.packet:
+                    _write_json(target, updated, args.force)
+                else:
+                    _replace_json(target, updated)
+                _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "material_snapshot": snapshot}, args.as_json)
+                return 0
             menu = _load_object(args.path)
+            if args.candidate_command == "select":
+                updated = select_candidate(menu, args.candidate_id, confirmed=args.confirm)
+                target = args.output or args.path
+                if target != args.path:
+                    _write_json(target, updated, args.force)
+                else:
+                    _replace_json(target, updated)
+                _print({"updated": str(target), "selected_id": args.candidate_id, "confirmed": args.confirm}, args.as_json)
+                return 0
             if args.candidate_command == "validate":
                 result = validate_candidate_menu(menu)
                 _print(result, args.as_json)

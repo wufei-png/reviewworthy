@@ -5,9 +5,13 @@ import unittest
 from pathlib import Path
 
 from reviewworthy.brief import build_project_brief, render_project_brief, validate_project_brief
-from reviewworthy.candidate import render_candidate_menu, skeleton_menu, validate_candidate_menu
+from reviewworthy.candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, validate_candidate_menu
 from reviewworthy.contract import skeleton_contract, validate_contract
 from reviewworthy.disclosure import disclosure_errors, render_disclosure
+from reviewworthy.packet import material_snapshot
+from reviewworthy.understanding import record_understanding, validate_understanding
+
+from helpers import valid_packet
 from reviewworthy.util import sha256_json
 
 
@@ -69,6 +73,77 @@ class ArtifactTests(unittest.TestCase):
         rendered = render_candidate_menu(menu)
 
         self.assertIn("module:input boundary", rendered)
+
+    def test_confirmed_candidate_selection_binds_basis_and_provenance(self) -> None:
+        menu = skeleton_menu("example/project")
+        menu["candidates"] = [{
+            "id": "candidate-003",
+            "title": "Narrow fix",
+            "basis": {"kind": "issue", "references": ["https://github.com/example/project/issues/3"], "evidence": []},
+            "duplicate_search": {"checked": True, "matches": []},
+            "value": {"summary": "Fixes a reported regression"},
+            "scope": {"files": ["src/example.py"]},
+            "review_cost": "small",
+            "verifiability": "high",
+            "risk": [],
+            "recommendation": "plan_directly",
+        }]
+        selected = select_candidate(menu, "candidate-003", confirmed=True)
+        bound = bind_candidate(selected, valid_packet(), "candidate-003")
+
+        self.assertEqual(bound["basis"]["references"], ["https://github.com/example/project/issues/3"])
+        self.assertEqual(bound["entry"]["mode"], "issue-backed")
+        self.assertEqual(bound["candidate_selection"]["candidate_id"], "candidate-003")
+        self.assertNotEqual(bound["materials"]["material_snapshot"], material_snapshot(bound))
+
+    def test_confirming_signal_candidate_requires_a_structured_signal(self) -> None:
+        menu = skeleton_menu("example/project")
+        menu["candidates"] = [{
+            "id": "candidate-004",
+            "title": "Signal-backed work",
+            "basis": {"kind": "signal", "references": ["https://github.com/example/project/issues/4"], "evidence": []},
+            "duplicate_search": {"checked": True, "matches": []},
+            "value": {"summary": "A requested change"},
+            "scope": {"files": ["src/example.py"]},
+            "review_cost": "small",
+            "verifiability": "high",
+            "risk": [],
+            "recommendation": "plan_directly",
+        }]
+
+        with self.assertRaises(ValueError):
+            select_candidate(menu, "candidate-004", confirmed=True)
+
+    def test_unavailable_signal_cannot_be_bound(self) -> None:
+        menu = skeleton_menu("example/project")
+        menu["candidates"] = [{
+            "id": "candidate-005",
+            "title": "Unavailable work",
+            "basis": {
+                "kind": "signal",
+                "references": ["https://github.com/example/project/issues/5"],
+                "evidence": [],
+                "signal": {
+                    "signal_version": "0.1",
+                    "kind": "issue",
+                    "reference": "https://github.com/example/project/issues/5",
+                    "status": "rejected",
+                    "evidence": [],
+                    "published": True,
+                },
+            },
+            "duplicate_search": {"checked": True, "matches": []},
+            "value": {"summary": "No longer wanted"},
+            "scope": {"files": ["src/example.py"]},
+            "review_cost": "small",
+            "verifiability": "high",
+            "risk": [],
+            "recommendation": "plan_directly",
+        }]
+        menu["selection"] = {"selected_id": "candidate-005", "confirmed": True}
+
+        with self.assertRaises(ValueError):
+            bind_candidate(menu, valid_packet(), "candidate-005")
 
     def test_contract_skeleton_is_explicitly_incomplete(self) -> None:
         result = validate_contract(skeleton_contract("contract-001"))
@@ -173,3 +248,58 @@ class ArtifactTests(unittest.TestCase):
             result = validate_project_brief(brief, root)
 
             self.assertIn("stale_source_manifest", {error["code"] for error in result["errors"]})
+
+    def test_understanding_requires_orientation_topics_and_material_binding(self) -> None:
+        understanding = {
+            "orientation": {
+                "status": "passed",
+                "summary": "Explained the change.",
+                "topics": ["contract"],
+                "evidence": [],
+                "material_snapshot": "snapshot-1",
+            },
+            "assessment": {
+                "status": "passed",
+                "questions": ["What changed?"],
+                "answers": ["The boundary changed."],
+                "evidence": [],
+                "material_snapshot": "snapshot-1",
+            },
+        }
+
+        result = validate_understanding(understanding, "snapshot-2")
+
+        codes = {error["code"] for error in result["errors"]}
+        self.assertIn("missing_orientation_topics", codes)
+        self.assertIn("stale_orientation", codes)
+        self.assertIn("stale_assessment", codes)
+
+    def test_passed_assessment_requires_passed_orientation(self) -> None:
+        understanding = {
+            "orientation": {
+                "status": "not_run",
+                "summary": "",
+                "topics": [],
+                "evidence": [],
+                "material_snapshot": "snapshot-1",
+            },
+            "assessment": {
+                "status": "passed",
+                "questions": ["What changed?"],
+                "answers": ["The boundary changed."],
+                "evidence": [],
+                "material_snapshot": "snapshot-1",
+            },
+        }
+
+        result = validate_understanding(understanding, "snapshot-1")
+
+        self.assertIn("assessment_requires_orientation", {error["code"] for error in result["errors"]})
+
+    def test_record_understanding_binds_both_phases_to_given_snapshot(self) -> None:
+        packet = {"understanding": {}}
+        packet = record_understanding(packet, "orientation", "passed", "snapshot-3", summary="Explained.", topics=["contract", "diff", "verification", "policy"])
+        packet = record_understanding(packet, "assessment", "passed", "snapshot-3", questions=["What changed?"], answers=["The boundary changed."])
+
+        self.assertEqual(packet["understanding"]["orientation"]["material_snapshot"], "snapshot-3")
+        self.assertEqual(packet["understanding"]["assessment"]["answers"], ["The boundary changed."])

@@ -14,6 +14,7 @@ SIGNAL_KINDS = {
     "reproducible-evidence",
 }
 SIGNAL_STATUSES = {"pending", "confirmed", "rejected", "expired"}
+SIGNAL_VERIFICATION_STATUSES = {"verified", "local_only"}
 
 
 def skeleton_signal(kind: str = "issue", reference: str = "") -> dict[str, Any]:
@@ -71,6 +72,29 @@ def validate_signal(signal: dict[str, Any], *, require_confirmed: bool = False) 
         if signal.get("kind") in {"maintainer-request", "accepted-proposal", "discussion"} and not str(signal.get("confirmed_by", "")).strip():
             _error(errors, "missing_signal_confirmer", "This signal needs the confirming maintainer or project actor", "signal.confirmed_by")
 
+    verification = signal.get("verification")
+    if verification is not None:
+        if not isinstance(verification, dict):
+            _error(errors, "invalid_signal_verification", "signal.verification must be an object", "signal.verification")
+        else:
+            verification_status = verification.get("status")
+            if verification_status not in SIGNAL_VERIFICATION_STATUSES:
+                _error(errors, "invalid_signal_verification_status", "signal.verification.status must be verified or local_only", "signal.verification.status")
+            if verification.get("reference") != signal.get("reference"):
+                _error(errors, "stale_signal_verification", "signal.verification.reference must match signal.reference", "signal.verification.reference")
+            if not isinstance(verification.get("provider"), str) or not verification["provider"].strip():
+                _error(errors, "invalid_signal_verification_provider", "signal.verification.provider must be a non-empty string", "signal.verification.provider")
+            if not isinstance(verification.get("verified_at"), str) or not verification["verified_at"].strip():
+                _error(errors, "missing_signal_verification_time", "signal.verification.verified_at is required", "signal.verification.verified_at")
+            if signal.get("kind") == "reproducible-evidence" and verification_status == "verified":
+                _error(errors, "signal_verification_kind_mismatch", "Reproducible evidence uses local_only verification", "signal.verification.status")
+            if signal.get("kind") != "reproducible-evidence" and verification_status == "local_only":
+                _error(errors, "signal_verification_kind_mismatch", "External signals require GitHub verification", "signal.verification.status")
+            if signal.get("kind") == "reproducible-evidence" and verification_status == "local_only" and verification.get("provider") != "local":
+                _error(errors, "signal_verification_provider_mismatch", "Reproducible evidence uses the local provider", "signal.verification.provider")
+            if signal.get("kind") != "reproducible-evidence" and verification_status == "verified" and verification.get("provider") != "github":
+                _error(errors, "signal_verification_provider_mismatch", "External signals use the GitHub provider", "signal.verification.provider")
+
     if require_confirmed and signal.get("status") != "confirmed":
         _error(errors, "signal_not_confirmed", "The Contribution Signal must be confirmed before implementation or remote readiness", "signal.status")
 
@@ -116,4 +140,12 @@ def signal_readiness_blockers(basis: dict[str, Any], mode: str) -> list[dict[str
         return [{"code": "missing_signal_record", "message": "The selected contribution basis has no structured signal record.", "path": "basis.signal"}]
     if signal.get("status") in {"rejected", "expired"}:
         return [{"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "basis.signal.status"}]
+    if signal.get("kind") != "reproducible-evidence":
+        verification = signal.get("verification")
+        if (
+            not isinstance(verification, dict)
+            or verification.get("status") != "verified"
+            or verification.get("reference") != signal.get("reference")
+        ):
+            return [{"code": "signal_verification_required", "message": "An external Contribution Signal needs a recorded successful public-reference verification.", "path": "basis.signal.verification"}]
     return []

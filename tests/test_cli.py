@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from reviewworthy.cli import main
 from reviewworthy.github import GhError
+from reviewworthy.packet import skeleton_packet
 
 from helpers import valid_packet
 
@@ -41,6 +42,176 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(init_code, 0)
             self.assertEqual(validation_code, 0)
             self.assertEqual(readiness_code, 1)
+
+    def test_signal_verify_is_read_only_and_signal_publish_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            signal_path = root / "signal.json"
+            signal_path.write_text(json.dumps({
+                "signal_version": "0.1",
+                "kind": "maintainer-request",
+                "reference": "",
+                "status": "pending",
+                "evidence": [],
+                "published": False,
+                "confirmed_by": "",
+                "confirmed_at": "",
+            }), encoding="utf-8")
+            body_path = root / "body.md"
+            body_path.write_text("Please review this candidate.\n", encoding="utf-8")
+            published_path = root / "published" / "signal.json"
+            plan_output = io.StringIO()
+            plan_args = [
+                "signal", "publish", "plan", str(signal_path), "--repo", "example/project",
+                "--title", "Candidate request", "--body-file", str(body_path), "--json",
+            ]
+            with redirect_stdout(plan_output):
+                plan_code = main(plan_args)
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            create_args = [
+                "signal", "publish", "create", str(signal_path), "--repo", "example/project",
+                "--title", "Candidate request", "--body-file", str(body_path),
+                "--confirm-operation-id", operation_id, "--output", str(published_path), "--json",
+            ]
+            fake_client = unittest.mock.MagicMock()
+            fake_client.find_existing.return_value = []
+            fake_client.create.return_value = "https://github.com/example/project/issues/9"
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client):
+                with redirect_stdout(io.StringIO()):
+                    first_code = main(create_args)
+                retry_args = [
+                    "signal", "publish", "create", str(published_path), "--repo", "example/project",
+                    "--title", "Candidate request", "--body-file", str(body_path),
+                    "--confirm-operation-id", operation_id, "--json",
+                ]
+                with redirect_stdout(io.StringIO()):
+                    second_code = main(retry_args)
+                with redirect_stdout(io.StringIO()):
+                    third_code = main(create_args)
+
+            published = json.loads(published_path.read_text())
+            self.assertEqual(plan_code, 0)
+            self.assertEqual(first_code, 0)
+            self.assertEqual(second_code, 0)
+            self.assertEqual(third_code, 0)
+            self.assertTrue(published["published"])
+            self.assertEqual(published["reference"], "https://github.com/example/project/issues/9")
+            self.assertEqual(fake_client.create.call_count, 1)
+
+    def test_signal_verify_checks_github_reference_without_mutating_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            signal_path = Path(directory) / "signal.json"
+            signal = {
+                "signal_version": "0.1",
+                "kind": "issue",
+                "reference": "https://github.com/example/project/issues/2",
+                "status": "pending",
+                "evidence": [],
+                "published": True,
+                "confirmed_by": "",
+                "confirmed_at": "",
+            }
+            signal_path.write_text(json.dumps(signal), encoding="utf-8")
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {"verified": True, "provider": "github", "url": signal["reference"]}
+            output = io.StringIO()
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
+                code = main(["signal", "verify", str(signal_path), "--json"])
+
+            self.assertEqual(code, 0)
+            self.assertTrue(json.loads(output.getvalue())["valid"])
+            self.assertEqual(json.loads(signal_path.read_text()), signal)
+
+    def test_signal_verify_can_explicitly_record_successful_public_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            signal_path = Path(directory) / "signal.json"
+            signal = {
+                "signal_version": "0.1",
+                "kind": "issue",
+                "reference": "https://github.com/example/project/issues/2",
+                "status": "pending",
+                "evidence": [],
+                "published": True,
+                "confirmed_by": "",
+                "confirmed_at": "",
+            }
+            signal_path.write_text(json.dumps(signal), encoding="utf-8")
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "provider": "github",
+                "repository": "example/project",
+                "record_type": "issue",
+                "number": 2,
+                "url": signal["reference"],
+                "visibility": "public",
+            }
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(io.StringIO()):
+                code = main(["signal", "verify", str(signal_path), "--record", "--json"])
+
+            recorded = json.loads(signal_path.read_text())
+            self.assertEqual(code, 0)
+            self.assertEqual(recorded["verification"]["status"], "verified")
+            self.assertEqual(recorded["verification"]["reference"], signal["reference"])
+
+    def test_candidate_select_bind_and_understanding_record_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            menu_path = root / "menu.json"
+            menu_path.write_text(json.dumps({
+                "menu_version": "0.1",
+                "repository": "example/project",
+                "project_brief": "brief.json",
+                "candidates": [{
+                    "id": "candidate-001",
+                    "title": "Narrow fix",
+                    "basis": {"kind": "issue", "references": ["https://github.com/example/project/issues/1"], "evidence": []},
+                    "duplicate_search": {"checked": True, "matches": []},
+                    "value": {"summary": "Fixes a regression"},
+                    "scope": {"files": ["src/example.py"]},
+                    "review_cost": "small",
+                    "verifiability": "high",
+                    "risk": [],
+                    "recommendation": "plan_directly",
+                }],
+                "selection": {"selected_id": "", "confirmed": False},
+            }), encoding="utf-8")
+            packet_path = root / "packet.json"
+            packet_path.write_text(json.dumps(skeleton_packet("contribution-001", "issue-backed")), encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                select_code = main(["candidate", "select", str(menu_path), "--candidate-id", "candidate-001", "--confirm", "--json"])
+                bind_code = main(["candidate", "bind", "--menu", str(menu_path), "--packet", str(packet_path), "--json"])
+                orientation_code = main([
+                    "understanding", "record", str(packet_path), "--phase", "orientation", "--status", "passed",
+                    "--summary", "Explained the material.", "--topic", "contract", "--topic", "diff",
+                    "--topic", "verification", "--topic", "policy", "--json",
+                ])
+                assessment_code = main([
+                    "understanding", "record", str(packet_path), "--phase", "assessment", "--status", "passed",
+                    "--question", "What changed?", "--answer", "The selected boundary changed.", "--json",
+                ])
+                validate_code = main(["understanding", "validate", str(packet_path), "--json"])
+
+            bound = json.loads(packet_path.read_text())
+            self.assertEqual(select_code, 0)
+            self.assertEqual(bind_code, 0)
+            self.assertEqual(orientation_code, 0)
+            self.assertEqual(assessment_code, 0)
+            self.assertEqual(validate_code, 0)
+            self.assertEqual(bound["candidate_selection"]["candidate_id"], "candidate-001")
+
+    def test_action_can_mark_changed_file_evidence_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet_path = Path(directory) / "packet.json"
+            packet_path.write_text(json.dumps(valid_packet()), encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main(["action", "check", str(packet_path), "--changed-files-unavailable", "--json"])
+
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 0)
+            self.assertTrue(any("Changed-file evidence was not provided" in unknown for unknown in result["unknowns"]))
 
     def test_remote_plan_uses_the_approved_packet_narrative(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

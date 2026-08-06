@@ -12,6 +12,19 @@ from helpers import valid_packet
 
 
 class ActionCheckTests(unittest.TestCase):
+    def test_composite_action_is_read_only_and_uses_action_check(self) -> None:
+        action_path = Path(__file__).parents[1] / "action.yml"
+        content = action_path.read_text(encoding="utf-8")
+
+        self.assertIn("using: composite", content)
+        self.assertIn("python -m reviewworthy action check", content)
+        self.assertIn("git cat-file -e", content)
+        self.assertIn("changed-file scope will be reported as unknown", content)
+        self.assertIn("--changed-files-provided", content)
+        self.assertIn("--changed-files-unavailable", content)
+        self.assertNotIn("gh pr create", content)
+        self.assertNotIn("gh issue create", content)
+
     def test_missing_packet_is_unknown_but_non_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             result = check_packet(Path(directory) / "missing.json")
@@ -32,6 +45,7 @@ class ActionCheckTests(unittest.TestCase):
             packet["policy"] = {}
             packet["ai_assistance"]["disclosure"] = {"text": "", "locations": [], "human_confirmed": False}
             packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
             path = Path(directory) / "packet.json"
             path.write_text(json.dumps(packet), encoding="utf-8")
@@ -85,6 +99,7 @@ class ActionCheckTests(unittest.TestCase):
             packet["contract"]["scope"] = {"modules": ["input boundary"]}
             packet["diff"]["changed_files"] = ["src/unapproved.py"]
             packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
             path = Path(directory) / "packet.json"
             path.write_text(json.dumps(packet), encoding="utf-8")
@@ -114,6 +129,7 @@ class ActionCheckTests(unittest.TestCase):
             packet = valid_packet()
             packet["policy"] = {"posture": "explicit", "authoritative_claims": {"ai_assistance": "allowed", "disclosure_required": False}}
             packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
             path = Path(directory) / "packet.json"
             path.write_text(json.dumps(packet), encoding="utf-8")

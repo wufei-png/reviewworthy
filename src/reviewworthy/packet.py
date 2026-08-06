@@ -7,6 +7,7 @@ from typing import Any
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
 from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
+from .understanding import validate_understanding
 from .util import sha256_json
 
 
@@ -23,10 +24,12 @@ ALLOWED_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run"}
 
 
 def material_snapshot(packet: dict[str, Any]) -> str:
-    """Hash only the materials Orientation and Assessment are about."""
+    """Hash the selected basis and other materials Orientation and Assessment are about."""
 
     return sha256_json(
         {
+            "entry": packet.get("entry", {}),
+            "basis": packet.get("basis", {}),
             "contract": packet.get("contract", {}),
             "diff": packet.get("diff", {}),
             "verification": packet.get("verification", {}),
@@ -92,8 +95,8 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
         "materials": {},
         "results": [result_record(node, "not_run") for node in REQUIRED_NODES],
         "understanding": {
-            "orientation": {"status": "not_run", "summary": "", "material_snapshot": ""},
-            "assessment": {"status": "not_run", "questions": [], "answers": []},
+            "orientation": {"status": "not_run", "summary": "", "topics": [], "evidence": [], "material_snapshot": ""},
+            "assessment": {"status": "not_run", "questions": [], "answers": [], "evidence": [], "material_snapshot": ""},
         },
         "narrative": {
             "title": "",
@@ -269,7 +272,7 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
             _error(
                 errors,
                 "material_snapshot_mismatch",
-                "materials.material_snapshot does not match the current contract, Diff, verification, and policy",
+                "materials.material_snapshot does not match the current entry, basis, contract, Diff, verification, and policy",
                 "materials.material_snapshot",
             )
 
@@ -297,25 +300,8 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
                 _error(errors, "missing_result_record", f"Every flow node needs a result record: {node}", "results")
 
     understanding = packet.get("understanding", {})
-    if not isinstance(understanding, dict):
-        _error(errors, "invalid_understanding", "understanding must be an object", "understanding")
-    else:
-        orientation = understanding.get("orientation", {})
-        assessment = understanding.get("assessment", {})
-        if not isinstance(orientation, dict) or orientation.get("status") not in ALLOWED_STATUSES:
-            _error(errors, "invalid_orientation", "understanding.orientation.status is required", "understanding.orientation")
-        if not isinstance(assessment, dict) or assessment.get("status") not in ALLOWED_STATUSES:
-            _error(errors, "invalid_assessment", "understanding.assessment.status is required", "understanding.assessment")
-        if isinstance(assessment, dict):
-            expected = material_snapshot(packet)
-            if assessment.get("material_snapshot") != expected:
-                _error(errors, "stale_assessment", "Assessment is not bound to the current material snapshot", "understanding.assessment.material_snapshot")
-            questions = assessment.get("questions", [])
-            answers = assessment.get("answers", [])
-            if not isinstance(questions, list) or not questions:
-                _error(errors, "missing_assessment_questions", "Assessment needs at least one question", "understanding.assessment.questions")
-            if not isinstance(answers, list) or len(answers) != len(questions):
-                _error(errors, "assessment_answer_mismatch", "Assessment answers must match the question count", "understanding.assessment.answers")
+    for error in validate_understanding(understanding, material_snapshot(packet))["errors"]:
+        _error(errors, error["code"], error["message"], error["path"])
 
     narrative = packet.get("narrative", {})
     if not isinstance(narrative, dict):

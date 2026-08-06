@@ -80,11 +80,17 @@ def _base_packet() -> dict[str, Any]:
     packet["verification"] = {"commands": ["python -m unittest"], "evidence": ["exit 0"]}
     packet["results"] = [{"node": node, "status": "passed", "evidence": [f"{node} recorded"]} for node in REQUIRED_NODES]
     packet["understanding"] = {
-        "orientation": {"status": "passed", "summary": "The contract and evidence were explained."},
+        "orientation": {
+            "status": "passed",
+            "summary": "The contract and evidence were explained.",
+            "topics": ["contract", "diff", "verification", "policy"],
+            "evidence": ["Orientation covered the material snapshot."],
+        },
         "assessment": {
             "status": "passed",
             "questions": ["What boundary protects the invariant?"],
             "answers": ["The existing input boundary validates before the old path runs."],
+            "evidence": ["The contributor answered a non-repeating question."],
         },
     }
     packet["narrative"] = {

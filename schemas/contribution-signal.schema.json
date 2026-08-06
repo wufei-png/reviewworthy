@@ -12,7 +12,35 @@
     "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "published": { "type": "boolean" },
     "confirmed_by": { "type": "string" },
-    "confirmed_at": { "type": "string" }
+    "confirmed_at": { "type": "string" },
+    "verification": {
+      "type": "object",
+      "required": ["status", "provider", "reference", "verified_at"],
+      "properties": {
+        "status": { "enum": ["verified", "local_only"] },
+        "provider": { "type": "string", "minLength": 1 },
+        "reference": { "type": "string" },
+        "verified_at": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string" },
+        "record_type": { "type": "string" },
+        "number": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string" },
+        "visibility": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "publication_subject_id": { "type": "string" },
+    "publication": {
+      "type": "object",
+      "required": ["operation_id", "repo", "title", "body"],
+      "properties": {
+        "operation_id": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "body": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    }
   },
   "allOf": [
     {
@@ -26,6 +54,42 @@
     {
       "if": { "properties": { "kind": { "enum": ["issue", "maintainer-request", "accepted-proposal", "discussion"] } } },
       "then": { "properties": { "published": { "const": true } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": { "const": "reproducible-evidence" },
+          "verification": { "type": "object" }
+        }
+      },
+      "then": {
+        "properties": {
+          "verification": {
+            "properties": {
+              "status": { "const": "local_only" },
+              "provider": { "const": "local" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": { "enum": ["issue", "maintainer-request", "accepted-proposal", "discussion"] },
+          "verification": { "type": "object" }
+        }
+      },
+      "then": {
+        "properties": {
+          "verification": {
+            "properties": {
+              "status": { "const": "verified" },
+              "provider": { "const": "github" }
+            }
+          }
+        }
+      }
     }
   ],
   "additionalProperties": true

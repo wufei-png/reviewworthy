@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
+from .signal import validate_signal
+from .util import sha256_json
 
 MENU_VERSION = "0.1"
 REVIEW_COSTS = {"small", "medium", "large", "unknown"}
@@ -23,6 +26,13 @@ def skeleton_menu(repository: str) -> dict[str, Any]:
 
 def _error(errors: list[dict[str, str]], code: str, message: str, path: str) -> None:
     errors.append({"code": code, "message": message, "path": path})
+
+
+def _candidate_by_id(menu: dict[str, Any], candidate_id: str) -> dict[str, Any]:
+    for candidate in menu.get("candidates", []):
+        if isinstance(candidate, dict) and candidate.get("id") == candidate_id:
+            return candidate
+    raise ValueError(f"Candidate is not present in the menu: {candidate_id}")
 
 
 def validate_candidate_menu(menu: dict[str, Any]) -> dict[str, Any]:
@@ -73,6 +83,14 @@ def validate_candidate_menu(menu: dict[str, Any]) -> dict[str, Any]:
             _error(errors, "invalid_basis_evidence", "basis.references and basis.evidence must be lists", f"{path}.basis")
         elif not basis.get("references") and not basis.get("evidence"):
             _error(errors, "empty_candidate_basis", "A candidate needs references or reproducible evidence", f"{path}.basis")
+        if isinstance(basis, dict) and basis.get("kind") in {"signal", "discovery-evidence"} and isinstance(basis.get("signal"), dict):
+            signal_result = validate_signal(basis["signal"])
+            for error in signal_result["errors"]:
+                _error(errors, error["code"], error["message"], f"{path}.basis.{error['path'].removeprefix('signal.')}")
+            if basis["signal"].get("status") in {"rejected", "expired"}:
+                _error(errors, "signal_unavailable", "A rejected or expired Contribution Signal cannot be selected", f"{path}.basis.signal.status")
+            if basis.get("kind") == "discovery-evidence" and basis["signal"].get("kind") != "reproducible-evidence":
+                _error(errors, "discovery_signal_kind_mismatch", "discovery-evidence basis must use a reproducible-evidence signal", f"{path}.basis.signal.kind")
         duplicate_search = candidate.get("duplicate_search")
         if not isinstance(duplicate_search, dict) or duplicate_search.get("checked") is not True:
             _error(errors, "duplicate_search_missing", "Duplicate-work evidence must be explicitly checked", f"{path}.duplicate_search")
@@ -95,7 +113,69 @@ def validate_candidate_menu(menu: dict[str, Any]) -> dict[str, Any]:
         _error(errors, "unknown_selected_candidate", "selection.selected_id is not present in candidates", "selection.selected_id")
     elif not isinstance(selection.get("confirmed"), bool):
         _error(errors, "invalid_selection_confirmation", "selection.confirmed must be boolean", "selection.confirmed")
+    elif selection.get("confirmed") and selection.get("selected_id"):
+        selected = _candidate_by_id(menu, selection["selected_id"])
+        basis = selected.get("basis", {})
+        if isinstance(basis, dict) and basis.get("kind") in {"signal", "discovery-evidence"} and not isinstance(basis.get("signal"), dict):
+            _error(errors, "selected_signal_missing", "A confirmed signal-backed candidate needs a structured signal record", f"candidates[{selection['selected_id']}].basis.signal")
     return {"valid": not errors, "errors": errors, "candidate_count": len(candidates), "candidate_ids": sorted(seen)}
+
+
+def select_candidate(menu: dict[str, Any], candidate_id: str, *, confirmed: bool) -> dict[str, Any]:
+    """Record an explicit candidate selection without authorizing implementation."""
+
+    validation = validate_candidate_menu(menu)
+    if not validation["valid"]:
+        raise ValueError(f"Cannot select from an invalid candidate menu: {validation['errors']}")
+    _candidate_by_id(menu, candidate_id)
+    selected = deepcopy(menu)
+    selected["selection"] = {"selected_id": candidate_id, "confirmed": confirmed}
+    selected_validation = validate_candidate_menu(selected)
+    if not selected_validation["valid"]:
+        raise ValueError(f"Cannot confirm this candidate selection: {selected_validation['errors']}")
+    return selected
+
+
+def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: str | None = None) -> dict[str, Any]:
+    """Bind a confirmed candidate's basis to a packet before contract work begins."""
+
+    validation = validate_candidate_menu(menu)
+    if not validation["valid"]:
+        raise ValueError(f"Cannot bind from an invalid candidate menu: {validation['errors']}")
+    selection = menu.get("selection", {})
+    selected_id = candidate_id or selection.get("selected_id")
+    if not isinstance(selected_id, str) or not selected_id.strip():
+        raise ValueError("A candidate must be selected before binding")
+    if selection.get("selected_id") != selected_id or selection.get("confirmed") is not True:
+        raise ValueError("Candidate selection must be explicitly confirmed before binding")
+    candidate = _candidate_by_id(menu, selected_id)
+    if candidate.get("recommendation") == "do_not_contribute":
+        raise ValueError("A do_not_contribute candidate cannot be bound to an implementation packet")
+    if not isinstance(packet, dict) or packet.get("packet_version") != "0.1":
+        raise ValueError("A contribution packet with packet_version 0.1 is required")
+    basis = candidate.get("basis")
+    if not isinstance(basis, dict):
+        raise ValueError("Selected candidate has no valid contribution basis")
+    if basis.get("kind") in {"signal", "discovery-evidence"} and not isinstance(basis.get("signal"), dict):
+        raise ValueError("Selected signal-backed candidate has no structured signal record")
+    if isinstance(basis.get("signal"), dict) and basis["signal"].get("status") in {"rejected", "expired"}:
+        raise ValueError("A rejected or expired Contribution Signal cannot be bound")
+    bound = deepcopy(packet)
+    entry = bound.get("entry", {})
+    if not isinstance(entry, dict):
+        raise ValueError("packet_entry_invalid")
+    bound["entry"] = dict(entry)
+    bound["entry"]["mode"] = "issue-backed" if basis.get("kind") == "issue" else "discovery"
+    bound["entry"]["source"] = f"candidate-menu:{menu.get('repository', '')}:{selected_id}"
+    bound["basis"] = deepcopy(basis)
+    bound["candidate_selection"] = {
+        "candidate_id": selected_id,
+        "repository": menu.get("repository", ""),
+        "menu_snapshot": sha256_json(menu),
+        "recommendation": candidate.get("recommendation"),
+        "confirmed": True,
+    }
+    return bound
 
 
 def render_candidate_menu(menu: dict[str, Any]) -> str:
