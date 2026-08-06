@@ -27,6 +27,7 @@ class CliBoundaryTests(unittest.TestCase):
                         "maintainer-request",
                         "--reference",
                         "https://github.com/example/project/issues/2",
+                        "--published",
                         "--output",
                         str(signal_path),
                         "--json",

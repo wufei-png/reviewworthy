@@ -19,8 +19,8 @@ reviewworthy brief render .reviewworthy/project-brief.json --output project-brie
 reviewworthy candidate search --repo OWNER/REPO --query "keyword"
 reviewworthy candidate init --repository OWNER/REPO
 reviewworthy candidate validate .reviewworthy/candidates.json
-reviewworthy signal init --kind maintainer-request --reference https://github.com/OWNER/REPO/issues/123
-reviewworthy signal validate .reviewworthy/contribution-signal.json --require-confirmed
+reviewworthy signal init --kind maintainer-request --reference https://github.com/OWNER/REPO/issues/123 --published
+reviewworthy signal validate .reviewworthy/contribution-signal.json
 reviewworthy contract init --output .reviewworthy/contribution-contract.json
 reviewworthy risk assess MANIFEST.json
 reviewworthy packet validate .reviewworthy/contribution.json
@@ -42,7 +42,7 @@ Discovery entry ────┘                                      ↓
                          verification → Orientation → Assessment → narrative preview → PR
 ```
 
-Discovery evidence may serve as the contribution basis when repository policy explicitly allows it. A selected Discovery or signal-backed contribution must record a confirmed Contribution Signal before implementation or remote readiness. Both entries use the same implementation and verification path.
+Discovery evidence may serve as the contribution basis when repository policy explicitly allows it. A selected Discovery or signal-backed contribution must record a valid Contribution Signal before implementation or remote readiness; it does not need maintainer confirmation. External signals must already reference a public record, while reproducible evidence may remain unpublished.
 
 Every node records a result. Review depth is `standard` or `heightened`; risk signals and user escalation can raise it, never lower it. Security issues, policy conflicts, irreversible changes, and unverifiable results are independent hard-stops.
 

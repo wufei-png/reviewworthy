@@ -74,7 +74,7 @@ class PacketValidationTests(unittest.TestCase):
 
         self.assertIn("missing_signal_record", codes)
 
-    def test_pending_signal_blocks_remote_readiness(self) -> None:
+    def test_pending_signal_allows_remote_readiness(self) -> None:
         packet = valid_packet()
         packet["entry"]["mode"] = "discovery"
         packet["basis"] = {
@@ -86,6 +86,7 @@ class PacketValidationTests(unittest.TestCase):
                 "reference": "repro://input-regression",
                 "status": "pending",
                 "evidence": ["exit 1"],
+                "published": False,
             },
         }
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
@@ -93,7 +94,32 @@ class PacketValidationTests(unittest.TestCase):
         packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
         packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
 
-        self.assertIn("signal_not_confirmed", {blocker["code"] for blocker in readiness_blockers(packet)})
+        codes = {blocker["code"] for blocker in readiness_blockers(packet)}
+
+        self.assertNotIn("signal_not_confirmed", codes)
+        self.assertNotIn("signal_unavailable", codes)
+
+    def test_rejected_signal_blocks_remote_readiness(self) -> None:
+        packet = valid_packet()
+        packet["entry"]["mode"] = "discovery"
+        packet["basis"] = {
+            "kind": "discovery-evidence",
+            "evidence": ["reproduced failure"],
+            "signal": {
+                "signal_version": "0.1",
+                "kind": "reproducible-evidence",
+                "reference": "repro://input-regression",
+                "status": "rejected",
+                "evidence": ["exit 1"],
+                "published": False,
+            },
+        }
+        packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertIn("signal_unavailable", {blocker["code"] for blocker in readiness_blockers(packet)})
 
     def test_unknown_discovery_policy_blocks_remote_readiness(self) -> None:
         packet = valid_packet()
@@ -107,6 +133,7 @@ class PacketValidationTests(unittest.TestCase):
                 "reference": "repro://input-regression",
                 "status": "confirmed",
                 "evidence": ["exit 1"],
+                "published": False,
                 "confirmed_at": "2026-08-06T00:00:00Z",
             },
         }
@@ -128,6 +155,7 @@ class PacketValidationTests(unittest.TestCase):
                 "reference": "repro://input-regression",
                 "status": "confirmed",
                 "evidence": ["exit 1"],
+                "published": False,
                 "confirmed_at": "2026-08-06T00:00:00Z",
             },
         }

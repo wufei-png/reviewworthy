@@ -25,6 +25,7 @@ def skeleton_signal(kind: str = "issue", reference: str = "") -> dict[str, Any]:
         "reference": reference,
         "status": "pending",
         "evidence": [],
+        "published": False,
         "confirmed_by": "",
         "confirmed_at": "",
     }
@@ -52,6 +53,12 @@ def validate_signal(signal: dict[str, Any], *, require_confirmed: bool = False) 
         _error(errors, "invalid_signal_evidence", "signal.evidence must be a list of non-empty strings", "signal.evidence")
     elif signal.get("kind") == "reproducible-evidence" and not evidence:
         _error(errors, "missing_signal_evidence", "Reproducible evidence signals need evidence records", "signal.evidence")
+
+    published = signal.get("published")
+    if not isinstance(published, bool):
+        _error(errors, "invalid_signal_publication", "signal.published must be boolean", "signal.published")
+    elif signal.get("kind") != "reproducible-evidence" and published is not True:
+        _error(errors, "signal_not_published", "Issue, maintainer-request, accepted-proposal, and discussion signals need a public reference", "signal.published")
 
     for key in ("confirmed_by", "confirmed_at"):
         value = signal.get(key, "")
@@ -107,6 +114,6 @@ def signal_readiness_blockers(basis: dict[str, Any], mode: str) -> list[dict[str
     signal = basis.get("signal")
     if not isinstance(signal, dict):
         return [{"code": "missing_signal_record", "message": "The selected contribution basis has no structured signal record.", "path": "basis.signal"}]
-    if signal.get("status") != "confirmed":
-        return [{"code": "signal_not_confirmed", "message": "The Contribution Signal must be confirmed before implementation or remote readiness.", "path": "basis.signal.status"}]
+    if signal.get("status") in {"rejected", "expired"}:
+        return [{"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "basis.signal.status"}]
     return []

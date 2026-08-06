@@ -100,6 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
     signal_init.add_argument("--kind", choices=sorted(SIGNAL_KINDS), default="issue")
     signal_init.add_argument("--reference", default="")
     signal_init.add_argument("--evidence", action="append", default=[])
+    signal_init.add_argument("--published", action="store_true", help="Mark an external Issue/Discussion reference as publicly created")
     signal_init.add_argument("--status", choices=sorted(SIGNAL_STATUSES), default="pending")
     signal_init.add_argument("--confirmed-by", default="")
     signal_init.add_argument("--confirmed-at", default="")
@@ -247,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "evidence": args.evidence,
                         "status": args.status,
+                        "published": args.published,
                         "confirmed_by": args.confirmed_by,
                         "confirmed_at": args.confirmed_at,
                     }

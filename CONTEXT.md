@@ -23,7 +23,7 @@ A possible change supported by project evidence that has not yet been selected a
 _Avoid_: opportunity, random improvement
 
 **Contribution signal**:
-A status-bearing, recorded project-owned indication that a candidate is wanted, such as an existing issue, maintainer request, accepted proposal, or a reproducible failure that satisfies the project's contribution policy. Discovery work cannot enter implementation until this signal is confirmed; reproducible evidence may be confirmed by policy-permitted verification without a maintainer reply.
+A status-bearing, recorded contribution basis, such as a public issue, maintainer request, accepted proposal, discussion, or a reproducible failure that satisfies the project's contribution policy. External signals must be publicly recorded; reproducible evidence may remain unpublished. Maintainer confirmation is optional, while rejected or expired signals cannot progress.
 _Avoid_: agent enthusiasm, inferred demand
 
 **Contribution basis**:
