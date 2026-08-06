@@ -23,7 +23,7 @@ A possible change supported by project evidence that has not yet been selected a
 _Avoid_: opportunity, random improvement
 
 **Contribution signal**:
-A project-owned indication that a candidate is wanted, such as an existing issue, maintainer request, accepted proposal, or a reproducible failure that satisfies the project's contribution policy.
+A status-bearing, recorded project-owned indication that a candidate is wanted, such as an existing issue, maintainer request, accepted proposal, or a reproducible failure that satisfies the project's contribution policy. Discovery work cannot enter implementation until this signal is confirmed; reproducible evidence may be confirmed by policy-permitted verification without a maintainer reply.
 _Avoid_: agent enthusiasm, inferred demand
 
 **Contribution basis**:

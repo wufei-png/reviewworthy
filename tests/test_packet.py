@@ -60,6 +60,88 @@ class PacketValidationTests(unittest.TestCase):
 
         self.assertIn("discovery_evidence_disallowed", {blocker["code"] for blocker in blockers})
 
+    def test_discovery_requires_a_structured_signal_record(self) -> None:
+        packet = valid_packet()
+        packet["entry"]["mode"] = "discovery"
+        packet["basis"] = {"kind": "discovery-evidence", "evidence": ["reproduced failure"]}
+        packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        blockers = readiness_blockers(packet)
+        codes = {blocker["code"] for blocker in blockers}
+
+        self.assertIn("missing_signal_record", codes)
+
+    def test_pending_signal_blocks_remote_readiness(self) -> None:
+        packet = valid_packet()
+        packet["entry"]["mode"] = "discovery"
+        packet["basis"] = {
+            "kind": "discovery-evidence",
+            "evidence": ["reproduced failure"],
+            "signal": {
+                "signal_version": "0.1",
+                "kind": "reproducible-evidence",
+                "reference": "repro://input-regression",
+                "status": "pending",
+                "evidence": ["exit 1"],
+            },
+        }
+        packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertIn("signal_not_confirmed", {blocker["code"] for blocker in readiness_blockers(packet)})
+
+    def test_unknown_discovery_policy_blocks_remote_readiness(self) -> None:
+        packet = valid_packet()
+        packet["entry"]["mode"] = "discovery"
+        packet["basis"] = {
+            "kind": "discovery-evidence",
+            "evidence": ["reproduced failure"],
+            "signal": {
+                "signal_version": "0.1",
+                "kind": "reproducible-evidence",
+                "reference": "repro://input-regression",
+                "status": "confirmed",
+                "evidence": ["exit 1"],
+                "confirmed_at": "2026-08-06T00:00:00Z",
+            },
+        }
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertIn("discovery_evidence_policy_unknown", {blocker["code"] for blocker in readiness_blockers(packet)})
+
+    def test_confirmed_discovery_signal_clears_signal_specific_blockers(self) -> None:
+        packet = valid_packet()
+        packet["entry"]["mode"] = "discovery"
+        packet["basis"] = {
+            "kind": "discovery-evidence",
+            "evidence": ["reproduced failure"],
+            "signal": {
+                "signal_version": "0.1",
+                "kind": "reproducible-evidence",
+                "reference": "repro://input-regression",
+                "status": "confirmed",
+                "evidence": ["exit 1"],
+                "confirmed_at": "2026-08-06T00:00:00Z",
+            },
+        }
+        packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        codes = {blocker["code"] for blocker in readiness_blockers(packet)}
+
+        self.assertNotIn("signal_not_confirmed", codes)
+        self.assertNotIn("missing_signal_record", codes)
+        self.assertNotIn("discovery_evidence_policy_unknown", codes)
+
     def test_remote_readiness_checks_scope_and_diff_budget(self) -> None:
         packet = valid_packet()
         packet["diff"] = {"changed_files": ["src/example.py", "src/unapproved.py"], "additions": 99, "deletions": 0}

@@ -19,6 +19,7 @@ from .github import GhClient, GhError, build_operation, load_operation_receipt, 
 from .packet import readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
 from .risk import assess_manifest
+from .signal import SIGNAL_KINDS, SIGNAL_STATUSES, skeleton_signal, validate_signal
 from .util import read_json
 
 
@@ -92,6 +93,23 @@ def _build_parser() -> argparse.ArgumentParser:
     risk_assess = risk_commands.add_parser("assess")
     risk_assess.add_argument("manifest", type=Path)
     _common_json(risk_assess)
+
+    signal = commands.add_parser("signal", help="Record and validate a Contribution Signal")
+    signal_commands = signal.add_subparsers(dest="signal_command", required=True)
+    signal_init = signal_commands.add_parser("init", help="Create a pending Contribution Signal artifact")
+    signal_init.add_argument("--kind", choices=sorted(SIGNAL_KINDS), default="issue")
+    signal_init.add_argument("--reference", default="")
+    signal_init.add_argument("--evidence", action="append", default=[])
+    signal_init.add_argument("--status", choices=sorted(SIGNAL_STATUSES), default="pending")
+    signal_init.add_argument("--confirmed-by", default="")
+    signal_init.add_argument("--confirmed-at", default="")
+    signal_init.add_argument("--output", type=Path, default=Path(".reviewworthy/contribution-signal.json"))
+    signal_init.add_argument("--force", action="store_true")
+    _common_json(signal_init)
+    signal_validate = signal_commands.add_parser("validate")
+    signal_validate.add_argument("path", type=Path)
+    signal_validate.add_argument("--require-confirmed", action="store_true")
+    _common_json(signal_validate)
 
     packet = commands.add_parser("packet", help="Validate a Contribution Packet")
     packet_commands = packet.add_subparsers(dest="packet_command", required=True)
@@ -221,6 +239,25 @@ def main(argv: list[str] | None = None) -> int:
             result = assess_manifest(_load_object(args.manifest))
             _print(result, args.as_json)
             return 1 if result["hard_stops"] else 0
+
+        if args.command == "signal":
+            if args.signal_command == "init":
+                signal_value = skeleton_signal(args.kind, args.reference)
+                signal_value.update(
+                    {
+                        "evidence": args.evidence,
+                        "status": args.status,
+                        "confirmed_by": args.confirmed_by,
+                        "confirmed_at": args.confirmed_at,
+                    }
+                )
+                _write_json(args.output, signal_value, args.force)
+                _print({"created": str(args.output), "kind": args.kind, "status": args.status}, args.as_json)
+                return 0
+            signal_value = _load_object(args.path)
+            result = validate_signal(signal_value, require_confirmed=args.require_confirmed)
+            _print(result, args.as_json)
+            return 0 if result["valid"] else 1
 
         if args.command == "packet":
             if args.packet_command == "init":

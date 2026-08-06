@@ -19,6 +19,8 @@ reviewworthy brief render .reviewworthy/project-brief.json --output project-brie
 reviewworthy candidate search --repo OWNER/REPO --query "keyword"
 reviewworthy candidate init --repository OWNER/REPO
 reviewworthy candidate validate .reviewworthy/candidates.json
+reviewworthy signal init --kind maintainer-request --reference https://github.com/OWNER/REPO/issues/123
+reviewworthy signal validate .reviewworthy/contribution-signal.json --require-confirmed
 reviewworthy contract init --output .reviewworthy/contribution-contract.json
 reviewworthy risk assess MANIFEST.json
 reviewworthy packet validate .reviewworthy/contribution.json
@@ -29,7 +31,7 @@ reviewworthy remote plan ...
 reviewworthy remote create ... --confirm-operation-id rw-...
 ```
 
-The CLI and Skill share a Contribution Packet. The GitHub Action is read-only and checks objective evidence. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
+The CLI and Skill share a Contribution Packet and a status-bearing Contribution Signal. The GitHub Action is read-only and checks objective evidence. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
 
 ## Workflow contract
 
@@ -40,7 +42,7 @@ Discovery entry ────┘                                      ↓
                          verification → Orientation → Assessment → narrative preview → PR
 ```
 
-Discovery evidence may serve as the contribution basis when repository policy allows it. Speculative work still needs a project signal. Both entries use the same implementation and verification path.
+Discovery evidence may serve as the contribution basis when repository policy explicitly allows it. A selected Discovery or signal-backed contribution must record a confirmed Contribution Signal before implementation or remote readiness. Both entries use the same implementation and verification path.
 
 Every node records a result. Review depth is `standard` or `heightened`; risk signals and user escalation can raise it, never lower it. Security issues, policy conflicts, irreversible changes, and unverifiable results are independent hard-stops.
 
@@ -79,7 +81,7 @@ The operation ID is embedded in a hidden Body marker. Before creating an Issue o
 
 For a policy-required Draft PR, the draft state is included in the operation ID and passed to `gh pr create --draft`. A pending local operation record is persisted immediately before a create; if the create or receipt persistence is uncertain, later retries stop for reconciliation instead of issuing another create. After a successful create, the ignored local operation receipt under `.reviewworthy/local/operations/` protects immediate retries during GitHub's read-after-write delay.
 
-The first release does not create review comments, close PRs, merge changes, or use an LLM as an Action gatekeeper.
+The first release does not create review comments, Discussions, close PRs, merge changes, or use an LLM as an Action gatekeeper. The current signal slice records and gates the evidence; it does not yet wait for or fetch maintainer responses.
 
 ## Documents
 
@@ -87,6 +89,7 @@ The first release does not create review comments, close PRs, merge changes, or 
 - [Agent Skill](./SKILL.md)
 - [Project brief and orientation](./references/onboarding-contract.md)
 - [Candidate evidence matrix](./references/candidate-scoring.md)
+- [Contribution Signal](./references/contribution-signal.md)
 - [Contribution Contract](./references/contribution-contract.md)
 - [AI disclosure](./references/ai-disclosure.md)
 - [Fixture evaluations](./references/evaluation.md)
@@ -97,4 +100,4 @@ The first release does not create review comments, close PRs, merge changes, or 
 
 ## Status
 
-This is an early open-source foundation released under the [MIT License](./LICENSE). The current slice adds deterministic project facts, evidence-first candidate menus, standalone Contribution Contracts, policy-aware disclosure records, and provider-free fixture evaluations. Richer provider adapters and deeper project-specific onboarding remain later slices.
+This is an early open-source foundation released under the [MIT License](./LICENSE). The current slice adds deterministic project facts, evidence-first candidate menus, status-bearing Contribution Signals, standalone Contribution Contracts, policy-aware disclosure records, and provider-free fixture evaluations. Maintainer-response waiting, richer provider adapters, and deeper project-specific onboarding remain later slices.

@@ -15,6 +15,32 @@ from helpers import valid_packet
 
 
 class CliBoundaryTests(unittest.TestCase):
+    def test_signal_init_and_require_confirmed_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            signal_path = Path(directory) / "signal.json"
+            with redirect_stdout(io.StringIO()):
+                init_code = main(
+                    [
+                        "signal",
+                        "init",
+                        "--kind",
+                        "maintainer-request",
+                        "--reference",
+                        "https://github.com/example/project/issues/2",
+                        "--output",
+                        str(signal_path),
+                        "--json",
+                    ]
+                )
+            with redirect_stdout(io.StringIO()):
+                validation_code = main(["signal", "validate", str(signal_path), "--json"])
+            with redirect_stdout(io.StringIO()):
+                readiness_code = main(["signal", "validate", str(signal_path), "--require-confirmed", "--json"])
+
+            self.assertEqual(init_code, 0)
+            self.assertEqual(validation_code, 0)
+            self.assertEqual(readiness_code, 1)
+
     def test_remote_plan_uses_the_approved_packet_narrative(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

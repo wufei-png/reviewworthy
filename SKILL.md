@@ -31,14 +31,14 @@ Use this workflow whenever a user asks an Agent to make or publish an AI-assiste
 1. Identify the repository and read `README`, `CONTRIBUTING`, security guidance, templates, and relevant docs. Run `reviewworthy policy inspect .` before relying on `.reviewworthy/policy.toml`.
 2. Create `reviewworthy brief create` and complete its Skill/contributor-owned sections during Orientation; the deterministic source manifest is evidence, not an AI architecture claim.
 3. Classify the entry as Issue-backed or Discovery. Run `reviewworthy candidate search --repo OWNER/REPO --query "..."`, populate an evidence-first candidate menu, and inspect duplicate Issues/PRs before treating a candidate as actionable.
-4. Record the contribution basis. Discovery evidence can qualify only when repository policy permits it; speculative improvements need a project signal.
+4. Record the contribution basis and structured Contribution Signal. Discovery candidates may be explored or have an Issue/Discussion draft prepared while the signal is pending, but implementation requires a confirmed signal; reproducible evidence also requires explicit policy allowance.
 5. Build and approve a Contribution Contract: problem, non-goals, scope, invariants, design, alternatives, validation plan, Diff budget, risks, and success criteria. Validate it with `reviewworthy contract validate`.
 6. Assess review depth with `reviewworthy risk assess`. Escalate when the user requests more scrutiny. Respect hard-stops independently.
 7. Ask for approval of the contract before implementation. Re-plan if the implementation materially leaves the approved scope.
 8. Implement the smallest coherent change. Record commands, exit codes, verification evidence, and the AI-assistance stages/human verification record.
 9. Prepare the exact final Diff and update the material snapshot. Run Orientation, then ask fresh Assessment questions. Regenerate stale Assessment after any material change.
 10. Render disclosure with `reviewworthy disclosure render` according to normalized policy. Prepare the final PR title and Body and always show the exact text. For heightened work or policy-required narrative, require the user's own motivation, trade-offs, and risks before AI copyediting.
-11. Run `reviewworthy remote plan`. Only after the user confirms the displayed operation ID may the CLI create the requested Issue or formal Pull Request through `gh`.
+11. Run `reviewworthy remote plan`. Only after the user confirms the displayed operation ID and all signal/policy gates pass may the CLI create the requested Issue or formal Pull Request through `gh`.
 
 ## Stop outcomes
 

@@ -10,6 +10,7 @@ These eight fixtures exercise deterministic workflow boundaries without a networ
 - unverifiable results;
 - stale understanding material;
 - human-owned PR narrative.
+- Discovery work without a structured Contribution Signal.
 
 Run them with:
 

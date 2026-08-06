@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/contribution-signal.schema.json",
+  "title": "Reviewworthy Contribution Signal",
+  "type": "object",
+  "required": ["signal_version", "kind", "reference", "status", "evidence"],
+  "properties": {
+    "signal_version": { "const": "0.1" },
+    "kind": { "enum": ["issue", "maintainer-request", "accepted-proposal", "discussion", "reproducible-evidence"] },
+    "reference": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["pending", "confirmed", "rejected", "expired"] },
+    "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "confirmed_by": { "type": "string" },
+    "confirmed_at": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "reproducible-evidence" } } },
+      "then": { "properties": { "evidence": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "confirmed" } } },
+      "then": { "required": ["confirmed_at"] }
+    }
+  ],
+  "additionalProperties": true
+}

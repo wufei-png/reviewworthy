@@ -31,7 +31,10 @@
     "basis": {
       "type": "object",
       "required": ["kind"],
-      "properties": { "kind": { "enum": ["issue", "signal", "discovery-evidence"] } },
+      "properties": {
+        "kind": { "enum": ["issue", "signal", "discovery-evidence"] },
+        "signal": { "$ref": "contribution-signal.schema.json" }
+      },
       "additionalProperties": true
     },
     "contract": { "$ref": "contribution-contract.schema.json" },
@@ -70,5 +73,19 @@
       "additionalProperties": true
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "entry": { "properties": { "mode": { "const": "discovery" } } } } },
+      "then": {
+        "properties": {
+          "basis": { "properties": { "kind": { "enum": ["signal", "discovery-evidence"] }, "signal": { "$ref": "contribution-signal.schema.json" } }, "required": ["signal"] }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "basis": { "properties": { "kind": { "enum": ["signal", "discovery-evidence"] } } } } },
+      "then": { "properties": { "basis": { "required": ["signal"] } } }
+    }
+  ],
   "additionalProperties": true
 }

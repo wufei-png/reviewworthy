@@ -6,6 +6,7 @@ from typing import Any
 
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
+from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .util import sha256_json
 
 
@@ -102,6 +103,8 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
             "human_expression": "",
         },
     }
+    if mode == "discovery":
+        packet["basis"]["signal"] = skeleton_signal("reproducible-evidence")
     packet["materials"]["material_snapshot"] = material_snapshot(packet)
     packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
     packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
@@ -148,6 +151,8 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         _error(errors, "invalid_basis", "basis.kind must be issue, signal, or discovery-evidence", "basis.kind")
     elif not basis.get("references") and not basis.get("evidence"):
         _error(errors, "empty_basis", "A contribution basis needs references or reproducible evidence", "basis")
+    if isinstance(basis, dict):
+        errors.extend(validate_basis_signal(basis, entry.get("mode") if isinstance(entry, dict) else ""))
 
     contract = packet.get("contract", {})
     if not isinstance(contract, dict):
@@ -451,6 +456,8 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     evidence_violations, _unknowns = deterministic_evidence_checks(packet, strict=True)
     blockers.extend(evidence_violations)
 
+    entry = packet.get("entry", {})
+    basis = packet.get("basis", {})
     review = packet.get("review", {})
     if isinstance(review, dict) and review.get("signals") and review.get("depth") != "heightened":
         blockers.append({"code": "review_depth_too_low", "message": "Risk signals require heightened review depth.", "path": "review.depth"})
@@ -490,6 +497,24 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
         blockers.append({"code": "missing_verification_evidence", "message": "Remote readiness requires verification commands and evidence.", "path": "verification"})
 
     blockers.extend(policy_violations(packet, enforce_disclosure=True))
+
+    if isinstance(basis, dict):
+        blockers.extend(signal_readiness_blockers(basis, entry.get("mode") if isinstance(entry, dict) else ""))
+        if basis.get("kind") == "discovery-evidence":
+            claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
+            if not isinstance(claims, dict):
+                claims = {}
+            if claims.get("discovery_evidence_allowed") is not True:
+                if claims.get("discovery_evidence_allowed") is False:
+                    pass
+                else:
+                    blockers.append(
+                        {
+                            "code": "discovery_evidence_policy_unknown",
+                            "message": "Reproducible Discovery evidence needs an explicit policy allowance before remote readiness.",
+                            "path": "policy.authoritative_claims.discovery_evidence_allowed",
+                        }
+                    )
 
     understanding = packet.get("understanding", {}) if isinstance(packet.get("understanding", {}), dict) else {}
     orientation = understanding.get("orientation", {})

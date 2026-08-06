@@ -1,0 +1,14 @@
+{
+  "id": "discovery-signal-required",
+  "kind": "packet",
+  "mutations": [
+    {"path": "entry.mode", "value": "discovery"},
+    {"path": "basis.kind", "value": "discovery-evidence"},
+    {"path": "basis.references", "value": []},
+    {"path": "basis.evidence", "value": ["Reproduced with the documented command."]},
+    {"path": "policy.authoritative_claims.discovery_evidence_allowed", "value": true}
+  ],
+  "assert": {
+    "blocker": "missing_signal_record"
+  }
+}

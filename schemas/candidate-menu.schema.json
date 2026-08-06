@@ -16,7 +16,7 @@
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "title": { "type": "string", "minLength": 1 },
-          "basis": { "type": "object", "required": ["kind"], "properties": { "kind": { "enum": ["issue", "signal", "discovery-evidence"] } }, "additionalProperties": true },
+          "basis": { "type": "object", "required": ["kind"], "properties": { "kind": { "enum": ["issue", "signal", "discovery-evidence"] }, "signal": { "$ref": "contribution-signal.schema.json" } }, "additionalProperties": true },
           "duplicate_search": { "type": "object", "required": ["checked", "matches"], "properties": { "checked": { "const": true }, "matches": { "type": "array" } }, "additionalProperties": true },
           "value": { "type": "object" },
           "scope": { "type": "object" },
