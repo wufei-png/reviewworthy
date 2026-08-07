@@ -9,6 +9,7 @@
     {"path": "policy.authoritative_claims.discovery_evidence_allowed", "value": true}
   ],
   "assert": {
-    "blocker": "missing_signal_record"
+    "result": "blocked",
+    "blocker_codes": ["missing_signal_record"]
   }
 }

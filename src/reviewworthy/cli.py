@@ -185,6 +185,10 @@ def _build_parser() -> argparse.ArgumentParser:
     action_commands = action.add_subparsers(dest="action_command", required=True)
     action_check = action_commands.add_parser("check")
     action_check.add_argument("path", type=Path, nargs="?", default=Path(".reviewworthy/contribution.json"))
+    action_check.add_argument("--mode", choices=("report", "enforce"), default="report", help="Report unknown evidence, or explicitly enforce packet/diff/unknown requirements")
+    action_check.add_argument("--require-packet", action="store_true", help="Fail when the Contribution Packet is missing")
+    action_check.add_argument("--fail-on-unknown", action="store_true", help="Turn unknown policy/evidence into violations")
+    action_check.add_argument("--require-current-diff", action="store_true", help="Require changed files supplied from the current event/worktree")
     action_check.add_argument("--changed-file", action="append", default=[])
     action_check.add_argument("--changed-files-provided", action="store_true", help="Treat the supplied changed-file list as authoritative, even when empty")
     action_check.add_argument("--changed-files-unavailable", action="store_true", help="Do not fall back to packet-declared changed files")
@@ -654,8 +658,24 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["valid"] else 1
 
         if args.command == "action":
-            changed_files = args.changed_file if (args.changed_files_provided or args.changed_files_unavailable) else (args.changed_file or None)
-            result = check_packet(args.path, changed_files)
+            if args.changed_files_unavailable:
+                changed_files = []
+                current_diff_available = False
+            elif args.changed_files_provided:
+                changed_files = args.changed_file
+                current_diff_available = True
+            else:
+                changed_files = args.changed_file or None
+                current_diff_available = None
+            result = check_packet(
+                args.path,
+                changed_files,
+                current_diff_available=current_diff_available,
+                mode=args.mode,
+                require_packet=args.require_packet,
+                fail_on_unknown=args.fail_on_unknown,
+                require_current_diff=args.require_current_diff,
+            )
             _print(result, args.as_json)
             return 1 if result["conclusion"] == "failure" else 0
 

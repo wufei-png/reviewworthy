@@ -18,6 +18,7 @@ Use this workflow whenever a user asks an Agent to make or publish an AI-assiste
 - Treat existing issues, maintainer requests, and policy-permitted reproducible discovery evidence as the contribution basis.
 - Discovery candidates must be checked for duplicates before implementation.
 - Record an explicit duplicate disposition (`exact_duplicate`, `potential_duplicate`, `related`, `not_duplicate`, `stale`, or `superseded`); the CLI records and enforces the disposition but does not infer it from similarity.
+- Treat the composite Action's default as report-only. Select `enforce` and its packet/current-diff/unknown requirements only when the repository explicitly wants a blocking check.
 - Issue-backed and Discovery entries converge into one contribution contract and one implementation/verification path.
 - Record a result for every flow node; do not silently skip a node because a change is small.
 - Calculate `standard` or `heightened` review depth from risk signals. The user may raise depth, never lower it.
@@ -40,6 +41,7 @@ Use this workflow whenever a user asks an Agent to make or publish an AI-assiste
 9. Bind any confirmed Candidate Menu selection into the Packet before Contract approval. Prepare the exact final Diff and update the material snapshot. Record and validate Orientation, then ask fresh Assessment questions. A passed `standard` understanding covers behavior, invariant, and test; `heightened` additionally covers flow, trade-offs, failures, and regressions. The CLI validates rubric structure and evidence presence, not whether the answer is substantively correct. Regenerate stale records after any material change.
 10. Render disclosure with `reviewworthy disclosure render` according to normalized policy. Prepare the final PR title and Body and always show the exact text. For heightened work or policy-required narrative, require the user's own motivation, trade-offs, and risks before AI copyediting.
 11. Run `reviewworthy remote plan`. The Packet repository identity and live Issue identity must match, and a PR Body must contain the canonical supporting Issue URL. Only after the user confirms the displayed operation ID and all signal/policy gates pass may the CLI create the requested Issue or formal Pull Request through `gh`. For an Issue-backed PR, the CLI then searches for the exact PR URL note, writes at most one such note, and records `needs_reconciliation` if the note cannot be written; it never creates a second PR.
+12. For maintainer-side automation, keep `action.yml` in report mode unless the repository explicitly opts into `enforce`; use fixture evals with exact blocker/violation sets and conclusion/result assertions, and use JSON Schema only as a test/CI structural check. Dogfood this Skill against the repository's own `CONTRIBUTING.md`, `SECURITY.md`, `.reviewworthy/policy.toml`, and example contribution. Do not infer branch protection or required-check configuration from these files.
 
 ## Stop outcomes
 

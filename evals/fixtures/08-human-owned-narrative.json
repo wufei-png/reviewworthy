@@ -6,6 +6,7 @@
     {"path": "narrative.human_expression", "value": ""}
   ],
   "assert": {
-    "blocker": "missing_human_expression"
+    "result": "blocked",
+    "blocker_codes": ["missing_human_expression"]
   }
 }

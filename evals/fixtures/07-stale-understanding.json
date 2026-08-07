@@ -6,6 +6,13 @@
     {"path": "diff.additions", "value": 99}
   ],
   "assert": {
-    "blocker": "stale_assessment"
+    "result": "blocked",
+    "blocker_codes": [
+      "assessment_requires_current_orientation",
+      "diff_budget_exceeded",
+      "material_snapshot_mismatch",
+      "stale_assessment",
+      "stale_orientation"
+    ]
   }
 }

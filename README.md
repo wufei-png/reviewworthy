@@ -33,7 +33,8 @@ reviewworthy packet validate .reviewworthy/contribution.json
 reviewworthy issue verify --packet .reviewworthy/contribution.json --record
 reviewworthy understanding record .reviewworthy/contribution.json --phase orientation --status passed --summary "..." --rubric behavior="..." --rubric invariant="..." --rubric test="..." --topic contract --topic diff --topic verification --topic policy
 reviewworthy understanding validate .reviewworthy/contribution.json
-reviewworthy action check .reviewworthy/contribution.json
+reviewworthy action check .reviewworthy/contribution.json --mode report
+reviewworthy action check .reviewworthy/contribution.json --mode enforce --changed-files-provided
 reviewworthy disclosure render --packet .reviewworthy/contribution.json
 reviewworthy eval run
 reviewworthy remote plan ...
@@ -62,6 +63,7 @@ The contract must be explicitly approved before remote readiness. A confirmed Ca
 The runtime requires Python 3.11 or newer and has no third-party runtime dependencies.
 
 ```bash
+python -m pip install --requirement requirements-dev.txt  # test/CI-only dependency
 PYTHONPATH=src python -m unittest discover -s tests -v
 PYTHONPATH=src python -m reviewworthy --version
 ```
@@ -94,7 +96,9 @@ For a policy-required Draft PR, the draft state is included in the operation ID 
 
 The first release does not create review comments, Discussions, close PRs, merge changes, or use an LLM as an Action gatekeeper. The current signal slice records and gates the evidence; it does not yet wait for or fetch maintainer responses.
 
-The repository also ships a read-only composite Action in [`action.yml`](./action.yml). It runs `reviewworthy action check` against a checked-out Contribution Packet and changed-file list; it does not publish, comment, or infer maintainer approval. If pull-request SHAs are unavailable, it reports scope as unknown instead of trusting Packet-declared changed files.
+The repository also ships a read-only composite Action in [`action.yml`](./action.yml). Its default `report` mode runs the existing non-blocking check and reports missing packets or unknown evidence. An explicitly selected `enforce` mode requires a packet, current changed-file evidence, and known policy/evidence; individual `require-packet`, `require-current-diff`, and `fail-on-unknown` inputs are also available. It does not publish, comment, or infer maintainer approval. If pull-request SHAs are unavailable, report mode describes scope as unknown; enforce mode fails rather than trusting Packet-declared changed files.
+
+The runtime has no third-party dependencies. Schema validation is a test/CI-only concern: `requirements-dev.txt` installs `jsonschema`, and CI validates the portable schemas and generated test artifacts without adding it to the package runtime dependencies. Fixture evals assert exact blocker/violation sets and conclusion/result outcomes rather than whole response snapshots.
 
 ## Documents
 
@@ -106,6 +110,7 @@ The repository also ships a read-only composite Action in [`action.yml`](./actio
 - [Contribution Contract](./references/contribution-contract.md)
 - [AI disclosure](./references/ai-disclosure.md)
 - [Fixture evaluations](./references/evaluation.md)
+- [Action, eval, and Schema CI](./references/action-and-ci.md)
 - [Policy discovery reference](./references/policy-discovery.md)
 - [Understanding gate reference](./references/understanding-gate.md)
 - [Remote write reference](./references/remote-writes.md)

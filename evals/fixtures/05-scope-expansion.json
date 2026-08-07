@@ -4,6 +4,7 @@
   "changed_files": ["src/example.py", "src/unapproved.py"],
   "assert": {
     "conclusion": "failure",
-    "violation": "out_of_scope_files"
+    "result": "failed",
+    "violation_codes": ["out_of_scope_files"]
   }
 }

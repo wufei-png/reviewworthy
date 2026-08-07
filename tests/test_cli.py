@@ -220,6 +220,28 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(any("Changed-file evidence was not provided" in unknown for unknown in result["unknowns"]))
 
+    def test_action_cli_exposes_explicit_enforce_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet_path = Path(directory) / "packet.json"
+            packet_path.write_text(json.dumps(valid_packet()), encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main([
+                    "action", "check", str(packet_path), "--mode", "enforce",
+                    "--changed-file", "src/example.py", "--changed-files-provided", "--json",
+                ])
+
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 1)
+            self.assertEqual(result["mode"], "enforce")
+            self.assertEqual(result["requirements"], {
+                "require_packet": True,
+                "fail_on_unknown": True,
+                "require_current_diff": True,
+            })
+            self.assertIn("unknown_policy", {violation["code"] for violation in result["violations"]})
+
     def test_remote_plan_uses_the_approved_packet_narrative(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

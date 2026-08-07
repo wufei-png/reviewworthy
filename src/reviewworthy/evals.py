@@ -202,10 +202,18 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
             for mutation in fixture.get("mutations", []):
                 _set_path(packet, mutation["path"], mutation["value"])
             if fixture.get("refresh_materials", True):
-                packet["materials"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                snapshot = material_snapshot(packet)
+                packet["materials"]["material_snapshot"] = snapshot
+                packet["understanding"]["orientation"]["material_snapshot"] = snapshot
+                packet["understanding"]["assessment"]["material_snapshot"] = snapshot
             actual = {"blocker_codes": sorted({item["code"] for item in readiness_blockers(packet)})}
-            checks = [("blocker", expected.get("blocker") in actual["blocker_codes"], True)]
+            if not isinstance(expected.get("blocker_codes"), list) or not isinstance(expected.get("result"), str):
+                raise ValueError("packet evals must assert exact blocker_codes and result")
+            actual["result"] = "blocked" if actual["blocker_codes"] else "ready"
+            checks = [
+                ("result", actual["result"], expected["result"]),
+                ("blocker_codes", actual["blocker_codes"], sorted(expected["blocker_codes"])),
+            ]
         elif kind == "action":
             packet = _base_packet()
             for mutation in fixture.get("mutations", []):
@@ -214,7 +222,15 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
                 packet_path = Path(directory) / "packet.json"
                 packet_path.write_text(json.dumps(packet), encoding="utf-8")
                 actual = check_packet(packet_path, fixture.get("changed_files"))
-            checks = [("conclusion", actual["conclusion"], expected.get("conclusion")), ("violation", actual["violations"][0]["code"] if actual["violations"] else None, expected.get("violation"))]
+            if not isinstance(expected.get("violation_codes"), list) or not isinstance(expected.get("result"), str):
+                raise ValueError("action evals must assert exact violation_codes and result")
+            actual_codes = sorted({item["code"] for item in actual["violations"]})
+            actual_result = "failed" if actual["conclusion"] == "failure" else "passed"
+            checks = [
+                ("conclusion", actual["conclusion"], expected.get("conclusion")),
+                ("result", actual_result, expected["result"]),
+                ("violation_codes", actual_codes, sorted(expected["violation_codes"])),
+            ]
         elif kind == "risk":
             actual = assess_manifest(fixture["manifest"])
             checks = [("hard_stop", actual["hard_stops"][0]["code"] if actual["hard_stops"] else None, expected.get("hard_stop")), ("review_depth", actual["review_depth"], expected.get("review_depth", actual["review_depth"]))]

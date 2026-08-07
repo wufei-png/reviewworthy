@@ -6,6 +6,7 @@
     {"path": "basis.kind", "value": "signal"}
   ],
   "assert": {
-    "blocker": "issue_required"
+    "result": "blocked",
+    "blocker_codes": ["issue_reference_required", "issue_required", "missing_signal_record"]
   }
 }

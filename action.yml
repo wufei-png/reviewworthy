@@ -8,6 +8,22 @@ inputs:
   changed-files:
     description: Newline-separated changed files; on pull_request events the action derives them from the event SHAs when omitted
     required: false
+  mode:
+    description: report (default, non-blocking unknowns) or enforce (require a packet, current diff, and known evidence)
+    required: false
+    default: report
+  require-packet:
+    description: Fail when the Contribution Packet is missing
+    required: false
+    default: 'false'
+  fail-on-unknown:
+    description: Turn unknown policy or evidence into a failure
+    required: false
+    default: 'false'
+  require-current-diff:
+    description: Require changed files derived from the current event or supplied input
+    required: false
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -17,6 +33,10 @@ runs:
         PYTHONPATH: ${{ github.action_path }}/src
         REVIEWWORTHY_PACKET: ${{ inputs.packet }}
         REVIEWWORTHY_CHANGED_FILES: ${{ inputs.changed-files }}
+        REVIEWWORTHY_MODE: ${{ inputs.mode }}
+        REVIEWWORTHY_REQUIRE_PACKET: ${{ inputs.require-packet }}
+        REVIEWWORTHY_FAIL_ON_UNKNOWN: ${{ inputs.fail-on-unknown }}
+        REVIEWWORTHY_REQUIRE_CURRENT_DIFF: ${{ inputs.require-current-diff }}
         REVIEWWORTHY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         REVIEWWORTHY_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
@@ -46,5 +66,23 @@ runs:
           args+=(--changed-files-provided)
         else
           args+=(--changed-files-unavailable)
+        fi
+        case "${REVIEWWORTHY_MODE:-report}" in
+          report|enforce)
+            args+=(--mode "${REVIEWWORTHY_MODE:-report}")
+            ;;
+          *)
+            echo "Reviewworthy: mode must be report or enforce." >&2
+            exit 2
+            ;;
+        esac
+        if [[ "${REVIEWWORTHY_REQUIRE_PACKET:-false}" == true ]]; then
+          args+=(--require-packet)
+        fi
+        if [[ "${REVIEWWORTHY_FAIL_ON_UNKNOWN:-false}" == true ]]; then
+          args+=(--fail-on-unknown)
+        fi
+        if [[ "${REVIEWWORTHY_REQUIRE_CURRENT_DIFF:-false}" == true ]]; then
+          args+=(--require-current-diff)
         fi
         python -m reviewworthy action check "$REVIEWWORTHY_PACKET" "${args[@]}"

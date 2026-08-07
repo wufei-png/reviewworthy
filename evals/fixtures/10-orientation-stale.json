@@ -6,6 +6,13 @@
     {"path": "basis.references", "value": ["https://github.com/example/project/issues/2"]}
   ],
   "assert": {
-    "blocker": "stale_orientation"
+    "result": "blocked",
+    "blocker_codes": [
+      "assessment_requires_current_orientation",
+      "issue_verification_required",
+      "material_snapshot_mismatch",
+      "stale_assessment",
+      "stale_orientation"
+    ]
   }
 }

@@ -6,6 +6,7 @@
     {"path": "basis.labels", "value": ["good first issue"]}
   ],
   "assert": {
-    "blocker": "good_first_issue_ai_disallowed"
+    "result": "blocked",
+    "blocker_codes": ["good_first_issue_ai_disallowed"]
   }
 }

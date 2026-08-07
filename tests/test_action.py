@@ -23,6 +23,11 @@ class ActionCheckTests(unittest.TestCase):
         self.assertIn("changed-file scope will be reported as unknown", content)
         self.assertIn("--changed-files-provided", content)
         self.assertIn("--changed-files-unavailable", content)
+        self.assertIn("mode:", content)
+        self.assertIn("require-packet:", content)
+        self.assertIn("fail-on-unknown:", content)
+        self.assertIn("require-current-diff:", content)
+        self.assertIn("mode must be report or enforce", content)
         self.assertNotIn("gh pr create", content)
         self.assertNotIn("gh issue create", content)
 
@@ -31,6 +36,63 @@ class ActionCheckTests(unittest.TestCase):
             result = check_packet(Path(directory) / "missing.json")
             self.assertEqual(result["conclusion"], "success")
             self.assertTrue(result["unknowns"])
+
+    def test_enforce_mode_requires_packet_and_current_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = check_packet(Path(directory) / "missing.json", mode="enforce")
+            self.assertEqual(missing["conclusion"], "failure")
+            self.assertIn("packet_required", {violation["code"] for violation in missing["violations"]})
+            self.assertEqual(missing["requirements"], {
+                "require_packet": True,
+                "fail_on_unknown": True,
+                "require_current_diff": True,
+            })
+
+            packet_path = Path(directory) / "packet.json"
+            packet_path.write_text(json.dumps(valid_packet()), encoding="utf-8")
+            enforced = check_packet(packet_path, mode="enforce")
+            self.assertEqual(enforced["conclusion"], "failure")
+            self.assertIn("current_diff_required", {violation["code"] for violation in enforced["violations"]})
+
+    def test_enforce_mode_can_pass_with_complete_policy_and_current_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet = valid_packet()
+            packet["policy"]["authoritative_claims"] = {
+                "ai_assistance": "allowed",
+                "issue_required": False,
+                "disclosure_required": False,
+                "disclosure_locations": [],
+                "disclosure_stages": [],
+                "human_pr_narrative_required": False,
+                "security_private_reporting": False,
+                "draft_pr_required": False,
+                "discovery_evidence_allowed": True,
+                "good_first_issue_ai_allowed": True,
+            }
+            snapshot = material_snapshot(packet)
+            packet["materials"]["material_snapshot"] = snapshot
+            packet["understanding"]["orientation"]["material_snapshot"] = snapshot
+            packet["understanding"]["assessment"]["material_snapshot"] = snapshot
+            packet_path = Path(directory) / "packet.json"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+
+            result = check_packet(packet_path, ["src/example.py"], mode="enforce")
+
+            self.assertEqual(result["conclusion"], "success")
+            self.assertEqual(result["violations"], [])
+            self.assertEqual(result["unknowns"], [])
+
+    def test_individual_enforcement_flags_apply_in_report_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet_path = Path(directory) / "packet.json"
+            packet_path.write_text(json.dumps(valid_packet()), encoding="utf-8")
+
+            result = check_packet(packet_path, fail_on_unknown=True, require_current_diff=True)
+
+            codes = {violation["code"] for violation in result["violations"]}
+            self.assertEqual(result["mode"], "report")
+            self.assertIn("current_diff_required", codes)
+            self.assertIn("unknown_policy", codes)
 
     def test_action_fails_deterministic_scope_violation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

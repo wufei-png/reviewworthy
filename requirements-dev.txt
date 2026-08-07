@@ -1,0 +1,2 @@
+# Test/CI-only dependency. The runtime package remains standard-library-only.
+jsonschema>=4.23,<5

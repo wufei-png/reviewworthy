@@ -1,0 +1,17 @@
+[ai]
+allowed = true
+disclosure_required = true
+disclosure_locations = ["pr_body"]
+disclosure_stages = ["implementation", "verification", "narrative"]
+
+[contribution]
+issue_required = true
+discovery_evidence_allowed = false
+good_first_issue_ai_allowed = true
+
+[pr]
+human_narrative_required = true
+draft_required = true
+
+[security]
+private_reporting_required = true
