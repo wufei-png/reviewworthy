@@ -16,6 +16,7 @@
         },
         "duplicate_search": {
           "checked": true,
+          "disposition": "exact_duplicate",
           "query": "input regression",
           "matches": [
             {"kind": "pull_request", "number": 17, "url": "https://github.com/example/project/pull/17"}

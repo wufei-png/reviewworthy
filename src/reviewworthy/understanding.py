@@ -8,13 +8,44 @@ from typing import Any
 
 UNDERSTANDING_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run"}
 ORIENTATION_TOPICS = {"contract", "diff", "verification", "policy"}
+RUBRIC_CATEGORIES = {"behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"}
+RUBRIC_BY_DEPTH = {
+    "standard": {"behavior", "invariant", "test"},
+    "heightened": {"behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"},
+}
 
 
 def _error(errors: list[dict[str, str]], code: str, message: str, path: str) -> None:
     errors.append({"code": code, "message": message, "path": path})
 
 
-def validate_understanding(understanding: Any, expected_snapshot: str) -> dict[str, Any]:
+def _validate_rubric(record: dict[str, Any], depth: str, path: str, status: str, errors: list[dict[str, str]]) -> None:
+    rubric = record.get("rubric")
+    if not isinstance(rubric, dict):
+        _error(errors, "invalid_understanding_rubric", "Understanding rubric must be an object", path)
+        return
+    covered = rubric.get("covered", [])
+    evidence = rubric.get("evidence", {})
+    if not isinstance(covered, list) or not all(isinstance(item, str) for item in covered):
+        _error(errors, "invalid_rubric_categories", "Rubric covered must be a list of category strings", f"{path}.covered")
+        covered = []
+    unknown = sorted(set(covered) - RUBRIC_CATEGORIES)
+    if unknown:
+        _error(errors, "unknown_rubric_category", f"Unsupported rubric category(s): {unknown}", f"{path}.covered")
+    if not isinstance(evidence, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in evidence.items()):
+        _error(errors, "invalid_rubric_evidence", "Rubric evidence must map category names to strings", f"{path}.evidence")
+        evidence = {}
+    if status == "passed":
+        required = RUBRIC_BY_DEPTH.get(depth, RUBRIC_BY_DEPTH["standard"])
+        missing = sorted(required - set(covered))
+        if missing:
+            _error(errors, "missing_rubric_categories", f"Understanding must cover rubric categories: {missing}", f"{path}.covered")
+        empty = sorted(category for category in required if not str(evidence.get(category, "")).strip())
+        if empty:
+            _error(errors, "missing_rubric_evidence", f"Understanding rubric needs evidence for: {empty}", f"{path}.evidence")
+
+
+def validate_understanding(understanding: Any, expected_snapshot: str, *, review_depth: str = "standard") -> dict[str, Any]:
     """Validate both understanding phases against the current material snapshot."""
 
     errors: list[dict[str, str]] = []
@@ -40,6 +71,7 @@ def validate_understanding(understanding: Any, expected_snapshot: str) -> dict[s
             _error(errors, "invalid_orientation_evidence", "Orientation evidence must be a list of strings", "understanding.orientation.evidence")
         if not isinstance(orientation.get("material_snapshot"), str) or not orientation["material_snapshot"].strip():
             _error(errors, "invalid_orientation_snapshot", "Orientation material_snapshot must be a non-empty string", "understanding.orientation.material_snapshot")
+        _validate_rubric(orientation, review_depth, "understanding.orientation.rubric", status, errors)
         if status == "passed":
             if not isinstance(orientation.get("summary"), str) or not orientation["summary"].strip():
                 _error(errors, "missing_orientation_summary", "A passed Orientation needs a non-empty summary", "understanding.orientation.summary")
@@ -70,6 +102,7 @@ def validate_understanding(understanding: Any, expected_snapshot: str) -> dict[s
             _error(errors, "invalid_assessment_evidence", "Assessment evidence must be a list of strings", "understanding.assessment.evidence")
         if not isinstance(assessment.get("material_snapshot"), str) or not assessment["material_snapshot"].strip():
             _error(errors, "invalid_assessment_snapshot", "Assessment material_snapshot must be a non-empty string", "understanding.assessment.material_snapshot")
+        _validate_rubric(assessment, review_depth, "understanding.assessment.rubric", status, errors)
         if status == "passed":
             if isinstance(answers, list) and any(not answer.strip() for answer in answers if isinstance(answer, str)):
                 _error(errors, "empty_assessment_answer", "A passed Assessment needs a human answer for every question", "understanding.assessment.answers")
@@ -94,6 +127,7 @@ def record_understanding(
     evidence: list[str] | None = None,
     questions: list[str] | None = None,
     answers: list[str] | None = None,
+    rubric: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Record one phase while preserving a prior phase's material binding."""
 
@@ -119,6 +153,7 @@ def record_understanding(
             "summary": summary,
             "topics": list(topics or []),
             "evidence": list(evidence or []),
+            "rubric": {"covered": sorted(rubric or {}), "evidence": dict(rubric or {})},
             "material_snapshot": material_snapshot,
         }
     else:
@@ -127,6 +162,7 @@ def record_understanding(
             "questions": list(questions or []),
             "answers": list(answers or []),
             "evidence": list(evidence or []),
+            "rubric": {"covered": sorted(rubric or {}), "evidence": dict(rubric or {})},
             "material_snapshot": material_snapshot,
         }
     return updated

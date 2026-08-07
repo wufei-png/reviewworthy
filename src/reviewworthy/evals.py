@@ -126,12 +126,28 @@ def _base_packet() -> dict[str, Any]:
             "status": "passed",
             "summary": "The contract and evidence were explained.",
             "topics": ["contract", "diff", "verification", "policy"],
+            "rubric": {
+                "covered": ["behavior", "invariant", "test"],
+                "evidence": {
+                    "behavior": "The boundary rejects the invalid input.",
+                    "invariant": "Existing callers retain their behavior.",
+                    "test": "The focused regression test exercises the boundary.",
+                },
+            },
             "evidence": ["Orientation covered the material snapshot."],
         },
         "assessment": {
             "status": "passed",
             "questions": ["What boundary protects the invariant?"],
             "answers": ["The existing input boundary validates before the old path runs."],
+            "rubric": {
+                "covered": ["behavior", "invariant", "test"],
+                "evidence": {
+                    "behavior": "The invalid input follows the guarded path.",
+                    "invariant": "The existing caller contract remains unchanged.",
+                    "test": "The regression command covers the changed path.",
+                },
+            },
             "evidence": ["The contributor answered a non-repeating question."],
         },
     }

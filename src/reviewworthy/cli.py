@@ -124,6 +124,7 @@ def _build_parser() -> argparse.ArgumentParser:
     understanding_record.add_argument("--evidence", action="append", default=[])
     understanding_record.add_argument("--question", action="append", default=[])
     understanding_record.add_argument("--answer", action="append", default=[])
+    understanding_record.add_argument("--rubric", action="append", default=[], help="Human evidence as category=text; repeat for each rubric category")
     _common_json(understanding_record)
 
     risk = commands.add_parser("risk", help="Assess deterministic review-depth signals")
@@ -449,10 +450,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "understanding":
             packet = _load_object(args.path)
             if args.understanding_command == "validate":
-                result = validate_understanding(packet.get("understanding"), material_snapshot(packet))
+                depth = packet.get("review", {}).get("depth", "standard") if isinstance(packet.get("review"), dict) else "standard"
+                result = validate_understanding(packet.get("understanding"), material_snapshot(packet), review_depth=depth)
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
             snapshot = material_snapshot(packet)
+            rubric: dict[str, str] = {}
+            for item in args.rubric:
+                if "=" not in item:
+                    raise ValueError("--rubric values must use category=text")
+                category, evidence = item.split("=", 1)
+                if not category.strip() or not evidence.strip():
+                    raise ValueError("--rubric values need a non-empty category and evidence")
+                rubric[category.strip()] = evidence.strip()
             updated = record_understanding(
                 packet,
                 args.phase,
@@ -463,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
                 evidence=args.evidence,
                 questions=args.question,
                 answers=args.answer,
+                rubric=rubric,
             )
             results = updated.get("results", [])
             for result_record in results if isinstance(results, list) else []:
@@ -473,7 +484,8 @@ def main(argv: list[str] | None = None) -> int:
                     result_record["evidence"] = list(args.evidence) or [f"{args.phase}:{args.status}"]
                     result_record.setdefault("details", {})["phase"] = args.phase
             _replace_json(args.path, updated)
-            result = validate_understanding(updated.get("understanding"), material_snapshot(updated))
+            depth = updated.get("review", {}).get("depth", "standard") if isinstance(updated.get("review"), dict) else "standard"
+            result = validate_understanding(updated.get("understanding"), material_snapshot(updated), review_depth=depth)
             result["updated"] = str(args.path)
             _print(result, args.as_json)
             return 0 if result["valid"] else 1

@@ -8,8 +8,36 @@
     "brief_version": { "const": "0.1" },
     "generated_by": { "const": "reviewworthy" },
     "status": { "const": "source-manifest-only" },
-    "repository": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "minLength": 1 } }, "additionalProperties": true },
+    "repository": {
+      "type": "object",
+      "required": ["provider", "host", "owner", "name", "repository_id", "default_branch", "base_sha"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "host": { "type": "string" },
+        "owner": { "type": "string" },
+        "name": { "type": "string", "minLength": 1 },
+        "repository_id": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
+        "default_branch": { "type": "string", "minLength": 1 },
+        "base_sha": { "type": "string" },
+        "remote": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
     "focus": { "type": "array", "items": { "type": "string" } },
+    "focus_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind", "sha256", "bytes"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^(?!/).+" },
+          "kind": { "const": "focus" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    },
     "sources": {
       "type": "array",
       "items": {

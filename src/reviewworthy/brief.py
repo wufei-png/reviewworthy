@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import subprocess
 from typing import Any
+from urllib.parse import urlparse
 
 from .policy import inspect_policy
+from .repository import parse_repository_slug
 from .util import relative_path, sha256_json
 
 
@@ -105,10 +108,80 @@ def _entrypoint_hints(root: Path, tooling: list[Path], test_paths: list[Path]) -
     return sorted(set(hints))
 
 
+def _git_output(root: Path, args: list[str]) -> str:
+    try:
+        completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+    except OSError:
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def _remote_repository(remote: str) -> tuple[str, str, str] | None:
+    value = remote.strip()
+    if value.startswith("git@github.com:"):
+        slug = value.removeprefix("git@github.com:")
+        host = "github.com"
+    else:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"https", "ssh", "git"} or parsed.hostname != "github.com":
+            return None
+        slug = parsed.path.lstrip("/")
+        host = "github.com"
+    slug = slug.removesuffix(".git").strip("/")
+    try:
+        owner, name = parse_repository_slug(slug)
+    except ValueError:
+        return None
+    return "github", host, f"{owner}/{name}"
+
+
+def _repository_facts(root: Path) -> dict[str, Any]:
+    remote = _git_output(root, ["config", "--get", "remote.origin.url"])
+    parsed = _remote_repository(remote) if remote else None
+    current_branch = _git_output(root, ["branch", "--show-current"])
+    upstream_head = _git_output(root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+    default_branch = upstream_head.rsplit("/", 1)[-1] if upstream_head else current_branch or "main"
+    base_sha = _git_output(root, ["rev-parse", "refs/remotes/origin/HEAD"]) or _git_output(root, ["rev-parse", "HEAD"])
+    if parsed:
+        provider, host, slug = parsed
+        owner, name = slug.split("/", 1)
+    else:
+        provider, host, owner, name = "unknown", "", "", root.name
+    return {
+        "provider": provider,
+        "host": host,
+        "owner": owner,
+        "name": name,
+        "repository_id": None,
+        "default_branch": default_branch,
+        "base_sha": base_sha,
+        "remote": remote,
+    }
+
+
+def _focus_file_records(root: Path, focus: list[str]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for value in focus:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("brief focus entries must be non-empty repository-relative file paths")
+        path = (root / value).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"brief focus path escapes the repository: {value}") from exc
+        if not path.is_file():
+            raise ValueError(f"brief focus path is not a file: {value}")
+        records.append(_file_record(path, root, "focus"))
+    return records
+
+
 def build_project_brief(root: Path, focus: list[str] | None = None) -> dict[str, Any]:
     """Collect repository facts without inventing architecture or project intent."""
 
     root = root.resolve()
+    focus_values = list(focus or [])
     policy = inspect_policy(root)
     tooling, test_paths = _tooling_and_test_paths(root)
     source_paths: dict[str, tuple[Path, str]] = {}
@@ -129,12 +202,14 @@ def build_project_brief(root: Path, focus: list[str] | None = None) -> dict[str,
     ]
     tooling_records = [relative_path(path, root) for path in tooling]
     test_records = [relative_path(path, root) for path in test_paths]
+    focus_files = _focus_file_records(root, focus_values)
     brief: dict[str, Any] = {
         "brief_version": BRIEF_VERSION,
         "generated_by": "reviewworthy",
         "status": "source-manifest-only",
-        "repository": {"name": root.name},
-        "focus": list(focus or []),
+        "repository": _repository_facts(root),
+        "focus": focus_values,
+        "focus_files": focus_files,
         "sources": sources,
         "tooling": {
             "files": tooling_records,
@@ -157,7 +232,13 @@ def build_project_brief(root: Path, focus: list[str] | None = None) -> dict[str,
         },
     }
     brief["source_manifest_sha256"] = sha256_json(
-        {"sources": brief["sources"], "tooling": brief["tooling"], "policy": brief["policy"]}
+        {
+            "repository": brief["repository"],
+            "focus_files": brief["focus_files"],
+            "sources": brief["sources"],
+            "tooling": brief["tooling"],
+            "policy": brief["policy"],
+        }
     )
     return brief
 
@@ -176,6 +257,31 @@ def validate_project_brief(brief: dict[str, Any], root: Path | None = None) -> d
         error("invalid_status", "The deterministic brief must remain source-manifest-only", "status")
     if not isinstance(brief.get("repository"), dict) or not str(brief["repository"].get("name", "")).strip():
         error("missing_repository", "repository.name is required", "repository.name")
+    else:
+        repository = brief["repository"]
+        if repository.get("provider") == "github":
+            for key in ("host", "owner", "name", "default_branch"):
+                if not isinstance(repository.get(key), str) or not repository[key].strip():
+                    error("invalid_repository_identity", f"repository.{key} is required for a GitHub brief", f"repository.{key}")
+        if not isinstance(repository.get("base_sha"), str):
+            error("invalid_repository_base", "repository.base_sha must be a string", "repository.base_sha")
+    focus = brief.get("focus", [])
+    if not isinstance(focus, list) or not all(isinstance(item, str) and item.strip() for item in focus):
+        error("invalid_focus", "focus must be a list of non-empty paths", "focus")
+    focus_files = brief.get("focus_files")
+    if not isinstance(focus_files, list):
+        error("invalid_focus_files", "focus_files must be a list", "focus_files")
+        focus_files = []
+    else:
+        for index, record in enumerate(focus_files):
+            if not isinstance(record, dict):
+                error("invalid_focus_file", "Each focus_files entry must be an object", f"focus_files[{index}]")
+                continue
+            for key in ("path", "kind", "sha256", "bytes"):
+                if key not in record:
+                    error("missing_focus_file_field", f"Focus file field is required: {key}", f"focus_files[{index}].{key}")
+            if str(record.get("path", "")).startswith("/"):
+                error("absolute_focus_file", "Focus file paths must be repository-relative", f"focus_files[{index}].path")
     sources = brief.get("sources")
     if not isinstance(sources, list):
         error("invalid_sources", "sources must be a list", "sources")
@@ -214,14 +320,24 @@ def validate_project_brief(brief: dict[str, Any], root: Path | None = None) -> d
             if not isinstance(policy.get(key), list):
                 error("invalid_policy_field", f"policy.{key} must be a list", f"policy.{key}")
     expected_manifest = sha256_json(
-        {"sources": brief.get("sources", []), "tooling": brief.get("tooling", {}), "policy": brief.get("policy", {})}
+        {
+            "repository": brief.get("repository", {}),
+            "focus_files": brief.get("focus_files", []),
+            "sources": brief.get("sources", []),
+            "tooling": brief.get("tooling", {}),
+            "policy": brief.get("policy", {}),
+        }
     )
     if brief.get("source_manifest_sha256") != expected_manifest:
         error("manifest_hash_mismatch", "source_manifest_sha256 does not match deterministic facts", "source_manifest_sha256")
     if root is not None:
-        current = build_project_brief(root, brief.get("focus", []))
-        if current["source_manifest_sha256"] != brief.get("source_manifest_sha256"):
-            error("stale_source_manifest", "The brief does not match the current repository source manifest", "source_manifest_sha256")
+        try:
+            current = build_project_brief(root, brief.get("focus", []))
+        except ValueError as exc:
+            error("invalid_focus_file", str(exc), "focus")
+        else:
+            if current["source_manifest_sha256"] != brief.get("source_manifest_sha256"):
+                error("stale_source_manifest", "The brief does not match the current repository source manifest", "source_manifest_sha256")
     return {"valid": not errors, "errors": errors}
 
 
@@ -229,7 +345,8 @@ def render_project_brief(brief: dict[str, Any]) -> str:
     validation = validate_project_brief(brief)
     if not validation["valid"]:
         raise ValueError(f"Cannot render invalid project brief: {validation['errors']}")
-    repository = brief["repository"]["name"]
+    repository_record = brief["repository"]
+    repository = "/".join(filter(None, (repository_record.get("owner"), repository_record.get("name")))) or repository_record["name"]
     tooling = brief["tooling"]
     policy = brief["policy"]
     lines = [
@@ -240,6 +357,7 @@ def render_project_brief(brief: dict[str, Any]) -> str:
         "## Repository facts",
         "",
         f"- Repository: `{repository}`",
+        f"- Base SHA: `{repository_record.get('base_sha') or 'unknown'}`",
         f"- Brief version: `{brief['brief_version']}`",
         f"- Source manifest: `{brief['source_manifest_sha256']}`",
         f"- Policy posture: `{policy['posture']}`",
@@ -252,6 +370,11 @@ def render_project_brief(brief: dict[str, Any]) -> str:
     ]
     for source in brief["sources"]:
         lines.append(f"| `{source['path']}` | {source['kind']} | `{source['sha256']}` | {source['bytes']} |")
+    lines.extend(["", "## Explicit focus files", ""])
+    if brief.get("focus_files"):
+        lines.extend(f"- `{record['path']}` — `{record['sha256']}`" for record in brief["focus_files"])
+    else:
+        lines.append("- none recorded")
     lines.extend(["", "## Tooling and test entrypoints", ""])
     lines.append("- Tooling files: " + (", ".join(f"`{value}`" for value in tooling["files"]) or "none recorded"))
     lines.append("- Test paths: " + (", ".join(f"`{value}`" for value in tooling["test_paths"]) or "none recorded"))

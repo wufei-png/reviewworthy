@@ -40,7 +40,7 @@ class ArtifactTests(unittest.TestCase):
             "id": "candidate-001",
             "title": "Existing work",
             "basis": {"kind": "issue", "references": ["https://example/1"]},
-            "duplicate_search": {"checked": True, "matches": [{"number": 1}]},
+            "duplicate_search": {"checked": True, "matches": [{"number": 1}], "disposition": "exact_duplicate"},
             "value": {"summary": "Already covered"},
             "scope": {"files": ["src/example.py"]},
             "review_cost": "small",
@@ -61,7 +61,7 @@ class ArtifactTests(unittest.TestCase):
             "id": "candidate-002",
             "title": "Module work",
             "basis": {"kind": "signal", "references": ["https://example/2"]},
-            "duplicate_search": {"checked": True, "matches": []},
+            "duplicate_search": {"checked": True, "matches": [], "disposition": "not_duplicate"},
             "value": {"summary": "A bounded module improvement"},
             "scope": {"modules": ["input boundary"]},
             "review_cost": "small",
@@ -80,7 +80,7 @@ class ArtifactTests(unittest.TestCase):
             "id": "candidate-003",
             "title": "Narrow fix",
             "basis": {"kind": "issue", "references": ["https://github.com/example/project/issues/3"], "evidence": []},
-            "duplicate_search": {"checked": True, "matches": []},
+            "duplicate_search": {"checked": True, "matches": [], "disposition": "not_duplicate"},
             "value": {"summary": "Fixes a reported regression"},
             "scope": {"files": ["src/example.py"]},
             "review_cost": "small",
@@ -102,7 +102,7 @@ class ArtifactTests(unittest.TestCase):
             "id": "candidate-004",
             "title": "Signal-backed work",
             "basis": {"kind": "signal", "references": ["https://github.com/example/project/issues/4"], "evidence": []},
-            "duplicate_search": {"checked": True, "matches": []},
+            "duplicate_search": {"checked": True, "matches": [], "disposition": "not_duplicate"},
             "value": {"summary": "A requested change"},
             "scope": {"files": ["src/example.py"]},
             "review_cost": "small",
@@ -132,7 +132,7 @@ class ArtifactTests(unittest.TestCase):
                     "published": True,
                 },
             },
-            "duplicate_search": {"checked": True, "matches": []},
+            "duplicate_search": {"checked": True, "matches": [], "disposition": "not_duplicate"},
             "value": {"summary": "No longer wanted"},
             "scope": {"files": ["src/example.py"]},
             "review_cost": "small",
@@ -249,6 +249,35 @@ class ArtifactTests(unittest.TestCase):
 
             self.assertIn("stale_source_manifest", {error["code"] for error in result["errors"]})
 
+    def test_brief_records_explicit_focus_file_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            focus = root / "src"
+            focus.mkdir()
+            target = focus / "input.py"
+            target.write_text("return 1\n", encoding="utf-8")
+
+            brief = build_project_brief(root, ["src/input.py"])
+
+            self.assertEqual(brief["focus_files"][0]["path"], "src/input.py")
+            self.assertEqual(brief["focus_files"][0]["kind"], "focus")
+            self.assertTrue(validate_project_brief(brief, root)["valid"])
+            target.write_text("return 2\n", encoding="utf-8")
+            self.assertIn("stale_source_manifest", {error["code"] for error in validate_project_brief(brief, root)["errors"]})
+
+    def test_brief_validate_reports_deleted_focus_file_as_structured_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "README.md"
+            target.write_text("focus\n", encoding="utf-8")
+            brief = build_project_brief(root, ["README.md"])
+            target.unlink()
+
+            result = validate_project_brief(brief, root)
+
+            self.assertFalse(result["valid"])
+            self.assertIn("invalid_focus_file", {error["code"] for error in result["errors"]})
+
     def test_understanding_requires_orientation_topics_and_material_binding(self) -> None:
         understanding = {
             "orientation": {
@@ -256,6 +285,7 @@ class ArtifactTests(unittest.TestCase):
                 "summary": "Explained the change.",
                 "topics": ["contract"],
                 "evidence": [],
+                "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
                 "material_snapshot": "snapshot-1",
             },
             "assessment": {
@@ -263,6 +293,7 @@ class ArtifactTests(unittest.TestCase):
                 "questions": ["What changed?"],
                 "answers": ["The boundary changed."],
                 "evidence": [],
+                "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
                 "material_snapshot": "snapshot-1",
             },
         }
@@ -273,6 +304,46 @@ class ArtifactTests(unittest.TestCase):
         self.assertIn("missing_orientation_topics", codes)
         self.assertIn("stale_orientation", codes)
         self.assertIn("stale_assessment", codes)
+
+    def test_understanding_heightened_depth_requires_failure_and_tradeoff_categories(self) -> None:
+        understanding = {
+            "orientation": {
+                "status": "passed", "summary": "Explained.", "topics": ["contract", "diff", "verification", "policy"], "evidence": [],
+                "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
+                "material_snapshot": "snapshot-1",
+            },
+            "assessment": {
+                "status": "passed", "questions": ["What fails?"], "answers": ["The invalid input is rejected."], "evidence": [],
+                "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
+                "material_snapshot": "snapshot-1",
+            },
+        }
+
+        result = validate_understanding(understanding, "snapshot-1", review_depth="heightened")
+
+        self.assertIn("missing_rubric_categories", {error["code"] for error in result["errors"]})
+
+    def test_candidate_dispositions_allow_investigation_but_block_exact_implementation(self) -> None:
+        menu = skeleton_menu("example/project")
+        menu["candidates"] = [{
+            "id": "candidate-potential",
+            "title": "Potentially overlapping fix",
+            "basis": {"kind": "issue", "references": ["https://github.com/example/project/issues/9"], "evidence": []},
+            "duplicate_search": {"checked": True, "matches": [{"number": 2}], "disposition": "potential_duplicate"},
+            "value": {"summary": "Needs investigation"},
+            "scope": {"files": ["src/example.py"]},
+            "review_cost": "medium",
+            "verifiability": "high",
+            "risk": [],
+            "recommendation": "seek_maintainer_signal",
+        }]
+        selected = select_candidate(menu, "candidate-potential", confirmed=True)
+
+        bound = bind_candidate(selected, valid_packet(), "candidate-potential")
+
+        self.assertEqual(bound["candidate_selection"]["duplicate_disposition"], "potential_duplicate")
+        with self.assertRaises(ValueError):
+            select_candidate({**menu, "candidates": [{**menu["candidates"][0], "recommendation": "plan_directly"}]}, "candidate-potential", confirmed=True)
 
     def test_passed_assessment_requires_passed_orientation(self) -> None:
         understanding = {

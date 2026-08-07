@@ -3,16 +3,34 @@
   "$id": "https://reviewworthy.dev/schemas/understanding.schema.json",
   "title": "Reviewworthy material-bound understanding gate",
   "type": "object",
+  "$defs": {
+    "rubric": {
+      "type": "object",
+      "required": ["covered", "evidence"],
+      "properties": {
+        "covered": {
+          "type": "array",
+          "items": { "enum": ["behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"] }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
   "required": ["orientation", "assessment"],
   "properties": {
     "orientation": {
       "type": "object",
-      "required": ["status", "summary", "topics", "evidence", "material_snapshot"],
+      "required": ["status", "summary", "topics", "evidence", "rubric", "material_snapshot"],
       "properties": {
         "status": { "enum": ["passed", "failed", "blocked", "unknown", "not_run"] },
         "summary": { "type": "string" },
         "topics": { "type": "array", "items": { "type": "string" } },
         "evidence": { "type": "array", "items": { "type": "string" } },
+        "rubric": { "$ref": "#/$defs/rubric" },
         "material_snapshot": { "type": "string", "minLength": 1 }
       },
       "allOf": [
@@ -39,12 +57,13 @@
     "assessment": {
       "description": "The deterministic CLI additionally requires questions and answers to have equal cardinality.",
       "type": "object",
-      "required": ["status", "questions", "answers", "evidence", "material_snapshot"],
+      "required": ["status", "questions", "answers", "evidence", "rubric", "material_snapshot"],
       "properties": {
         "status": { "enum": ["passed", "failed", "blocked", "unknown", "not_run"] },
         "questions": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "\\S" } },
         "answers": { "type": "array", "items": { "type": "string" } },
         "evidence": { "type": "array", "items": { "type": "string" } },
+        "rubric": { "$ref": "#/$defs/rubric" },
         "material_snapshot": { "type": "string", "minLength": 1 }
       },
       "allOf": [

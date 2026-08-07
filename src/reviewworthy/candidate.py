@@ -13,6 +13,8 @@ MENU_VERSION = "0.1"
 REVIEW_COSTS = {"small", "medium", "large", "unknown"}
 VERIFIABILITY = {"high", "medium", "low", "unknown"}
 RECOMMENDATIONS = {"plan_directly", "seek_maintainer_signal", "issue_only", "do_not_contribute"}
+DUPLICATE_DISPOSITIONS = {"exact_duplicate", "potential_duplicate", "related", "not_duplicate", "stale", "superseded"}
+DUPLICATE_BLOCKING_DISPOSITIONS = {"exact_duplicate", "potential_duplicate"}
 
 
 def skeleton_menu(repository: str) -> dict[str, Any]:
@@ -102,9 +104,18 @@ def validate_candidate_menu(menu: dict[str, Any]) -> dict[str, Any]:
             _error(errors, "duplicate_search_missing", "Duplicate-work evidence must be explicitly checked", f"{path}.duplicate_search")
         elif not isinstance(duplicate_search.get("matches"), list):
             _error(errors, "invalid_duplicate_matches", "duplicate_search.matches must be a list", f"{path}.duplicate_search.matches")
-        elif duplicate_search.get("matches"):
-            if candidate.get("recommendation") != "do_not_contribute":
-                _error(errors, "duplicate_work_recommendation_mismatch", "A candidate with duplicate matches cannot recommend direct contribution", f"{path}.recommendation")
+        else:
+            disposition = duplicate_search.get("disposition")
+            if disposition not in DUPLICATE_DISPOSITIONS:
+                _error(errors, "invalid_duplicate_disposition", f"duplicate_search.disposition must be one of {sorted(DUPLICATE_DISPOSITIONS)}", f"{path}.duplicate_search.disposition")
+            if disposition == "superseded" and not isinstance(duplicate_search.get("superseded_by"), str):
+                _error(errors, "missing_superseded_by", "A superseded candidate must record superseded_by", f"{path}.duplicate_search.superseded_by")
+            elif disposition == "superseded" and not duplicate_search.get("superseded_by", "").strip():
+                _error(errors, "missing_superseded_by", "A superseded candidate must record superseded_by", f"{path}.duplicate_search.superseded_by")
+            if disposition == "exact_duplicate" and candidate.get("recommendation") != "do_not_contribute":
+                _error(errors, "duplicate_work_recommendation_mismatch", "An exact duplicate must not recommend contribution", f"{path}.recommendation")
+            if disposition == "potential_duplicate" and candidate.get("recommendation") == "plan_directly":
+                _error(errors, "potential_duplicate_needs_review", "A potential duplicate cannot recommend direct implementation before investigation", f"{path}.recommendation")
         if not isinstance(candidate.get("risk"), list):
             _error(errors, "invalid_risk", "risk must be a list", f"{path}.risk")
         elif not all(isinstance(item, str) for item in candidate["risk"]):
@@ -197,6 +208,7 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
         "repository": menu_repository,
         "menu_snapshot": sha256_json(menu),
         "recommendation": candidate.get("recommendation"),
+        "duplicate_disposition": candidate.get("duplicate_search", {}).get("disposition"),
         "confirmed": True,
     }
     return bound
@@ -213,8 +225,8 @@ def render_candidate_menu(menu: dict[str, Any]) -> str:
         f"- Project brief: `{menu.get('project_brief') or 'not linked'}`",
         "- Ranking rule: evidence and maintainer review cost; no single confidence score.",
         "",
-        "| ID | Candidate | Basis | Duplicate evidence | Value | Scope | Review cost | Verifiability | Risk | Recommendation |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| ID | Candidate | Basis | Duplicate evidence | Disposition | Value | Scope | Review cost | Verifiability | Risk | Recommendation |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for candidate in menu["candidates"]:
         basis = candidate["basis"]
@@ -224,11 +236,12 @@ def render_candidate_menu(menu: dict[str, Any]) -> str:
         matches = duplicate.get("matches") or []
         duplicate_text = f"checked ({len(matches)} match(es))"
         lines.append(
-            "| {id} | {title} | {basis} | {duplicate} | {value} | {scope} | {cost} | {verify} | {risk} | {recommendation} |".format(
+            "| {id} | {title} | {basis} | {duplicate} | {disposition} | {value} | {scope} | {cost} | {verify} | {risk} | {recommendation} |".format(
                 id=candidate["id"],
                 title=candidate["title"].replace("|", "\\|"),
                 basis=basis.get("kind", "unknown"),
                 duplicate=duplicate_text,
+                disposition=duplicate.get("disposition", "unknown"),
                 value=str(value.get("summary", "")).replace("|", "\\|"),
                 scope=", ".join(
                     [f"file:{item}" for item in scope.get("files", [])]

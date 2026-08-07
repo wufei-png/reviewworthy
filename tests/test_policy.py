@@ -114,3 +114,32 @@ class PolicyInspectionTests(unittest.TestCase):
             self.assertIsNone(result["authoritative_claims"]["ai_assistance"])
             self.assertIn("ai_assistance", result["unknown_claims"])
             self.assertEqual(result["posture"], "conservative")
+
+    def test_claim_records_preserve_state_and_source_line_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("Line one.\nAI assistance is prohibited for contributions.\n", encoding="utf-8")
+
+            result = inspect_policy(root)
+            record = result["claim_records"]["ai_assistance"]
+
+            self.assertEqual(record["state"], "false")
+            self.assertEqual(record["value"], "prohibited")
+            self.assertTrue(record["provenance"])
+            self.assertEqual(record["provenance"][0]["line_start"], 2)
+            self.assertEqual(len(record["provenance"][0]["excerpt_sha256"]), 64)
+
+    def test_structured_policy_provenance_fills_silence_without_becoming_opaque_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("A small project.\n", encoding="utf-8")
+            config_dir = root / ".reviewworthy"
+            config_dir.mkdir()
+            (config_dir / "policy.toml").write_text("[contribution]\nissue_required = true\n", encoding="utf-8")
+
+            result = inspect_policy(root)
+            record = result["claim_records"]["issue_required"]
+
+            self.assertEqual(record["state"], "true")
+            self.assertEqual(record["value"], True)
+            self.assertEqual(record["provenance"][0]["source"], ".reviewworthy/policy.toml")

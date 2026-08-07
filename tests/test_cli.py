@@ -167,7 +167,7 @@ class CliBoundaryTests(unittest.TestCase):
                     "id": "candidate-001",
                     "title": "Narrow fix",
                     "basis": {"kind": "issue", "references": ["https://github.com/example/project/issues/1"], "evidence": []},
-                    "duplicate_search": {"checked": True, "matches": []},
+                    "duplicate_search": {"checked": True, "matches": [], "disposition": "not_duplicate"},
                     "value": {"summary": "Fixes a regression"},
                     "scope": {"files": ["src/example.py"]},
                     "review_cost": "small",
@@ -185,11 +185,17 @@ class CliBoundaryTests(unittest.TestCase):
                 orientation_code = main([
                     "understanding", "record", str(packet_path), "--phase", "orientation", "--status", "passed",
                     "--summary", "Explained the material.", "--topic", "contract", "--topic", "diff",
-                    "--topic", "verification", "--topic", "policy", "--json",
+                    "--topic", "verification", "--topic", "policy",
+                    "--rubric", "behavior=The changed behavior is bounded.",
+                    "--rubric", "invariant=The existing invariant remains.",
+                    "--rubric", "test=The focused test covers the path.", "--json",
                 ])
                 assessment_code = main([
                     "understanding", "record", str(packet_path), "--phase", "assessment", "--status", "passed",
-                    "--question", "What changed?", "--answer", "The selected boundary changed.", "--json",
+                    "--question", "What changed?", "--answer", "The selected boundary changed.",
+                    "--rubric", "behavior=The changed behavior is bounded.",
+                    "--rubric", "invariant=The existing invariant remains.",
+                    "--rubric", "test=The focused test covers the path.", "--json",
                 ])
                 validate_code = main(["understanding", "validate", str(packet_path), "--json"])
 

@@ -12,6 +12,22 @@ class PacketValidationTests(unittest.TestCase):
         result = validate_packet(valid_packet())
         self.assertTrue(result["valid"], result["errors"])
 
+    def test_unresolved_candidate_duplicate_disposition_blocks_readiness(self) -> None:
+        packet = valid_packet()
+        packet["candidate_selection"] = {
+            "candidate_id": "candidate-potential",
+            "repository": "example/project",
+            "menu_snapshot": "menu-sha",
+            "recommendation": "seek_maintainer_signal",
+            "duplicate_disposition": "potential_duplicate",
+            "confirmed": True,
+        }
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        self.assertIn("duplicate_work_unresolved", {blocker["code"] for blocker in readiness_blockers(packet)})
+
     def test_material_change_invalidates_assessment(self) -> None:
         packet = valid_packet()
         packet["diff"]["additions"] = 99

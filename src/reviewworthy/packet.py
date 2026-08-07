@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
 from .repository import parse_public_record, parse_repository_slug, validate_repository_identity
@@ -31,6 +32,7 @@ def material_snapshot(packet: dict[str, Any]) -> str:
         {
             "entry": packet.get("entry", {}),
             "basis": packet.get("basis", {}),
+            "candidate_selection": packet.get("candidate_selection", {}),
             "contract": packet.get("contract", {}),
             "diff": packet.get("diff", {}),
             "verification": packet.get("verification", {}),
@@ -109,8 +111,8 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
         "materials": {},
         "results": [result_record(node, "not_run") for node in REQUIRED_NODES],
         "understanding": {
-            "orientation": {"status": "not_run", "summary": "", "topics": [], "evidence": [], "material_snapshot": ""},
-            "assessment": {"status": "not_run", "questions": [], "answers": [], "evidence": [], "material_snapshot": ""},
+            "orientation": {"status": "not_run", "summary": "", "topics": [], "evidence": [], "rubric": {"covered": [], "evidence": {}}, "material_snapshot": ""},
+            "assessment": {"status": "not_run", "questions": [], "answers": [], "evidence": [], "rubric": {"covered": [], "evidence": {}}, "material_snapshot": ""},
         },
         "narrative": {
             "title": "",
@@ -345,7 +347,8 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
                 _error(errors, "missing_result_record", f"Every flow node needs a result record: {node}", "results")
 
     understanding = packet.get("understanding", {})
-    for error in validate_understanding(understanding, material_snapshot(packet))["errors"]:
+    review_depth = review.get("depth") if isinstance(review, dict) else "standard"
+    for error in validate_understanding(understanding, material_snapshot(packet), review_depth=review_depth)["errors"]:
         _error(errors, error["code"], error["message"], error["path"])
 
     narrative = packet.get("narrative", {})
@@ -360,6 +363,15 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
             _error(errors, "narrative_not_confirmed", "Final PR title and Body must be previewed and confirmed", "narrative.final_preview_confirmed")
         if (narrative.get("human_expression_required") or (isinstance(review, dict) and review.get("depth") == "heightened")) and not str(narrative.get("human_expression", "")).strip():
             _error(errors, "missing_human_expression", "This contribution requires human-authored motivation/trade-offs/risk", "narrative.human_expression")
+
+    candidate_selection = packet.get("candidate_selection")
+    if candidate_selection is not None:
+        if not isinstance(candidate_selection, dict):
+            _error(errors, "invalid_candidate_selection", "candidate_selection must be an object", "candidate_selection")
+        else:
+            disposition = candidate_selection.get("duplicate_disposition")
+            if disposition not in DUPLICATE_DISPOSITIONS:
+                _error(errors, "invalid_duplicate_disposition", "candidate_selection.duplicate_disposition is required", "candidate_selection.duplicate_disposition")
 
     return {"valid": not errors, "errors": errors, "result_nodes": sorted(result_by_node)}
 
@@ -493,6 +505,7 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
     """Return only deterministic violations from known policy claims."""
 
     policy = packet.get("policy", {})
+
     if not isinstance(policy, dict):
         return []
     violations: list[dict[str, str]] = []
@@ -554,6 +567,16 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
             blockers.append({"code": "hard_stop", "message": str(stop), "path": "review.hard_stops"})
 
     policy = packet.get("policy", {})
+
+    candidate_selection = packet.get("candidate_selection")
+    if isinstance(candidate_selection, dict) and candidate_selection.get("duplicate_disposition") in DUPLICATE_BLOCKING_DISPOSITIONS:
+        blockers.append(
+            {
+                "code": "duplicate_work_unresolved",
+                "message": f"Candidate duplicate disposition {candidate_selection['duplicate_disposition']} blocks implementation until resolved.",
+                "path": "candidate_selection.duplicate_disposition",
+            }
+        )
 
     for result in packet.get("results", []) if isinstance(packet.get("results", []), list) else []:
         if isinstance(result, dict) and result.get("status") != "passed":

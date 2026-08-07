@@ -13,3 +13,5 @@ The Skill renders the JSON with `reviewworthy brief render` and fills the human 
 The brief is evidence for Orientation, not a replacement for the contributor explaining the selected change. Capture the implementation Diff with `reviewworthy diff capture` and test evidence with `reviewworthy verify run`; the resulting SHAs bind the evidence to one commit. A material change to the contract, Diff, verification evidence, or policy invalidates the packet's later Assessment as defined by `references/understanding-gate.md`.
 
 `brief validate path.json` checks the artifact structure and embedded hash. Use `brief validate path.json --root .` when freshness against the current repository must also be established.
+
+Phase 2 adds repository identity, base-SHA binding, and explicit focus-file hashes to newly generated briefs. Earlier package-phase artifacts are intentionally fail-closed rather than silently upgraded: these facts cannot be reconstructed safely after the fact. Regenerate the brief and re-record the human-owned sections when a validator reports missing Phase 2 fields.

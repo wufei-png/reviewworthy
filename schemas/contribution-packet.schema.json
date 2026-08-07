@@ -126,6 +126,7 @@
         "repository": { "type": "string", "minLength": 1 },
         "menu_snapshot": { "type": "string", "minLength": 1 },
         "recommendation": { "type": "string" },
+        "duplicate_disposition": { "enum": ["exact_duplicate", "potential_duplicate", "related", "not_duplicate", "stale", "superseded"] },
         "confirmed": { "const": true }
       },
       "additionalProperties": true

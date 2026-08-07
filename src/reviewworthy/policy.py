@@ -8,6 +8,8 @@ contradiction.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
+import hashlib
 from pathlib import Path
 import re
 import tomllib
@@ -36,10 +38,41 @@ class PolicySource:
     kind: str
     claims: dict[str, Any]
     error: str | None = None
+    provenance: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-def _claim(claims: dict[str, list[dict[str, Any]]], key: str, value: Any, path: Path, root: Path) -> None:
-    claims.setdefault(key, []).append({"value": value, "source": relative_path(path, root)})
+_PROVENANCE_ANCHORS = {
+    "ai_assistance": ("ai", "artificial intelligence"),
+    "issue_required": ("issue", "bug report"),
+    "disclosure_required": ("disclos", "declare", "mention"),
+    "disclosure_locations": ("disclos", "declare", "mention"),
+    "disclosure_stages": ("disclos", "stage"),
+    "human_pr_narrative_required": ("pr", "pull request", "human", "own words"),
+    "security_private_reporting": ("security", "private"),
+    "draft_pr_required": ("draft", "work in progress"),
+    "discovery_evidence_allowed": ("discovery", "reproducible"),
+    "good_first_issue_ai_allowed": ("good-first-issue", "good first issue", "ai"),
+}
+
+
+def _provenance(path: Path, root: Path, text: str, key: str) -> dict[str, Any]:
+    lines = text.splitlines() or [""]
+    anchors = _PROVENANCE_ANCHORS.get(key, (key,))
+    line_number = next(
+        (index for index, line in enumerate(lines, 1) if any(anchor.lower() in line.lower() for anchor in anchors)),
+        1,
+    )
+    excerpt = lines[line_number - 1].strip()
+    return {
+        "source": relative_path(path, root),
+        "line_start": line_number,
+        "line_end": line_number,
+        "excerpt_sha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest(),
+    }
+
+
+def _claim(claims: dict[str, list[dict[str, Any]]], key: str, value: Any, path: Path, root: Path, text: str) -> None:
+    claims.setdefault(key, []).append({"value": value, **_provenance(path, root, text, key)})
 
 
 def _first_match(text: str, patterns: Iterable[str]) -> bool:
@@ -227,19 +260,22 @@ def inspect_policy(root: Path) -> dict[str, Any]:
         try:
             text = path.read_text(encoding="utf-8")
             claims = _claims_from_document(text, path, root)
-            document_sources.append(PolicySource(relative_path(path, root), "repository_document", claims))
+            provenance = {key: _provenance(path, root, text, key) for key in claims}
+            document_sources.append(PolicySource(relative_path(path, root), "repository_document", claims, provenance=provenance))
             for key, value in claims.items():
-                _claim(document_claims, key, value, path, root)
+                _claim(document_claims, key, value, path, root, text)
         except OSError as exc:
             document_sources.append(PolicySource(relative_path(path, root), "repository_document", {}, str(exc)))
 
     structured_path = root / ".reviewworthy" / "policy.toml"
     structured_claims: dict[str, Any] = {}
     structured_error: str | None = None
+    structured_provenance: dict[str, dict[str, Any]] = {}
     if structured_path.is_file():
         try:
-            with structured_path.open("rb") as handle:
-                structured_claims = _structured_claims(tomllib.load(handle))
+            structured_text = structured_path.read_text(encoding="utf-8")
+            structured_claims = _structured_claims(tomllib.loads(structured_text))
+            structured_provenance = {key: _provenance(structured_path, root, structured_text, key) for key in structured_claims}
         except (OSError, tomllib.TOMLDecodeError) as exc:
             structured_error = str(exc)
 
@@ -261,8 +297,16 @@ def inspect_policy(root: Path) -> dict[str, Any]:
 
     authoritative: dict[str, Any] = {}
     unknown: list[str] = []
+    claim_records: dict[str, dict[str, Any]] = {}
     for key in CLAIM_KEYS:
         values = {str(item["value"]): item["value"] for item in document_claims.get(key, [])}
+        conflicting_key = any(conflict.get("key") == key for conflict in conflicts)
+        provenance: list[dict[str, Any]] = [
+            {field: item[field] for field in ("source", "line_start", "line_end", "excerpt_sha256") if field in item}
+            for item in document_claims.get(key, [])
+        ]
+        if key in structured_provenance:
+            provenance.append(structured_provenance[key])
         if len(values) == 1:
             value = next(iter(values.values()))
             if value == "unknown":
@@ -283,6 +327,18 @@ def inspect_policy(root: Path) -> dict[str, Any]:
         else:
             authoritative[key] = None
             unknown.append(key)
+        recorded_value = None if conflicting_key else authoritative[key]
+        if recorded_value is None:
+            state = "unknown"
+        elif recorded_value is False or recorded_value == "prohibited":
+            state = "false"
+        else:
+            state = "true"
+        claim_records[key] = {
+            "value": recorded_value,
+            "state": state,
+            "provenance": provenance,
+        }
 
     if structured_error:
         conflicts.append(
@@ -307,6 +363,7 @@ def inspect_policy(root: Path) -> dict[str, Any]:
         + ([{"path": ".reviewworthy/policy.toml", "kind": "structured_policy", "claims": structured_claims, "error": structured_error}] if structured_path.exists() else []),
         "authoritative_claims": authoritative,
         "structured_claims": structured_claims,
+        "claim_records": claim_records,
         "unknown_claims": sorted(set(unknown)),
         "conflicts": conflicts,
         "hard_stops": [{"code": "policy_conflict", "reason": "Policy sources contradict each other."}] if conflicts else [],

@@ -13,7 +13,7 @@ The repository currently provides an alpha, standard-library-only Python CLI wit
 ```text
 reviewworthy packet init --output .reviewworthy/contribution.json
 reviewworthy policy inspect [REPOSITORY]
-reviewworthy brief create --output .reviewworthy/project-brief.json
+reviewworthy brief create --output .reviewworthy/project-brief.json --focus src/relevant_file.py
 reviewworthy brief validate .reviewworthy/project-brief.json --root .
 reviewworthy brief render .reviewworthy/project-brief.json --output project-brief.md
 reviewworthy candidate search --repo OWNER/REPO --query "keyword"
@@ -31,7 +31,7 @@ reviewworthy contract init --output .reviewworthy/contribution-contract.json
 reviewworthy risk assess MANIFEST.json
 reviewworthy packet validate .reviewworthy/contribution.json
 reviewworthy issue verify --packet .reviewworthy/contribution.json --record
-reviewworthy understanding record .reviewworthy/contribution.json --phase orientation --status passed --summary "..." --topic contract --topic diff --topic verification --topic policy
+reviewworthy understanding record .reviewworthy/contribution.json --phase orientation --status passed --summary "..." --rubric behavior="..." --rubric invariant="..." --rubric test="..." --topic contract --topic diff --topic verification --topic policy
 reviewworthy understanding validate .reviewworthy/contribution.json
 reviewworthy action check .reviewworthy/contribution.json
 reviewworthy disclosure render --packet .reviewworthy/contribution.json
@@ -40,7 +40,7 @@ reviewworthy remote plan ...
 reviewworthy remote create ... --confirm-operation-id rw-...
 ```
 
-The CLI and Skill share a Contribution Packet and a status-bearing Contribution Signal. Packets bind their evidence to a GitHub repository identity. The GitHub Action is read-only and checks objective evidence. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
+The CLI and Skill share a Contribution Packet and a status-bearing Contribution Signal. Packets bind their evidence to a GitHub repository identity. Briefs record the local Git remote/default branch/base SHA and hash only explicitly named focus files; they do not invent symbols or dependency graphs. The GitHub Action is read-only and checks objective evidence. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
 
 ## Workflow contract
 
@@ -53,7 +53,7 @@ Discovery entry ────┘                                      ↓
 
 Discovery evidence may serve as the contribution basis when repository policy explicitly allows it. A selected Discovery or signal-backed contribution must record a valid Contribution Signal before implementation or remote readiness; it does not need maintainer confirmation. External signals must reference a public record and have a successful verification record, while reproducible evidence may remain unpublished. `signal verify` is read-only by default; `signal verify --record` persists the exact successful check for readiness. `signal publish` is an explicit, idempotent Issue write and never infers maintainer intent. A verified, pending Issue is sufficient for the Issue-backed path; an Issue recorded as closed for `not planned` or `duplicate` blocks progression.
 
-Every node records a result. Review depth is `standard` or `heightened`; risk signals and user escalation can raise it, never lower it. Security issues, policy conflicts, irreversible changes, and unverifiable results are independent hard-stops.
+Every node records a result. Review depth is `standard` or `heightened`; risk signals and user escalation can raise it, never lower it. Standard Understanding covers behavior, invariant, and test; heightened Understanding additionally records flow, tradeoffs, failures, and regressions. The CLI checks rubric categories, evidence shape, and material snapshots, but does not claim that an answer is correct. Security issues, policy conflicts, irreversible changes, and unverifiable results are independent hard-stops.
 
 The contract must be explicitly approved before remote readiness. A confirmed Candidate Menu selection can be bound to a Packet with a menu snapshot, but it does not approve the Contract. Verification needs commands and evidence plus a Git-bound receipt: `exit_code`, `argv`, `cwd`, and matching `head_sha` are hard fields; output hashes are audit-only. Orientation must pass before Assessment, and both phases are material-bound: Orientation explains the contract, basis, final Diff, verification evidence, and policy result; Assessment asks new questions. A material change invalidates the prior records.
 
@@ -78,6 +78,8 @@ reviewworthy policy inspect .
 Reviewworthy reads repository-authored policy documents first, including `README`, `CONTRIBUTING`, `SECURITY`, `AGENTS`, `.github` templates, and Markdown under `docs/`. An optional `.reviewworthy/policy.toml` supplies structured claims where documents are silent. Contradictory claims produce a `policy_conflict` hard-stop; they are never silently overridden.
 
 Unknown policy, including an explicit `allowed = "unknown"` claim, enters Conservative mode. The CLI preserves human approval and disclosure requirements. The Action reports incomplete/unknown policy without failing by default, except for independently deterministic prohibitions such as an explicit AI prohibition.
+
+Policy inspection also emits claim records with `true`/`false`/`unknown` state and source line/excerpt hashes. Structured policy fills silence and remains provenance-bearing; conflicting sources produce an unknown claim plus a hard-stop rather than an opaque automatic decision.
 
 ## Remote writes
 
