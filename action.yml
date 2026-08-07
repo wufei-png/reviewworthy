@@ -6,10 +6,10 @@ inputs:
     required: false
     default: .reviewworthy/contribution.json
   changed-files:
-    description: Newline-separated changed files; on pull_request events the action derives them from the event SHAs when omitted
+    description: Newline-separated changed files for report mode; enforce mode ignores this input and derives a complete Diff from the pull_request SHAs
     required: false
   mode:
-    description: report (default, non-blocking unknowns) or enforce (require a packet, current diff, and known evidence)
+    description: report (default, non-blocking unknowns) or enforce (require a real pull_request, complete Diff, and current-head verification receipt)
     required: false
     default: report
   require-packet:
@@ -21,7 +21,7 @@ inputs:
     required: false
     default: 'false'
   require-current-diff:
-    description: Require changed files derived from the current event or supplied input
+    description: Require current changed-file evidence in report mode; enforce mode always requires the complete pull-request Diff
     required: false
     default: 'false'
 runs:
@@ -37,8 +37,6 @@ runs:
         REVIEWWORTHY_REQUIRE_PACKET: ${{ inputs.require-packet }}
         REVIEWWORTHY_FAIL_ON_UNKNOWN: ${{ inputs.fail-on-unknown }}
         REVIEWWORTHY_REQUIRE_CURRENT_DIFF: ${{ inputs.require-current-diff }}
-        REVIEWWORTHY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        REVIEWWORTHY_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
         set -euo pipefail
         changed_files="${REVIEWWORTHY_CHANGED_FILES:-}"
@@ -46,17 +44,9 @@ runs:
         if [[ -n "$changed_files" ]]; then
           changed_files_available=true
         fi
-        if [[ -z "$changed_files" && -n "${REVIEWWORTHY_BASE_SHA:-}" && -n "${REVIEWWORTHY_HEAD_SHA:-}" ]]; then
-          if git cat-file -e "$REVIEWWORTHY_BASE_SHA^{commit}" 2>/dev/null && git cat-file -e "$REVIEWWORTHY_HEAD_SHA^{commit}" 2>/dev/null; then
-            if ! changed_files="$(git diff --name-only "$REVIEWWORTHY_BASE_SHA" "$REVIEWWORTHY_HEAD_SHA" 2>/dev/null)"; then
-              echo "Reviewworthy: changed-file evidence could not be derived from the supplied pull-request SHAs." >&2
-              changed_files=""
-            else
-              changed_files_available=true
-            fi
-          else
-            echo "Reviewworthy: pull-request SHAs are not available in this checkout; changed-file scope will be reported as unknown." >&2
-          fi
+        if [[ "${REVIEWWORTHY_MODE:-report}" == enforce ]]; then
+          changed_files=""
+          changed_files_available=false
         fi
         args=()
         while IFS= read -r path; do
@@ -76,6 +66,7 @@ runs:
             exit 2
             ;;
         esac
+        args+=(--root . --json)
         if [[ "${REVIEWWORTHY_REQUIRE_PACKET:-false}" == true ]]; then
           args+=(--require-packet)
         fi

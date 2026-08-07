@@ -34,7 +34,7 @@ reviewworthy issue verify --packet .reviewworthy/contribution.json --record
 reviewworthy understanding record .reviewworthy/contribution.json --phase orientation --status passed --summary "..." --rubric behavior="..." --rubric invariant="..." --rubric test="..." --topic contract --topic diff --topic verification --topic policy
 reviewworthy understanding validate .reviewworthy/contribution.json
 reviewworthy action check .reviewworthy/contribution.json --mode report
-reviewworthy action check .reviewworthy/contribution.json --mode enforce --changed-files-provided
+reviewworthy action check .reviewworthy/contribution.json --mode enforce --root .  # in a pull_request Action context
 reviewworthy disclosure render --packet .reviewworthy/contribution.json
 reviewworthy eval run
 reviewworthy remote plan ...
@@ -96,7 +96,7 @@ For a policy-required Draft PR, the draft state is included in the operation ID 
 
 The first release does not create review comments, Discussions, close PRs, merge changes, or use an LLM as an Action gatekeeper. The current signal slice records and gates the evidence; it does not yet wait for or fetch maintainer responses.
 
-The repository also ships a read-only composite Action in [`action.yml`](./action.yml). Its default `report` mode runs the existing non-blocking check and reports missing packets or unknown evidence. An explicitly selected `enforce` mode requires a packet, current changed-file evidence, and known policy/evidence; individual `require-packet`, `require-current-diff`, and `fail-on-unknown` inputs are also available. It does not publish, comment, or infer maintainer approval. If pull-request SHAs are unavailable, report mode describes scope as unknown; enforce mode fails rather than trusting Packet-declared changed files.
+The repository also ships a read-only composite Action in [`action.yml`](./action.yml). Its default `report` mode runs the existing non-blocking check and reports missing packets or unknown evidence. An explicitly selected `enforce` mode is PR-only: it requires a real `pull_request` context, local base/head commit objects, a complete Diff recomputed through the shared Git capture implementation, exact agreement with the Packet's base/head/hash/files/counts, and a successful clean-worktree verification receipt bound to the current head. Hand-supplied `changed-files` are never a substitute in enforce mode; `require-packet`, `require-current-diff`, and `fail-on-unknown` remain available for report-mode consumers. It does not publish, comment, or infer maintainer approval. The Action never fetches missing objects: report mode describes unavailable PR evidence as unknown, while enforce mode fails closed. Consumers that use enforce should check out with `fetch-depth: 0`.
 
 The runtime has no third-party dependencies. Schema validation is a test/CI-only concern: `requirements-dev.txt` installs `jsonschema`, and CI validates the portable schemas and generated test artifacts without adding it to the package runtime dependencies. Fixture evals assert exact blocker/violation sets and conclusion/result outcomes rather than whole response snapshots.
 

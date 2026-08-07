@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -263,6 +264,59 @@ class CliBoundaryTests(unittest.TestCase):
                 "require_current_diff": True,
             })
             self.assertIn("unknown_policy", {violation["code"] for violation in result["violations"]})
+
+    def test_action_cli_recomputes_pr_diff_and_ignores_manual_files_in_enforce(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, actual_diff = self._pr_repository(root)
+            packet = valid_packet()
+            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["diff"] = dict(actual_diff)
+            packet["verification"]["receipts"][0].update({
+                "head_sha": actual_diff["head_sha"],
+                "head_sha_before": actual_diff["head_sha"],
+                "head_sha_after": actual_diff["head_sha"],
+                "cwd": ".",
+            })
+            packet["policy"]["authoritative_claims"] = {
+                "ai_assistance": "allowed",
+                "issue_required": False,
+                "disclosure_required": False,
+                "disclosure_locations": [],
+                "disclosure_stages": [],
+                "human_pr_narrative_required": False,
+                "security_private_reporting": False,
+                "draft_pr_required": False,
+                "discovery_evidence_allowed": True,
+                "good_first_issue_ai_allowed": True,
+            }
+            packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet_path = root / "packet.json"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            event_path = root / "event.json"
+            event_path.write_text(json.dumps({
+                "pull_request": {
+                    "base": {"sha": actual_diff["base_sha"]},
+                    "head": {"sha": actual_diff["head_sha"]},
+                }
+            }), encoding="utf-8")
+            output = io.StringIO()
+
+            with patch.dict(os.environ, {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_EVENT_PATH": str(event_path),
+            }, clear=False), redirect_stdout(output):
+                code = main([
+                    "action", "check", str(packet_path), "--root", str(repository_root),
+                    "--mode", "enforce", "--changed-file", "src/forged.py",
+                    "--changed-files-provided", "--json",
+                ])
+
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 0)
+            self.assertEqual(result["violations"], [])
 
     def test_verify_cli_persists_invalid_receipt_and_returns_failure_when_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

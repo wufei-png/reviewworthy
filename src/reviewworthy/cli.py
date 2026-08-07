@@ -9,7 +9,7 @@ import sys
 from typing import Any
 
 from . import __version__
-from .action import check_packet
+from .action import check_packet, github_event_context
 from .brief import build_project_brief, render_project_brief, validate_project_brief
 from .candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, validate_candidate_menu
 from .contract import render_contract, skeleton_contract, validate_contract
@@ -192,6 +192,7 @@ def _build_parser() -> argparse.ArgumentParser:
     action_check.add_argument("--changed-file", action="append", default=[])
     action_check.add_argument("--changed-files-provided", action="store_true", help="Treat the supplied changed-file list as authoritative, even when empty")
     action_check.add_argument("--changed-files-unavailable", action="store_true", help="Do not fall back to packet-declared changed files")
+    action_check.add_argument("--root", type=Path, default=Path("."), help="Git checkout used to recompute the current pull-request Diff")
     _common_json(action_check)
 
     candidate = commands.add_parser("candidate", help="Collect read-only duplicate-work evidence")
@@ -675,10 +676,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 changed_files = args.changed_file or None
                 current_diff_available = None
+            event_name, event_base_sha, event_head_sha = github_event_context()
             result = check_packet(
                 args.path,
                 changed_files,
+                root=args.root,
                 current_diff_available=current_diff_available,
+                event_name=event_name,
+                event_base_sha=event_base_sha,
+                event_head_sha=event_head_sha,
                 mode=args.mode,
                 require_packet=args.require_packet,
                 fail_on_unknown=args.fail_on_unknown,
