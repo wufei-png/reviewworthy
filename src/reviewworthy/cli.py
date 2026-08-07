@@ -15,18 +15,25 @@ from .candidate import bind_candidate, render_candidate_menu, select_candidate, 
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
+from .git import GitError, capture_diff, resolve_ref, run_verification
 from .github import (
     GhClient,
     GhError,
     build_operation,
     build_signal_operation,
     load_operation_receipt,
+    operation_lock,
     operation_receipt_path,
+    save_operation_link_attempted,
+    save_operation_linked,
+    save_operation_needs_reconciliation,
     save_operation_pending,
+    save_operation_pr_created,
     save_operation_receipt,
 )
-from .packet import material_snapshot, readiness_blockers, skeleton_packet, validate_packet
+from .packet import issue_link_blockers, issue_reference, material_snapshot, readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
+from .repository import parse_public_record, repository_matches
 from .risk import assess_manifest
 from .signal import SIGNAL_KINDS, SIGNAL_STATUSES, skeleton_signal, validate_signal
 from .understanding import record_understanding, validate_understanding
@@ -166,6 +173,7 @@ def _build_parser() -> argparse.ArgumentParser:
     packet_init.add_argument("--output", type=Path, default=Path(".reviewworthy/contribution.json"))
     packet_init.add_argument("--contribution-id", default="contribution-001")
     packet_init.add_argument("--mode", choices=("issue-backed", "discovery"), default="issue-backed")
+    packet_init.add_argument("--repository", help="github.com owner/name")
     packet_init.add_argument("--force", action="store_true", help="Overwrite an existing output file")
     _common_json(packet_init)
     packet_validate = packet_commands.add_parser("validate")
@@ -248,6 +256,33 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_run.add_argument("path", type=Path, nargs="?", default=Path("evals/fixtures"))
     _common_json(eval_run)
 
+    diff = commands.add_parser("diff", help="Capture a read-only Git diff receipt")
+    diff_commands = diff.add_subparsers(dest="diff_command", required=True)
+    diff_capture = diff_commands.add_parser("capture")
+    diff_capture.add_argument("--root", type=Path, default=Path("."))
+    diff_capture.add_argument("--base", required=True)
+    diff_capture.add_argument("--head", required=True)
+    diff_capture.add_argument("--output", type=Path, default=Path(".reviewworthy/diff.json"))
+    diff_capture.add_argument("--force", action="store_true")
+    _common_json(diff_capture)
+
+    verify = commands.add_parser("verify", help="Execute a verification command and record its Git-bound receipt")
+    verify_commands = verify.add_subparsers(dest="verify_command", required=True)
+    verify_run = verify_commands.add_parser("run")
+    verify_run.add_argument("--root", type=Path, default=Path("."))
+    verify_run.add_argument("--head", required=True)
+    verify_run.add_argument("--output", type=Path, default=Path(".reviewworthy/verification.json"))
+    verify_run.add_argument("--force", action="store_true")
+    verify_run.add_argument("argv", nargs=argparse.REMAINDER, help="Command to execute; place it after --")
+    _common_json(verify_run)
+
+    issue = commands.add_parser("issue", help="Verify a supporting GitHub Issue reference")
+    issue_commands = issue.add_subparsers(dest="issue_command", required=True)
+    issue_verify = issue_commands.add_parser("verify")
+    issue_verify.add_argument("--packet", type=Path, required=True)
+    issue_verify.add_argument("--record", action="store_true", help="Persist successful verification in the packet basis")
+    _common_json(issue_verify)
+
     remote = commands.add_parser("remote", help="Plan or explicitly execute a GitHub write")
     remote_commands = remote.add_subparsers(dest="remote_command", required=True)
     for name in ("plan", "create"):
@@ -259,6 +294,7 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--body-file", type=Path, required=True)
         command.add_argument("--base", default="main")
         command.add_argument("--head")
+        command.add_argument("--root", type=Path, default=Path("."), help="Git worktree used to resolve base/head SHAs")
         if name == "create":
             command.add_argument("--confirm-operation-id", required=True)
         _common_json(command)
@@ -267,14 +303,124 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any]:
     packet = _load_object(args.packet)
+    if not repository_matches(packet.get("repository"), args.repo):
+        raise ValueError("Remote target repository must exactly match packet.repository")
     body = args.body_file.read_text(encoding="utf-8")
     narrative = packet.get("narrative", {})
     if not isinstance(narrative, dict) or args.title.strip() != str(narrative.get("title", "")).strip():
         raise ValueError("Remote title must exactly match the approved packet narrative title")
     if body.strip() != str(narrative.get("body", "")).strip():
         raise ValueError("Remote Body must exactly match the approved packet narrative Body")
-    operation = build_operation(packet, args.repo, args.kind, args.title, body, args.base, args.head)
+    base_sha = resolve_ref(args.root, args.base) if args.kind == "pull_request" else None
+    head_sha = resolve_ref(args.root, args.head) if args.kind == "pull_request" and args.head else None
+    operation = build_operation(packet, args.repo, args.kind, args.title, body, args.base, args.head, base_sha, head_sha)
     return packet, operation
+
+
+def _issue_revalidation_errors(packet: dict[str, Any], remote: dict[str, Any]) -> list[dict[str, str]]:
+    reference = issue_reference(packet)
+    repository = packet.get("repository", {})
+    errors: list[dict[str, str]] = []
+    if not reference:
+        return [{"code": "issue_reference_required", "message": "A pull request must have a canonical supporting Issue URL.", "path": "basis.references"}]
+    if not remote.get("verified"):
+        errors.append({"code": "issue_revalidation_failed", "message": str(remote.get("error", "The supporting Issue could not be verified.")), "path": "basis.verification"})
+        return errors
+    parsed = parse_public_record(reference)
+    if not parsed or remote.get("record_type") != "issue" or remote.get("repository") != f"{parsed['owner']}/{parsed['name']}":
+        errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match the Packet Issue identity.", "path": "basis.verification"})
+    if isinstance(repository, dict):
+        expected_repository = f"{repository.get('owner')}/{repository.get('name')}"
+        if remote.get("repository") != expected_repository:
+            errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match packet.repository.", "path": "repository"})
+        if repository.get("repository_id") is not None and remote.get("repository_id") != repository.get("repository_id"):
+            errors.append({"code": "issue_revalidation_identity_mismatch", "message": "The live Issue verification has a different repository ID.", "path": "repository.repository_id"})
+    state_reason = str(remote.get("state_reason", "")).strip().lower()
+    if state_reason in {"not planned", "duplicate"}:
+        errors.append({"code": "issue_not_actionable", "message": f"The supporting Issue is closed as {state_reason}.", "path": "basis.verification.state_reason"})
+    return errors
+
+
+def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool) -> dict[str, Any]:
+    reference = issue_reference(packet)
+    if not reference:
+        return {"valid": False, "verification": "not_run", "errors": [{"code": "issue_reference_required", "message": "Packet needs a canonical GitHub Issue URL.", "path": "basis.references"}]}
+    remote = GhClient().verify_public_reference(reference)
+    errors = _issue_revalidation_errors(packet, remote)
+    result: dict[str, Any] = {"valid": not errors, "verification": "github_public_reference", "remote": remote, "errors": errors}
+    if record and result["valid"]:
+        basis = packet.get("basis")
+        if not isinstance(basis, dict):
+            raise ValueError("Packet basis must be an object")
+        verification = {
+            "status": "verified",
+            "provider": "github",
+            "reference": reference,
+            "verified_at": utc_now(),
+        }
+        for key in ("host", "repository", "repository_id", "record_type", "number", "url", "visibility", "state", "state_reason", "locked", "labels"):
+            if remote.get(key) is not None:
+                verification[key] = remote[key]
+        if basis.get("kind") == "issue":
+            basis["verification"] = verification
+        elif isinstance(basis.get("signal"), dict) and basis["signal"].get("kind") == "issue":
+            basis["signal"]["verification"] = verification
+        else:
+            raise ValueError("Packet basis does not contain an Issue verification target")
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        _replace_json(path, packet)
+        result["recorded"] = str(path)
+    return result
+
+
+def _canonical_remote_url(value: Any, expected_type: str, repo: str) -> str:
+    parsed = parse_public_record(value)
+    if not parsed or parsed.get("record_type") != expected_type or f"{parsed['owner']}/{parsed['name']}" != repo:
+        raise GhError(f"GitHub returned a non-canonical {expected_type} URL for {repo}")
+    return str(parsed["url"])
+
+
+def _operation_diff_blockers(packet: dict[str, Any], operation: Any) -> list[dict[str, str]]:
+    diff = packet.get("diff", {})
+    if not isinstance(diff, dict):
+        return []
+    blockers: list[dict[str, str]] = []
+    if diff.get("base_sha") and operation.base_sha and diff["base_sha"] != operation.base_sha:
+        blockers.append({"code": "remote_base_mismatch", "message": "The current PR base SHA differs from packet.diff.base_sha; recapture evidence.", "path": "diff.base_sha"})
+    if diff.get("head_sha") and operation.head_sha and diff["head_sha"] != operation.head_sha:
+        blockers.append({"code": "remote_head_mismatch", "message": "The current PR head SHA differs from packet.diff.head_sha; recapture evidence.", "path": "diff.head_sha"})
+    return blockers
+
+
+def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_url: str) -> tuple[str, str]:
+    """Reconcile exactly one Issue note after a PR has been created."""
+
+    if not operation.issue_url:
+        save_operation_linked(receipt_path, operation, pr_url)
+        return "linked", "no_supporting_issue"
+    save_operation_link_attempted(receipt_path, operation, pr_url)
+    try:
+        matches = client.find_issue_link_note(operation.issue_url, pr_url)
+    except GhError as exc:
+        reason = str(exc)
+        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
+        return "needs_reconciliation", reason
+    if matches:
+        save_operation_linked(receipt_path, operation, pr_url)
+        return "linked", "existing_exact_note"
+    commentability = client.issue_commentability(operation.issue_url)
+    if not commentability.get("commentable"):
+        reason = str(commentability.get("reason", "issue_not_commentable"))
+        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
+        return "needs_reconciliation", reason
+    try:
+        client.add_issue_note(operation.issue_url, pr_url)
+    except GhError as exc:
+        reason = str(exc)
+        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
+        return "needs_reconciliation", reason
+    save_operation_linked(receipt_path, operation, pr_url)
+    return "linked", "created_exact_note"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -454,22 +600,23 @@ def main(argv: list[str] | None = None) -> int:
 
             receipt_path = operation_receipt_path(target, operation.operation_id)
             payload["receipt_path"] = str(receipt_path)
-            receipt = load_operation_receipt(receipt_path, operation)
-            if receipt:
-                remote = receipt["remote"]
-                payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
-            else:
-                client = GhClient()
-                existing = client.find_existing(operation)
-                if existing:
-                    remote = existing[0].get("url") or existing[0].get("html_url") or ""
-                    save_operation_receipt(receipt_path, operation, remote)
-                    payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+            with operation_lock(receipt_path):
+                receipt = load_operation_receipt(receipt_path, operation)
+                if receipt:
+                    remote = receipt["remote"]
+                    payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
                 else:
-                    save_operation_pending(receipt_path, operation)
-                    remote = client.create(operation)
-                    save_operation_receipt(receipt_path, operation, remote)
-                    payload.update({"outcome": "created", "remote": remote})
+                    client = GhClient()
+                    existing = client.find_existing(operation)
+                    if existing:
+                        remote = existing[0].get("url") or existing[0].get("html_url") or ""
+                        save_operation_receipt(receipt_path, operation, remote)
+                        payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+                    else:
+                        save_operation_pending(receipt_path, operation)
+                        remote = client.create(operation)
+                        save_operation_receipt(receipt_path, operation, remote)
+                        payload.update({"outcome": "created", "remote": remote})
             updated_signal = dict(signal_value)
             updated_signal["reference"] = remote
             updated_signal["published"] = True
@@ -484,7 +631,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.packet_command == "init":
                 if args.output.exists() and not args.force:
                     raise ValueError(f"Refusing to overwrite existing file: {args.output}; use --force to replace it")
-                packet = skeleton_packet(args.contribution_id, args.mode)
+                packet = skeleton_packet(args.contribution_id, args.mode, args.repository)
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(json.dumps(packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 result = {"created": str(args.output), "contribution_id": args.contribution_id, "mode": args.mode}
@@ -587,17 +734,45 @@ def main(argv: list[str] | None = None) -> int:
             _print(result, args.as_json)
             return 0 if result["result"] == "passed" else 1
 
+        if args.command == "diff":
+            diff_value = capture_diff(args.root, args.base, args.head)
+            _write_json(args.output, diff_value, args.force)
+            _print({"captured": str(args.output), **diff_value}, args.as_json)
+            return 0
+
+        if args.command == "verify":
+            command_argv = list(args.argv)
+            if command_argv and command_argv[0] == "--":
+                command_argv = command_argv[1:]
+            receipt = run_verification(args.root, args.head, command_argv)
+            _write_json(args.output, receipt, args.force)
+            _print({"captured": str(args.output), **receipt}, args.as_json)
+            return 0 if receipt["exit_code"] == 0 else 1
+
+        if args.command == "issue":
+            packet = _load_object(args.packet)
+            result = _verify_and_record_issue(packet, args.packet, record=args.record)
+            _print(result, args.as_json)
+            return 0 if result["valid"] else 1
+
         if args.command == "remote":
             packet, operation = _remote_operation(args)
             payload = operation.as_dict()
             if args.remote_command == "plan":
-                payload["readiness_blockers"] = readiness_blockers(packet)
+                blockers = readiness_blockers(packet)
+                if operation.kind == "pull_request":
+                    blockers.extend(issue_link_blockers(packet, operation.body))
+                    blockers.extend(_operation_diff_blockers(packet, operation))
+                payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)
                 return 0
 
             if args.confirm_operation_id != operation.operation_id:
                 raise ValueError("Confirmation operation ID does not match the current rendered operation")
             blockers = readiness_blockers(packet)
+            if operation.kind == "pull_request":
+                blockers.extend(issue_link_blockers(packet, operation.body))
+                blockers.extend(_operation_diff_blockers(packet, operation))
             if blockers:
                 payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)
@@ -605,25 +780,62 @@ def main(argv: list[str] | None = None) -> int:
 
             receipt_path = operation_receipt_path(args.packet, operation.operation_id)
             payload["receipt_path"] = str(receipt_path)
-            receipt = load_operation_receipt(receipt_path, operation)
-            if receipt:
-                payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": receipt["remote"]})
-            else:
-                client = GhClient()
-                existing = client.find_existing(operation)
-                if existing:
-                    remote = existing[0].get("url") or existing[0].get("html_url") or ""
-                    save_operation_receipt(receipt_path, operation, remote)
-                    payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+            with operation_lock(receipt_path):
+                receipt = load_operation_receipt(receipt_path, operation)
+                if operation.kind == "pull_request":
+                    if receipt:
+                        status = receipt["status"]
+                        if status == "linked":
+                            payload.update({"outcome": "already_exists", "source": "local_receipt", "status": status, "pr_url": receipt["pr_url"], "issue_url": receipt.get("issue_url", "")})
+                            _print(payload, args.as_json)
+                            return 0
+                        payload.update({"outcome": "needs_reconciliation", "source": "local_receipt", "status": status, "pr_url": receipt["pr_url"], "issue_url": receipt.get("issue_url", ""), "reason": receipt.get("reason", "The PR link receipt is not terminally linked.")})
+                        _print(payload, args.as_json)
+                        return 1
+
+                    client = GhClient()
+                    if operation.issue_url:
+                        live_issue = client.verify_public_reference(operation.issue_url)
+                        live_errors = _issue_revalidation_errors(packet, live_issue)
+                        if live_errors:
+                            payload["readiness_blockers"] = live_errors
+                            _print(payload, args.as_json)
+                            return 1
+                    existing = client.find_existing(operation)
+                    if existing:
+                        pr_url = _canonical_remote_url(existing[0].get("url") or existing[0].get("html_url"), "pull_request", operation.repo)
+                        source = "remote_reconciliation"
+                    else:
+                        save_operation_pending(receipt_path, operation)
+                        pr_url = _canonical_remote_url(client.create(operation), "pull_request", operation.repo)
+                        source = "created"
+                    save_operation_pr_created(receipt_path, operation, pr_url)
+                    link_status, link_source = _link_pull_request(client, operation, receipt_path, pr_url)
+                    payload.update({"source": source, "pr_url": pr_url, "issue_url": operation.issue_url or "", "status": link_status, "link_source": link_source})
+                    if link_status != "linked":
+                        payload["outcome"] = "needs_reconciliation"
+                        _print(payload, args.as_json)
+                        return 1
+                    payload["outcome"] = "created" if source == "created" else "already_exists"
                 else:
-                    save_operation_pending(receipt_path, operation)
-                    remote = client.create(operation)
-                    save_operation_receipt(receipt_path, operation, remote)
-                    payload.update({"outcome": "created", "remote": remote})
+                    if receipt:
+                        payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": receipt["remote"]})
+                    else:
+                        client = GhClient()
+                        existing = client.find_existing(operation)
+                        if existing:
+                            remote = existing[0].get("url") or existing[0].get("html_url") or ""
+                            save_operation_receipt(receipt_path, operation, remote)
+                            payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+                        else:
+                            save_operation_pending(receipt_path, operation)
+                            remote = client.create(operation)
+                            save_operation_receipt(receipt_path, operation, remote)
+                            payload.update({"outcome": "created", "remote": remote})
             _print(payload, args.as_json)
             return 0
 
-    except (OSError, ValueError, GhError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, GhError, GitError, json.JSONDecodeError) as exc:
         error = {"error": str(exc)}
         _print(error, getattr(args, "as_json", False))
         return 2

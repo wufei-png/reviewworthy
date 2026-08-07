@@ -6,6 +6,7 @@
   "required": [
     "packet_version",
     "contribution_id",
+    "repository",
     "entry",
     "basis",
     "contract",
@@ -22,6 +23,20 @@
   "properties": {
     "packet_version": { "const": "0.1" },
     "contribution_id": { "type": "string", "minLength": 1 },
+    "repository": {
+      "type": "object",
+      "required": ["provider", "host", "owner", "name", "default_branch"],
+      "properties": {
+        "provider": { "const": "github" },
+        "host": { "const": "github.com" },
+        "owner": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "repository_id": { "type": ["integer", "null"], "exclusiveMinimum": 0 },
+        "default_branch": { "type": "string", "minLength": 1 },
+        "base_sha": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
     "entry": {
       "type": "object",
       "required": ["mode"],
@@ -33,7 +48,24 @@
       "required": ["kind"],
       "properties": {
         "kind": { "enum": ["issue", "signal", "discovery-evidence"] },
-        "signal": { "$ref": "contribution-signal.schema.json" }
+        "signal": { "$ref": "contribution-signal.schema.json" },
+        "verification": {
+          "type": "object",
+          "required": ["status", "provider", "reference", "verified_at"],
+          "properties": {
+            "status": { "const": "verified" },
+            "provider": { "const": "github" },
+            "reference": { "type": "string", "minLength": 1 },
+            "verified_at": { "type": "string", "minLength": 1 },
+            "repository": { "type": "string", "minLength": 1 },
+            "repository_id": { "type": "integer", "exclusiveMinimum": 0 },
+            "record_type": { "const": "issue" },
+            "number": { "type": "integer", "minimum": 1 },
+            "state_reason": { "type": "string" },
+            "locked": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": true
     },
@@ -46,8 +78,43 @@
       "properties": { "depth": { "enum": ["standard", "heightened"] } },
       "additionalProperties": true
     },
-    "diff": { "type": "object" },
-    "verification": { "type": "object" },
+    "diff": {
+      "type": "object",
+      "properties": {
+        "base_sha": { "type": "string", "minLength": 1 },
+        "head_sha": { "type": "string", "minLength": 1 },
+        "patch_sha256": { "type": "string", "minLength": 1 },
+        "changed_files": { "type": "array", "items": { "type": "string" } },
+        "additions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "commands": { "type": "array", "items": { "type": "string" } },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "receipts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["argv", "cwd", "exit_code", "head_sha", "provenance"],
+            "properties": {
+              "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+              "cwd": { "type": "string", "minLength": 1 },
+              "exit_code": { "type": "integer" },
+              "head_sha": { "type": "string", "minLength": 1 },
+              "stdout_sha256": { "type": "string", "minLength": 1 },
+              "stderr_sha256": { "type": "string", "minLength": 1 },
+              "provenance": { "enum": ["cli_executed", "self_reported"] }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "materials": { "type": "object" },
     "results": { "type": "array", "minItems": 7 },
     "understanding": { "$ref": "understanding.schema.json" },

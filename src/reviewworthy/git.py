@@ -1,0 +1,105 @@
+"""Read-only Git evidence capture and command verification."""
+
+from __future__ import annotations
+
+from hashlib import sha256
+from pathlib import Path
+import subprocess
+from typing import Any
+
+from .util import utc_now
+
+
+class GitError(RuntimeError):
+    """A requested Git evidence operation could not be completed."""
+
+
+def _run_git(root: Path, args: list[str], *, text: bool = True) -> subprocess.CompletedProcess[Any]:
+    try:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=text, check=False)
+    except OSError as exc:
+        raise GitError(f"Could not invoke git: {exc}") from exc
+
+
+def resolve_ref(root: Path, ref: str) -> str:
+    completed = _run_git(root.resolve(), ["rev-parse", "--verify", f"{ref}^{{commit}}"])
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "unknown git ref").strip()
+        raise GitError(f"Could not resolve Git ref {ref!r}: {detail}")
+    return str(completed.stdout).strip()
+
+
+def current_head(root: Path) -> str:
+    return resolve_ref(root, "HEAD")
+
+
+def _parse_numstat(output: str) -> tuple[int, int]:
+    additions = 0
+    deletions = 0
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        if parts[0].isdigit():
+            additions += int(parts[0])
+        if parts[1].isdigit():
+            deletions += int(parts[1])
+    return additions, deletions
+
+
+def capture_diff(root: Path, base: str, head: str) -> dict[str, Any]:
+    root = root.resolve()
+    base_sha = resolve_ref(root, base)
+    head_sha = resolve_ref(root, head)
+    patch = _run_git(root, ["diff", "--binary", "--no-ext-diff", "--no-renames", base_sha, head_sha], text=False)
+    if patch.returncode != 0:
+        detail = (patch.stderr or patch.stdout or b"git diff failed").decode("utf-8", errors="replace").strip()
+        raise GitError(detail)
+    names = _run_git(root, ["diff", "--name-only", "--no-ext-diff", base_sha, head_sha])
+    if names.returncode != 0:
+        raise GitError((names.stderr or names.stdout or "git diff --name-only failed").strip())
+    numstat = _run_git(root, ["diff", "--numstat", "--no-ext-diff", "--no-renames", base_sha, head_sha])
+    if numstat.returncode != 0:
+        raise GitError((numstat.stderr or numstat.stdout or "git diff --numstat failed").strip())
+    additions, deletions = _parse_numstat(str(numstat.stdout))
+    patch_bytes = bytes(patch.stdout)
+    return {
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "patch_sha256": sha256(patch_bytes).hexdigest(),
+        "changed_files": [line for line in str(names.stdout).splitlines() if line],
+        "additions": additions,
+        "deletions": deletions,
+        "captured_at": utc_now(),
+        "root": str(root),
+        "provenance": "cli_executed",
+    }
+
+
+def run_verification(root: Path, head: str, argv: list[str]) -> dict[str, Any]:
+    root = root.resolve()
+    if not argv:
+        raise ValueError("verification command must not be empty")
+    expected_head = resolve_ref(root, head)
+    actual_head = current_head(root)
+    if actual_head != expected_head:
+        raise GitError(f"Working tree HEAD moved: expected {expected_head}, found {actual_head}")
+    started_at = utc_now()
+    try:
+        completed = subprocess.run(argv, cwd=root, capture_output=True, text=False, check=False)
+    except OSError as exc:
+        raise GitError(f"Could not execute verification command: {exc}") from exc
+    finished_at = utc_now()
+    stdout = bytes(completed.stdout or b"")
+    stderr = bytes(completed.stderr or b"")
+    return {
+        "argv": list(argv),
+        "cwd": str(root),
+        "exit_code": completed.returncode,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "head_sha": expected_head,
+        "stdout_sha256": sha256(stdout).hexdigest(),
+        "stderr_sha256": sha256(stderr).hexdigest(),
+        "provenance": "cli_executed",
+    }

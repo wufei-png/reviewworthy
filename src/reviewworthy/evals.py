@@ -9,6 +9,7 @@ from typing import Any
 
 from .action import check_packet
 from .candidate import validate_candidate_menu
+from .contract import contract_snapshot
 from .packet import REQUIRED_NODES, material_snapshot, readiness_blockers, skeleton_packet
 from .policy import inspect_policy
 from .risk import assess_manifest
@@ -40,8 +41,30 @@ def _get_path(value: Any, path: str) -> Any:
 
 def _base_packet() -> dict[str, Any]:
     packet = skeleton_packet("eval-001", "issue-backed")
+    packet["repository"] = {
+        "provider": "github",
+        "host": "github.com",
+        "owner": "example",
+        "name": "project",
+        "repository_id": 101,
+        "default_branch": "main",
+        "base_sha": "base-sha",
+    }
     packet["entry"]["source"] = "https://github.com/example/project/issues/1"
-    packet["basis"] = {"kind": "issue", "references": ["https://github.com/example/project/issues/1"], "evidence": [], "labels": []}
+    packet["basis"] = {
+        "kind": "issue",
+        "references": ["https://github.com/example/project/issues/1"],
+        "evidence": [],
+        "labels": [],
+        "verification": {
+            "status": "verified",
+            "provider": "github",
+            "reference": "https://github.com/example/project/issues/1",
+            "repository": "example/project",
+            "repository_id": 101,
+            "verified_at": "2026-08-07T00:00:00Z",
+        },
+    }
     packet["contract"].update(
         {
             "problem": "A reproducible failure needs a narrow fix.",
@@ -76,8 +99,27 @@ def _base_packet() -> dict[str, Any]:
         ],
         "disclosure": {"text": "AI assistance was reviewed by the contributor.", "locations": ["pr_body"], "human_confirmed": True},
     }
-    packet["diff"] = {"changed_files": ["src/example.py"], "additions": 3, "deletions": 1}
-    packet["verification"] = {"commands": ["python -m unittest"], "evidence": ["exit 0"]}
+    packet["diff"] = {
+        "base_sha": "base-sha",
+        "head_sha": "head-sha",
+        "patch_sha256": "patch-sha256",
+        "changed_files": ["src/example.py"],
+        "additions": 3,
+        "deletions": 1,
+    }
+    packet["verification"] = {
+        "commands": ["python -m unittest"],
+        "evidence": ["exit 0"],
+        "receipts": [{
+            "argv": ["python", "-m", "unittest"],
+            "cwd": "/workspace/reviewworthy",
+            "exit_code": 0,
+            "head_sha": "head-sha",
+            "stdout_sha256": "stdout-sha256",
+            "stderr_sha256": "stderr-sha256",
+            "provenance": "cli_executed",
+        }],
+    }
     packet["results"] = [{"node": node, "status": "passed", "evidence": [f"{node} recorded"]} for node in REQUIRED_NODES]
     packet["understanding"] = {
         "orientation": {
@@ -95,12 +137,13 @@ def _base_packet() -> dict[str, Any]:
     }
     packet["narrative"] = {
         "title": "Fix invalid input handling",
-        "body": "## Why\nFixes the reported regression.\n\n## Testing\n`python -m unittest`",
+        "body": "https://github.com/example/project/issues/1\n\n## Why\nFixes the reported regression.\n\n## Testing\n`python -m unittest`",
         "final_preview_confirmed": True,
         "human_expression_required": False,
         "human_expression": "",
     }
     packet["contract"]["approval"] = {"status": "approved", "human_confirmed": True}
+    packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
     packet["materials"]["material_snapshot"] = material_snapshot(packet)
     packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
     packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)

@@ -6,7 +6,20 @@ from subprocess import CompletedProcess
 import tempfile
 import unittest
 
-from reviewworthy.github import GhClient, GhError, build_operation, build_signal_operation, load_operation_receipt, operation_receipt_path, save_operation_receipt
+from reviewworthy.github import (
+    GhClient,
+    GhError,
+    build_operation,
+    build_signal_operation,
+    load_operation_receipt,
+    operation_lock,
+    operation_receipt_path,
+    save_operation_link_attempted,
+    save_operation_linked,
+    save_operation_needs_reconciliation,
+    save_operation_pr_created,
+    save_operation_receipt,
+)
 
 from helpers import valid_packet
 
@@ -18,7 +31,7 @@ class GitHubOperationTests(unittest.TestCase):
         second = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input")
         self.assertEqual(first.operation_id, second.operation_id)
         self.assertIn(first.marker, first.body)
-        self.assertEqual(first.permissions, ("contents:read", "pull-requests:write"))
+        self.assertEqual(first.permissions, ("contents:read", "pull-requests:write", "issues:write"))
 
     def test_changed_body_changes_confirmation_id(self) -> None:
         packet = valid_packet()
@@ -113,6 +126,55 @@ class GitHubOperationTests(unittest.TestCase):
             GhClient().verify_public_reference("https://github.com/example/project/issues/2?state=open")
         with self.assertRaises(GhError):
             GhClient().verify_public_reference("https://github.com/example/project/issues/2#details")
+
+    def test_issue_link_note_search_is_exact_and_note_write_is_one_line(self) -> None:
+        calls = []
+        issue_url = "https://github.com/example/project/issues/2"
+        pr_url = "https://github.com/example/project/pull/8"
+
+        def fake_runner(argv, **kwargs):
+            calls.append(argv)
+            if any(str(item).endswith("/comments") for item in argv) and "GET" in argv:
+                pages = [[
+                    {"id": 1, "body": "prefix " + pr_url},
+                    {"id": 2, "body": pr_url},
+                ]]
+                return CompletedProcess(argv, 0, json.dumps(pages), "")
+            return CompletedProcess(argv, 0, json.dumps({"id": 3, "html_url": "https://github.com/example/project/issues/comments/3"}), "")
+
+        client = GhClient(fake_runner)
+        matches = client.find_issue_link_note(issue_url, pr_url)
+        self.assertEqual([item["id"] for item in matches], [2])
+        client.add_issue_note(issue_url, pr_url)
+        self.assertIn("body=" + pr_url, calls[-1])
+        self.assertEqual(calls[-1][4], "POST")
+
+    def test_pull_request_receipt_lifecycle_never_uses_issue_receipt_shape(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", "base-sha", "head-sha")
+        pr_url = "https://github.com/example/project/pull/7"
+        with tempfile.TemporaryDirectory() as directory:
+            path = operation_receipt_path(Path(directory) / ".reviewworthy" / "contribution.json", operation.operation_id)
+            save_operation_pr_created(path, operation, pr_url)
+            self.assertEqual(load_operation_receipt(path, operation)["status"], "pr_created")
+            save_operation_link_attempted(path, operation, pr_url)
+            self.assertEqual(load_operation_receipt(path, operation)["status"], "link_attempted")
+            save_operation_needs_reconciliation(path, operation, pr_url, "issue_locked")
+            self.assertEqual(load_operation_receipt(path, operation)["status"], "needs_reconciliation")
+            save_operation_linked(path, operation, pr_url)
+            linked = load_operation_receipt(path, operation)
+            self.assertEqual(linked["status"], "linked")
+            self.assertEqual(linked["pr_url"], pr_url)
+
+    def test_operation_lock_rejects_concurrent_claim_and_releases_afterward(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix input", "Body")
+        with tempfile.TemporaryDirectory() as directory:
+            path = operation_receipt_path(Path(directory) / "packet.json", operation.operation_id)
+            with operation_lock(path):
+                with self.assertRaises(GhError):
+                    with operation_lock(path):
+                        pass
+            with operation_lock(path):
+                pass
 
     def test_find_existing_reads_all_pages_and_filters_issue_kind(self) -> None:
         packet = valid_packet()

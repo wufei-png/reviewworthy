@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -16,6 +17,7 @@ DISCLOSURE_STAGES = {
     "review_response",
 }
 ASSISTANCE_LEVELS = {"assisted", "generated", "reviewed"}
+_VERIFICATION_CLAIM_RE = re.compile(r"\b(reviewed|verified|validated|confirmed)\b", re.IGNORECASE)
 
 
 def _as_disclosure_record(value: Any) -> dict[str, Any]:
@@ -77,6 +79,18 @@ def disclosure_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
     missing_stages = sorted(set(requirements["stages"]) - stage_names)
     if missing_stages:
         errors.append({"code": "missing_disclosure_stage", "message": f"AI-assistance stages are missing: {missing_stages}", "path": "ai_assistance.stages"})
+    required_stage_names = set(requirements["stages"]) or stage_names
+    unverified = [
+        stage for stage in stages
+        if isinstance(stage, dict) and stage.get("name") in required_stage_names and stage.get("human_verified") is not True
+    ]
+    if unverified and isinstance(text, str) and _VERIFICATION_CLAIM_RE.search(text):
+        errors.append({"code": "disclosure_overclaims_verification", "message": "Disclosure cannot claim reviewed or verified work while a required AI-assistance stage is not human_verified.", "path": "ai_assistance.disclosure.text"})
+    if "pr_body" in locations:
+        narrative = packet.get("narrative", {})
+        body = narrative.get("body", "") if isinstance(narrative, dict) else ""
+        if not isinstance(body, str) or text not in body:
+            errors.append({"code": "disclosure_not_in_pr_body", "message": "Disclosure text recorded for pr_body must appear exactly in the final PR Body.", "path": "narrative.body"})
     return errors
 
 
@@ -116,7 +130,16 @@ def render_disclosure(packet: dict[str, Any], location: str | None = None) -> di
     ) or "the recorded contribution workflow"
     text = str(record.get("text", "")).strip()
     if not text:
-        text = f"AI assistance was used during {stage_text}. The contributor reviewed and verified the resulting contribution."
+        required_stage_names = set(requirements["stages"]) or {
+            stage.get("name") for stage in stages if isinstance(stage, dict) and stage.get("name")
+        }
+        related_stages = [
+            stage for stage in stages
+            if isinstance(stage, dict) and stage.get("name") in required_stage_names
+        ]
+        all_verified = bool(related_stages) and all(stage.get("human_verified") is True for stage in related_stages)
+        suffix = "The contributor reviewed and verified the resulting contribution." if all_verified else "Manual verification of the resulting contribution is incomplete."
+        text = f"AI assistance was used during {stage_text}. {suffix}"
     return {
         "required": requirements["required"],
         "location": selected_location,

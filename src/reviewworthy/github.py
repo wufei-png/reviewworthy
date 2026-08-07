@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ from subprocess import CompletedProcess, run
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from .repository import parse_public_record
 from .util import canonical_json, utc_now
 
 
@@ -29,9 +31,14 @@ class RemoteOperation:
     permissions: tuple[str, ...]
     base: str | None = None
     head: str | None = None
+    base_sha: str | None = None
+    head_sha: str | None = None
     draft: bool = False
     purpose: str = "contribution"
     subject_id: str = ""
+    issue_url: str | None = None
+    link_note_template: str | None = None
+    repository_id: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -44,9 +51,14 @@ class RemoteOperation:
             "permissions": list(self.permissions),
             "base": self.base,
             "head": self.head,
+            "base_sha": self.base_sha,
+            "head_sha": self.head_sha,
             "draft": self.draft,
             "purpose": self.purpose,
             "subject_id": self.subject_id,
+            "issue_url": self.issue_url,
+            "link_note_template": self.link_note_template,
+            "repository_id": self.repository_id,
         }
 
 
@@ -58,11 +70,26 @@ def build_operation(
     body: str,
     base: str | None = None,
     head: str | None = None,
+    base_sha: str | None = None,
+    head_sha: str | None = None,
 ) -> RemoteOperation:
     if kind not in {"issue", "pull_request"}:
         raise ValueError("kind must be issue or pull_request")
     if kind == "pull_request" and not head:
         raise ValueError("head is required for a pull_request")
+    issue_url = None
+    basis = packet.get("basis")
+    if isinstance(basis, dict):
+        if basis.get("kind") == "issue":
+            references = basis.get("references", [])
+            if isinstance(references, list):
+                issue_url = next((str(item) for item in references if parse_public_record(item or "") and parse_public_record(item or "").get("record_type") == "issue"), None)
+        signal = basis.get("signal")
+        if issue_url is None and isinstance(signal, dict) and signal.get("kind") == "issue":
+            parsed = parse_public_record(str(signal.get("reference", "")))
+            if parsed and parsed.get("record_type") == "issue":
+                issue_url = parsed["url"]
+    link_note_template = "{pr_url}" if kind == "pull_request" and issue_url else None
     payload = {
         "purpose": "contribution",
         "subject_id": str(packet.get("contribution_id", "")),
@@ -73,30 +100,45 @@ def build_operation(
         "body": body,
         "base": base,
         "head": head,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
         "draft": kind == "pull_request" and bool(
             isinstance(packet.get("policy"), dict)
             and isinstance(packet["policy"].get("authoritative_claims"), dict)
             and packet["policy"]["authoritative_claims"].get("draft_pr_required") is True
         ),
+        "issue_url": issue_url,
+        "link_note_template": link_note_template,
+        "repository_id": packet.get("repository", {}).get("repository_id") if isinstance(packet.get("repository"), dict) else None,
     }
     digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
     operation_id = f"rw-{digest}"
     marker = f"<!-- reviewworthy:operation-id={operation_id} -->"
     marked_body = body.rstrip() + f"\n\n{marker}"
-    permissions = ("issues:write",) if kind == "issue" else ("contents:read", "pull-requests:write")
+    if kind == "issue":
+        permissions = ("issues:write",)
+    elif issue_url:
+        permissions = ("contents:read", "pull-requests:write", "issues:write")
+    else:
+        permissions = ("contents:read", "pull-requests:write")
     return RemoteOperation(
-        operation_id,
-        marker,
-        kind,
-        repo,
-        title,
-        marked_body,
-        permissions,
-        base,
-        head,
-        payload["draft"],
-        payload["purpose"],
-        payload["subject_id"],
+        operation_id=operation_id,
+        marker=marker,
+        kind=kind,
+        repo=repo,
+        title=title,
+        body=marked_body,
+        permissions=permissions,
+        base=base,
+        head=head,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        draft=payload["draft"],
+        purpose=payload["purpose"],
+        subject_id=payload["subject_id"],
+        issue_url=issue_url,
+        link_note_template=link_note_template,
+        repository_id=payload["repository_id"],
     )
 
 
@@ -133,18 +175,15 @@ def build_signal_operation(
     marker = f"<!-- reviewworthy:operation-id={operation_id} -->"
     marked_body = body.rstrip() + f"\n\n{marker}"
     return RemoteOperation(
-        operation_id,
-        marker,
-        "issue",
-        repo,
-        title,
-        marked_body,
-        ("issues:write",),
-        None,
-        None,
-        False,
-        payload["purpose"],
-        payload["subject_id"],
+        operation_id=operation_id,
+        marker=marker,
+        kind="issue",
+        repo=repo,
+        title=title,
+        body=marked_body,
+        permissions=("issues:write",),
+        purpose=payload["purpose"],
+        subject_id=payload["subject_id"],
     )
 
 
@@ -152,6 +191,27 @@ def operation_receipt_path(packet_path: Path, operation_id: str) -> Path:
     """Return ignored local state used to bridge GitHub read-after-write delay."""
 
     return packet_path.parent / "local" / "operations" / f"{operation_id}.json"
+
+
+@contextmanager
+def operation_lock(path: Path):
+    """Claim one operation locally so concurrent invocations reconcile first."""
+
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({"operation_id": path.stem, "recorded_at": utc_now()}) + "\n")
+    except FileExistsError as exc:
+        raise GhError(f"Operation is already in progress; reconcile the lock before retrying: {lock_path}") from exc
+    try:
+        yield lock_path
+    finally:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, Any] | None:
@@ -176,9 +236,18 @@ def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, 
     status = receipt.get("status")
     if status == "pending":
         raise GhError(f"Operation has an uncertain or pending remote write; reconcile before retrying: {path}")
-    if status != "succeeded":
+    if operation.kind == "pull_request" and status in {"pr_created", "link_attempted", "linked", "needs_reconciliation"}:
+        pr_url = receipt.get("pr_url")
+        parsed_pr = parse_public_record(pr_url)
+        if not parsed_pr or parsed_pr.get("record_type") != "pull_request" or f"{parsed_pr['owner']}/{parsed_pr['name']}" != operation.repo:
+            raise GhError(f"Pull-request receipt has no valid pr_url; reconcile before retrying: {path}")
+        if operation.issue_url and receipt.get("issue_url") != operation.issue_url:
+            raise GhError(f"Pull-request receipt has a mismatched issue_url; reconcile before retrying: {path}")
+        if operation.issue_url and not parse_public_record(receipt.get("issue_url")):
+            raise GhError(f"Pull-request receipt has an invalid issue_url; reconcile before retrying: {path}")
+    elif status != "succeeded":
         raise GhError(f"Operation receipt has an unsupported status; reconcile before retrying: {path}")
-    if not isinstance(receipt.get("remote"), str) or not receipt["remote"].strip():
+    if status == "succeeded" and (not isinstance(receipt.get("remote"), str) or not receipt["remote"].strip()):
         raise GhError(f"Operation receipt has no valid remote result; reconcile before retrying: {path}")
     if not isinstance(receipt.get("recorded_at"), str) or not receipt["recorded_at"].strip():
         raise GhError(f"Operation receipt has no valid timestamp; reconcile before retrying: {path}")
@@ -203,6 +272,8 @@ def save_operation_pending(path: Path, operation: RemoteOperation) -> None:
         "kind": operation.kind,
         "operation": operation.as_dict(),
         "status": "pending",
+        "pr_url": "",
+        "issue_url": operation.issue_url or "",
         "recorded_at": utc_now(),
     }
     _write_operation_record(path, record, "Could not persist pending remote-write state")
@@ -222,6 +293,43 @@ def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str) 
         "recorded_at": utc_now(),
     }
     _write_operation_record(path, receipt, "Remote write succeeded but operation receipt could not be saved; reconcile before retrying")
+
+
+def _save_link_state(path: Path, operation: RemoteOperation, status: str, pr_url: str, *, reason: str = "") -> None:
+    if operation.kind != "pull_request":
+        raise GhError("Link receipt states apply only to pull-request operations")
+    if not pr_url.strip():
+        raise GhError("Pull-request link state needs a non-empty pr_url")
+    record = {
+        "operation_id": operation.operation_id,
+        "marker": operation.marker,
+        "repo": operation.repo,
+        "kind": operation.kind,
+        "operation": operation.as_dict(),
+        "status": status,
+        "pr_url": pr_url,
+        "issue_url": operation.issue_url or "",
+        "recorded_at": utc_now(),
+    }
+    if reason:
+        record["reason"] = reason
+    _write_operation_record(path, record, f"Could not persist {status} remote-write state")
+
+
+def save_operation_pr_created(path: Path, operation: RemoteOperation, pr_url: str) -> None:
+    _save_link_state(path, operation, "pr_created", pr_url)
+
+
+def save_operation_link_attempted(path: Path, operation: RemoteOperation, pr_url: str) -> None:
+    _save_link_state(path, operation, "link_attempted", pr_url)
+
+
+def save_operation_linked(path: Path, operation: RemoteOperation, pr_url: str) -> None:
+    _save_link_state(path, operation, "linked", pr_url)
+
+
+def save_operation_needs_reconciliation(path: Path, operation: RemoteOperation, pr_url: str, reason: str) -> None:
+    _save_link_state(path, operation, "needs_reconciliation", pr_url, reason=reason)
 
 
 class GhClient:
@@ -329,9 +437,11 @@ class GhClient:
             raise GhError("GitHub repository response was not an object")
         base_result = {
             "provider": "github",
+            "host": "github.com",
             "reference": reference,
             "record_type": "pull_request" if record_type == "pull" else record_type[:-1] if record_type.endswith("s") else record_type,
             "repository": f"{owner}/{repository}",
+            "repository_id": repository_record.get("id"),
             "number": int(number),
             "visibility": repository_record.get("visibility"),
         }
@@ -359,7 +469,89 @@ class GhClient:
                 "error": "reference_canonical_mismatch",
                 "canonical_url": canonical_url,
             }
-        return {**base_result, "verified": True, "url": canonical_url, "state": record.get("state")}
+        result = {**base_result, "verified": True, "url": canonical_url, "state": record.get("state")}
+        for key in ("state_reason", "locked", "author_association"):
+            if key in record:
+                result[key] = record[key]
+        if isinstance(record.get("labels"), list):
+            result["labels"] = [
+                label.get("name")
+                for label in record["labels"]
+                if isinstance(label, dict) and isinstance(label.get("name"), str)
+            ]
+        return result
+
+    def find_issue_link_note(self, issue_url: str, pr_url: str) -> list[dict[str, Any]]:
+        """Find an exact one-line PR URL comment on the supporting Issue."""
+
+        parsed_issue = parse_public_record(issue_url)
+        if not parsed_issue or parsed_issue.get("record_type") != "issue":
+            raise GhError("Issue link note needs a canonical GitHub Issue URL")
+        if not parse_public_record(pr_url) or "/pull/" not in pr_url:
+            raise GhError("Issue link note needs a canonical GitHub pull-request URL")
+        pages = self._json(
+            [
+                "api",
+                "--paginate",
+                "--slurp",
+                "--method",
+                "GET",
+                f"repos/{parsed_issue['owner']}/{parsed_issue['name']}/issues/{parsed_issue['number']}/comments",
+                "-f",
+                "per_page=100",
+            ]
+        )
+        if not isinstance(pages, list):
+            raise GhError("gh paginated Issue-comment response was not a list")
+        matches: list[dict[str, Any]] = []
+        for page in pages:
+            if not isinstance(page, list):
+                raise GhError("gh paginated Issue-comment response contained a non-list page")
+            for comment in page:
+                if isinstance(comment, dict) and comment.get("body") == pr_url:
+                    matches.append(comment)
+        return matches
+
+    def issue_commentability(self, issue_url: str) -> dict[str, Any]:
+        """Check the read-side conditions needed before writing one Issue note."""
+
+        try:
+            remote = self.verify_public_reference(issue_url)
+        except GhError as exc:
+            return {"commentable": False, "reason": "issue_unavailable", "error": str(exc)}
+        if not remote.get("verified"):
+            return {"commentable": False, "reason": str(remote.get("error", "issue_unverified")), "remote": remote}
+        if remote.get("record_type") != "issue":
+            return {"commentable": False, "reason": "not_an_issue", "remote": remote}
+        if remote.get("locked") is True:
+            return {"commentable": False, "reason": "issue_locked", "remote": remote}
+        state_reason = str(remote.get("state_reason", "")).strip().lower()
+        if state_reason in {"not planned", "duplicate"}:
+            return {"commentable": False, "reason": f"issue_{state_reason.replace(' ', '_')}", "remote": remote}
+        return {"commentable": True, "remote": remote}
+
+    def add_issue_note(self, issue_url: str, pr_url: str) -> dict[str, Any]:
+        """Write the single canonical PR URL note to the supporting Issue."""
+
+        parsed_issue = parse_public_record(issue_url)
+        if not parsed_issue or parsed_issue.get("record_type") != "issue":
+            raise GhError("Issue link note needs a canonical GitHub Issue URL")
+        parsed_pr = parse_public_record(pr_url)
+        if not parsed_pr or parsed_pr.get("record_type") != "pull_request":
+            raise GhError("Issue link note needs a canonical GitHub pull-request URL")
+        comment = self._json(
+            [
+                "api",
+                f"repos/{parsed_issue['owner']}/{parsed_issue['name']}/issues/{parsed_issue['number']}/comments",
+                "--method",
+                "POST",
+                "-f",
+                f"body={pr_url}",
+            ]
+        )
+        if not isinstance(comment, dict):
+            raise GhError("GitHub Issue note response was not an object")
+        return comment
 
     def create(self, operation: RemoteOperation) -> str:
         if operation.kind == "issue":

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .util import sha256_json
+
 
 CONTRACT_VERSION = "0.1"
 CONTRACT_FIELDS = (
@@ -18,6 +20,12 @@ CONTRACT_FIELDS = (
     "success_criteria",
     "max_diff_lines",
 )
+
+
+def contract_snapshot(contract: dict[str, Any]) -> str:
+    """Hash the approved contract fields, excluding the approval record itself."""
+
+    return sha256_json({key: contract.get(key) for key in CONTRACT_FIELDS})
 
 
 def skeleton_contract(contribution_id: str) -> dict[str, Any]:
@@ -80,6 +88,11 @@ def validate_contract(contract: dict[str, Any]) -> dict[str, Any]:
             error("invalid_approval_status", "approval.status must be not_run, approved, or rejected", "approval.status")
         if not isinstance(approval.get("human_confirmed"), bool):
             error("invalid_approval_confirmation", "approval.human_confirmed must be boolean", "approval.human_confirmed")
+        if approval.get("status") == "approved":
+            if not isinstance(approval.get("contract_sha256"), str) or not approval.get("contract_sha256", "").strip():
+                error("missing_approval_snapshot", "An approved contract needs contract_sha256", "approval.contract_sha256")
+            elif approval.get("contract_sha256") != contract_snapshot(contract):
+                error("stale_contract_approval", "Contract approval does not match the current contract fields", "approval.contract_sha256")
     return {"valid": not errors, "errors": errors}
 
 

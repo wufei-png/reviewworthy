@@ -9,8 +9,9 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.cli import main
+from reviewworthy.git import current_head
 from reviewworthy.github import GhError
-from reviewworthy.packet import skeleton_packet
+from reviewworthy.packet import material_snapshot, skeleton_packet
 
 from helpers import valid_packet
 
@@ -239,7 +240,7 @@ class CliBoundaryTests(unittest.TestCase):
                         "--body-file",
                         str(body_path),
                         "--head",
-                        "fix/input",
+                        "main",
                         "--json",
                     ]
                 )
@@ -262,7 +263,7 @@ class CliBoundaryTests(unittest.TestCase):
                         "--body-file",
                         str(body_path),
                         "--head",
-                        "fix/input",
+                        "main",
                         "--json",
                     ]
                 )
@@ -346,3 +347,109 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(second_code, 2)
             self.assertEqual(fake_client.create.call_count, 1)
             self.assertEqual(json.loads(receipt_path.read_text())["status"], "pending")
+
+    def test_pull_request_create_links_issue_once_and_reuses_linked_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root = Path(__file__).parents[1]
+            head_sha = current_head(repository_root)
+            packet = valid_packet()
+            packet["repository"]["base_sha"] = head_sha
+            packet["diff"].update({"base_sha": head_sha, "head_sha": head_sha})
+            packet["verification"]["receipts"][0]["head_sha"] = head_sha
+            packet["verification"]["receipts"][0]["cwd"] = str(repository_root)
+            packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet_path = root / "packet.json"
+            body_path = root / "body.md"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+            common = [
+                "--packet", str(packet_path),
+                "--repo", "example/project",
+                "--kind", "pull_request",
+                "--title", packet["narrative"]["title"],
+                "--body-file", str(body_path),
+                "--base", "main",
+                "--head", "main",
+                "--root", str(repository_root),
+            ]
+            plan_output = io.StringIO()
+            with redirect_stdout(plan_output):
+                self.assertEqual(main(["remote", "plan", *common, "--json"]), 0)
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "provider": "github",
+                "repository": "example/project",
+                "repository_id": 101,
+                "record_type": "issue",
+                "state": "open",
+            }
+            fake_client.find_existing.return_value = []
+            fake_client.create.return_value = "https://github.com/example/project/pull/8"
+            fake_client.find_issue_link_note.return_value = []
+            fake_client.issue_commentability.return_value = {"commentable": True}
+            fake_client.add_issue_note.return_value = {}
+            create_args = ["remote", "create", *common, "--confirm-operation-id", operation_id, "--json"]
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client):
+                with redirect_stdout(io.StringIO()):
+                    first_code = main(create_args)
+                with redirect_stdout(io.StringIO()):
+                    second_code = main(create_args)
+
+            receipt_files = list((root / "local" / "operations").glob("*.json"))
+            self.assertEqual(first_code, 0)
+            self.assertEqual(second_code, 0)
+            self.assertEqual(len(receipt_files), 1)
+            receipt = json.loads(receipt_files[0].read_text())
+            self.assertEqual(receipt["status"], "linked")
+            self.assertEqual(receipt["pr_url"], "https://github.com/example/project/pull/8")
+            self.assertEqual(receipt["issue_url"], "https://github.com/example/project/issues/1")
+            self.assertEqual(fake_client.create.call_count, 1)
+            self.assertEqual(fake_client.add_issue_note.call_count, 1)
+
+    def test_pull_request_link_failure_is_terminal_without_creating_another_pr(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root = Path(__file__).parents[1]
+            head_sha = current_head(repository_root)
+            packet = valid_packet()
+            packet["repository"]["base_sha"] = head_sha
+            packet["diff"].update({"base_sha": head_sha, "head_sha": head_sha})
+            packet["verification"]["receipts"][0]["head_sha"] = head_sha
+            packet["verification"]["receipts"][0]["cwd"] = str(repository_root)
+            packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet_path = root / "packet.json"
+            body_path = root / "body.md"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+            common = [
+                "--packet", str(packet_path), "--repo", "example/project", "--kind", "pull_request",
+                "--title", packet["narrative"]["title"], "--body-file", str(body_path), "--base", "main",
+                "--head", "main", "--root", str(repository_root),
+            ]
+            plan_output = io.StringIO()
+            with redirect_stdout(plan_output):
+                main(["remote", "plan", *common, "--json"])
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {"verified": True, "repository": "example/project", "repository_id": 101, "record_type": "issue"}
+            fake_client.find_existing.return_value = []
+            fake_client.create.return_value = "https://github.com/example/project/pull/9"
+            fake_client.find_issue_link_note.side_effect = GhError("Issue comments unavailable")
+            create_args = ["remote", "create", *common, "--confirm-operation-id", operation_id, "--json"]
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client):
+                with redirect_stdout(io.StringIO()):
+                    first_code = main(create_args)
+                with redirect_stdout(io.StringIO()):
+                    second_code = main(create_args)
+            receipt_files = list((root / "local" / "operations").glob("*.json"))
+            self.assertEqual(first_code, 1)
+            self.assertEqual(second_code, 1)
+            self.assertEqual(json.loads(receipt_files[0].read_text())["status"], "needs_reconciliation")
+            self.assertEqual(fake_client.create.call_count, 1)

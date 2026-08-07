@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .repository import parse_repository_slug, repository_identity, repository_matches
 from .signal import validate_signal
 from .util import sha256_json
 
@@ -41,6 +42,11 @@ def validate_candidate_menu(menu: dict[str, Any]) -> dict[str, Any]:
         _error(errors, "unsupported_version", "menu_version must be 0.1", "menu_version")
     if not isinstance(menu.get("repository"), str) or not menu.get("repository", "").strip():
         _error(errors, "missing_repository", "repository is required", "repository")
+    else:
+        try:
+            parse_repository_slug(menu["repository"])
+        except ValueError:
+            _error(errors, "invalid_repository", "repository must use the owner/name form", "repository")
     candidates = menu.get("candidates")
     if not isinstance(candidates, list):
         _error(errors, "invalid_candidates", "candidates must be a list", "candidates")
@@ -161,6 +167,24 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
     if isinstance(basis.get("signal"), dict) and basis["signal"].get("status") in {"rejected", "expired"}:
         raise ValueError("A rejected or expired Contribution Signal cannot be bound")
     bound = deepcopy(packet)
+    menu_repository = menu.get("repository")
+    if not isinstance(menu_repository, str) or not menu_repository.strip():
+        raise ValueError("Candidate menu has no repository identity")
+    try:
+        parse_repository_slug(menu_repository)
+    except ValueError as exc:
+        raise ValueError("Candidate menu repository must use the owner/name form") from exc
+    packet_repository = bound.get("repository")
+    if not isinstance(packet_repository, dict) or not packet_repository.get("owner") or not packet_repository.get("name"):
+        previous = packet_repository if isinstance(packet_repository, dict) else {}
+        bound["repository"] = repository_identity(
+            menu_repository,
+            repository_id=previous.get("repository_id"),
+            default_branch=str(previous.get("default_branch", "main") or "main"),
+            base_sha=str(previous.get("base_sha", "") or ""),
+        )
+    elif not repository_matches(packet_repository, menu_repository):
+        raise ValueError("Candidate menu repository does not match packet.repository")
     entry = bound.get("entry", {})
     if not isinstance(entry, dict):
         raise ValueError("packet_entry_invalid")
@@ -170,7 +194,7 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
     bound["basis"] = deepcopy(basis)
     bound["candidate_selection"] = {
         "candidate_id": selected_id,
-        "repository": menu.get("repository", ""),
+        "repository": menu_repository,
         "menu_snapshot": sha256_json(menu),
         "recommendation": candidate.get("recommendation"),
         "confirmed": True,

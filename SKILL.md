@@ -35,10 +35,10 @@ Use this workflow whenever a user asks an Agent to make or publish an AI-assiste
 5. Build and approve a Contribution Contract: problem, non-goals, scope, invariants, design, alternatives, validation plan, Diff budget, risks, and success criteria. Validate it with `reviewworthy contract validate`.
 6. Assess review depth with `reviewworthy risk assess`. Escalate when the user requests more scrutiny. Respect hard-stops independently.
 7. Ask for approval of the contract before implementation. Re-plan if the implementation materially leaves the approved scope.
-8. Implement the smallest coherent change. Record commands, exit codes, verification evidence, and the AI-assistance stages/human verification record.
+8. Implement the smallest coherent change. Capture the real Git diff and run verification through the CLI so `argv`, `cwd`, exit code, and the tested `head_sha` are recorded; stdout/stderr hashes are audit data only. Record the AI-assistance stages and human verification record.
 9. Bind any confirmed Candidate Menu selection into the Packet before Contract approval. Prepare the exact final Diff and update the material snapshot. Record and validate Orientation, then ask fresh Assessment questions. Regenerate stale records after any material change.
 10. Render disclosure with `reviewworthy disclosure render` according to normalized policy. Prepare the final PR title and Body and always show the exact text. For heightened work or policy-required narrative, require the user's own motivation, trade-offs, and risks before AI copyediting.
-11. Run `reviewworthy remote plan`. Only after the user confirms the displayed operation ID and all signal/policy gates pass may the CLI create the requested Issue or formal Pull Request through `gh`.
+11. Run `reviewworthy remote plan`. The Packet repository identity and live Issue identity must match, and a PR Body must contain the canonical supporting Issue URL. Only after the user confirms the displayed operation ID and all signal/policy gates pass may the CLI create the requested Issue or formal Pull Request through `gh`. For an Issue-backed PR, the CLI then searches for the exact PR URL note, writes at most one such note, and records `needs_reconciliation` if the note cannot be written; it never creates a second PR.
 
 ## Stop outcomes
 

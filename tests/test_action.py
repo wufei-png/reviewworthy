@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from reviewworthy.action import check_packet
+from reviewworthy.contract import contract_snapshot
 from reviewworthy.packet import material_snapshot
 
 from helpers import valid_packet
@@ -98,6 +99,7 @@ class ActionCheckTests(unittest.TestCase):
             packet = valid_packet()
             packet["contract"]["scope"] = {"modules": ["input boundary"]}
             packet["diff"]["changed_files"] = ["src/unapproved.py"]
+            packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
             packet["materials"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)

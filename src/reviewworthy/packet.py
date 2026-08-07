@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .contract import CONTRACT_FIELDS, CONTRACT_VERSION
+from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
+from .repository import parse_public_record, parse_repository_slug, validate_repository_identity
 from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .understanding import validate_understanding
 from .util import sha256_json
@@ -58,14 +59,27 @@ def result_record(
     return record
 
 
-def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
+def skeleton_packet(contribution_id: str, mode: str, repository: str | None = None) -> dict[str, Any]:
     """Create an explicit, incomplete packet for a new contribution."""
 
     if mode not in {"issue-backed", "discovery"}:
         raise ValueError("mode must be issue-backed or discovery")
+    repository_value: dict[str, Any] = {
+        "provider": "github",
+        "host": "github.com",
+        "owner": "",
+        "name": "",
+        "repository_id": None,
+        "default_branch": "main",
+        "base_sha": "",
+    }
+    if repository:
+        owner, name = parse_repository_slug(repository)
+        repository_value.update({"owner": owner, "name": name})
     packet: dict[str, Any] = {
         "packet_version": "0.1",
         "contribution_id": contribution_id,
+        "repository": repository_value,
         "entry": {"mode": mode, "source": ""},
         "basis": {"kind": "issue" if mode == "issue-backed" else "discovery-evidence", "references": [], "evidence": []},
         "contract": {
@@ -91,7 +105,7 @@ def skeleton_packet(contribution_id: str, mode: str) -> dict[str, Any]:
             "disclosure": {"text": "", "locations": [], "human_confirmed": False},
         },
         "diff": {"changed_files": [], "additions": 0, "deletions": 0},
-        "verification": {"commands": [], "evidence": []},
+        "verification": {"commands": [], "evidence": [], "receipts": []},
         "materials": {},
         "results": [result_record(node, "not_run") for node in REQUIRED_NODES],
         "understanding": {
@@ -123,6 +137,7 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
     required_top = (
         "packet_version",
         "contribution_id",
+        "repository",
         "entry",
         "basis",
         "contract",
@@ -144,6 +159,8 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         _error(errors, "unsupported_version", "packet_version must be 0.1", "packet_version")
     if not isinstance(packet.get("contribution_id"), str) or not packet.get("contribution_id"):
         _error(errors, "invalid_contribution_id", "contribution_id must be a non-empty string", "contribution_id")
+
+    errors.extend(validate_repository_identity(packet.get("repository")))
 
     entry = packet.get("entry", {})
     if not isinstance(entry, dict) or entry.get("mode") not in {"issue-backed", "discovery"}:
@@ -184,6 +201,11 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
                     _error(errors, "invalid_approval_status", "contract.approval.status must be not_run, approved, or rejected", "contract.approval.status")
                 if not isinstance(approval.get("human_confirmed"), bool):
                     _error(errors, "invalid_approval_confirmation", "contract.approval.human_confirmed must be boolean", "contract.approval.human_confirmed")
+                if approval.get("status") == "approved":
+                    if not isinstance(approval.get("contract_sha256"), str) or not approval.get("contract_sha256", "").strip():
+                        _error(errors, "missing_approval_snapshot", "An approved contract needs contract_sha256", "contract.approval.contract_sha256")
+                    elif approval.get("contract_sha256") != contract_snapshot(contract):
+                        _error(errors, "stale_contract_approval", "Contract approval does not match the current contract fields", "contract.approval.contract_sha256")
         scope = contract.get("scope")
         if isinstance(scope, dict):
             for scope_key in ("files", "modules"):
@@ -258,10 +280,33 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         for count_key in ("additions", "deletions"):
             if count_key in diff and (not isinstance(diff[count_key], int) or isinstance(diff[count_key], bool) or diff[count_key] < 0):
                 _error(errors, "invalid_diff_count", f"diff.{count_key} must be a non-negative integer", f"diff.{count_key}")
+        for sha_key in ("base_sha", "head_sha", "patch_sha256"):
+            if sha_key in diff and (not isinstance(diff[sha_key], str) or not diff[sha_key].strip()):
+                _error(errors, "invalid_diff_receipt", f"diff.{sha_key} must be a non-empty string when present", f"diff.{sha_key}")
 
     verification = packet.get("verification", {})
     if not isinstance(verification, dict):
         _error(errors, "invalid_verification", "verification must be an object", "verification")
+    else:
+        receipts = verification.get("receipts", [])
+        if not isinstance(receipts, list):
+            _error(errors, "invalid_verification_receipts", "verification.receipts must be a list", "verification.receipts")
+        else:
+            for index, receipt in enumerate(receipts):
+                path = f"verification.receipts[{index}]"
+                if not isinstance(receipt, dict):
+                    _error(errors, "invalid_verification_receipt", "Each verification receipt must be an object", path)
+                    continue
+                if not isinstance(receipt.get("argv"), list) or not receipt.get("argv") or not all(isinstance(item, str) and item for item in receipt["argv"]):
+                    _error(errors, "invalid_verification_command", "A verification receipt needs a non-empty argv list", f"{path}.argv")
+                if not isinstance(receipt.get("cwd"), str) or not receipt.get("cwd", "").strip():
+                    _error(errors, "invalid_verification_cwd", "A verification receipt needs cwd", f"{path}.cwd")
+                if not isinstance(receipt.get("head_sha"), str) or not receipt.get("head_sha", "").strip():
+                    _error(errors, "invalid_verification_head", "A verification receipt needs head_sha", f"{path}.head_sha")
+                if not isinstance(receipt.get("exit_code"), int) or isinstance(receipt.get("exit_code"), bool):
+                    _error(errors, "invalid_verification_exit_code", "A verification receipt needs an integer exit_code", f"{path}.exit_code")
+                if receipt.get("provenance") not in {"cli_executed", "self_reported"}:
+                    _error(errors, "invalid_verification_provenance", "verification receipt provenance must be cli_executed or self_reported", f"{path}.provenance")
 
     materials = packet.get("materials", {})
     if not isinstance(materials, dict):
@@ -389,6 +434,61 @@ def deterministic_evidence_checks(
     return violations, unknowns
 
 
+def issue_reference(packet: dict[str, Any]) -> str | None:
+    """Return the canonical Issue URL supporting an Issue-backed contribution."""
+
+    basis = packet.get("basis", {})
+    if not isinstance(basis, dict):
+        return None
+    candidates: list[Any] = []
+    if basis.get("kind") == "issue":
+        candidates.extend(basis.get("references", []) if isinstance(basis.get("references", []), list) else [])
+    signal = basis.get("signal")
+    if isinstance(signal, dict) and signal.get("kind") == "issue":
+        candidates.append(signal.get("reference"))
+    for candidate in candidates:
+        parsed = parse_public_record(candidate)
+        if parsed and parsed.get("record_type") == "issue":
+            return str(parsed["url"])
+    return None
+
+
+def issue_basis_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
+    """Check the local Issue evidence without making a provider call."""
+
+    basis = packet.get("basis", {})
+    if not isinstance(basis, dict) or basis.get("kind") not in {"issue", "signal"}:
+        return []
+    reference = issue_reference(packet)
+    if not reference:
+        return [{"code": "issue_reference_required", "message": "Issue-backed work needs a canonical GitHub Issue URL.", "path": "basis.references"}]
+    repository = packet.get("repository", {})
+    parsed = parse_public_record(reference)
+    if not isinstance(repository, dict) or parsed is None or parsed.get("owner") != repository.get("owner") or parsed.get("name") != repository.get("name"):
+        return [{"code": "issue_repository_mismatch", "message": "The Issue reference must belong to the Packet repository.", "path": "basis.references"}]
+    verification = basis.get("verification") if basis.get("kind") == "issue" else (basis.get("signal", {}) or {}).get("verification")
+    if not isinstance(verification, dict) or verification.get("status") != "verified" or verification.get("provider") != "github" or verification.get("reference") != reference:
+        return [{"code": "issue_verification_required", "message": "The Issue reference needs a recorded successful GitHub verification.", "path": "basis.verification"}]
+    if verification.get("repository") and verification.get("repository") != f"{repository.get('owner')}/{repository.get('name')}":
+        return [{"code": "issue_verification_repository_mismatch", "message": "The recorded Issue verification belongs to another repository.", "path": "basis.verification.repository"}]
+    state_reason = str(verification.get("state_reason", "")).strip().lower()
+    if state_reason in {"not planned", "duplicate"}:
+        return [{"code": "issue_not_actionable", "message": f"The Issue is recorded as closed for {state_reason}.", "path": "basis.verification.state_reason"}]
+    repository_id = repository.get("repository_id")
+    if repository_id is not None and verification.get("repository_id") is None:
+        return [{"code": "issue_verification_identity_missing", "message": "The recorded Issue verification must include the Packet repository identity.", "path": "basis.verification.repository_id"}]
+    if repository_id is not None and repository_id != verification.get("repository_id"):
+        return [{"code": "issue_verification_identity_mismatch", "message": "The recorded Issue verification has a different repository identity.", "path": "basis.verification.repository_id"}]
+    return []
+
+
+def issue_link_blockers(packet: dict[str, Any], body: str) -> list[dict[str, str]]:
+    reference = issue_reference(packet)
+    if reference and reference not in body:
+        return [{"code": "issue_link_missing", "message": "The final PR Body must contain the canonical supporting Issue URL.", "path": "narrative.body"}]
+    return []
+
+
 def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> list[dict[str, str]]:
     """Return only deterministic violations from known policy claims."""
 
@@ -481,10 +581,32 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
         or not verification.get("evidence")
     ):
         blockers.append({"code": "missing_verification_evidence", "message": "Remote readiness requires verification commands and evidence.", "path": "verification"})
+    receipts = verification.get("receipts", []) if isinstance(verification, dict) else []
+    usable_receipts = [
+        receipt for receipt in receipts
+        if isinstance(receipt, dict)
+        and receipt.get("provenance") == "cli_executed"
+        and receipt.get("exit_code") == 0
+        and isinstance(receipt.get("argv"), list)
+        and receipt.get("argv")
+        and isinstance(receipt.get("cwd"), str)
+        and receipt.get("cwd")
+        and isinstance(receipt.get("head_sha"), str)
+        and receipt.get("head_sha")
+    ] if isinstance(receipts, list) else []
+    if not usable_receipts:
+        blockers.append({"code": "missing_executed_verification", "message": "Remote readiness needs a CLI-executed verification receipt with exit_code 0.", "path": "verification.receipts"})
+
+    diff = packet.get("diff", {})
+    if not isinstance(diff, dict) or not all(isinstance(diff.get(key), str) and diff.get(key) for key in ("base_sha", "head_sha", "patch_sha256")):
+        blockers.append({"code": "missing_diff_receipt", "message": "Remote readiness needs a real Git diff receipt bound to base_sha and head_sha.", "path": "diff"})
+    elif usable_receipts and not any(receipt.get("head_sha") == diff.get("head_sha") for receipt in usable_receipts):
+        blockers.append({"code": "verification_head_mismatch", "message": "No executed verification receipt matches diff.head_sha.", "path": "verification.receipts"})
 
     blockers.extend(policy_violations(packet, enforce_disclosure=True))
 
     if isinstance(basis, dict):
+        blockers.extend(issue_basis_blockers(packet))
         blockers.extend(signal_readiness_blockers(basis, entry.get("mode") if isinstance(entry, dict) else ""))
         if basis.get("kind") == "discovery-evidence":
             claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
