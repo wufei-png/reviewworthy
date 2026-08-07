@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS
@@ -23,6 +24,21 @@ REQUIRED_NODES = (
     "narrative",
 )
 ALLOWED_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run"}
+
+
+def _is_repository_relative_path(value: str) -> bool:
+    """Return whether a public path is relative under POSIX and Windows rules."""
+
+    posix_path = Path(value)
+    windows_path = PureWindowsPath(value)
+    return not (
+        posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or windows_path.root
+        or ".." in posix_path.parts
+        or ".." in windows_path.parts
+    )
 
 
 def material_snapshot(packet: dict[str, Any]) -> str:
@@ -303,6 +319,8 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
                     _error(errors, "invalid_verification_command", "A verification receipt needs a non-empty argv list", f"{path}.argv")
                 if not isinstance(receipt.get("cwd"), str) or not receipt.get("cwd", "").strip():
                     _error(errors, "invalid_verification_cwd", "A verification receipt needs cwd", f"{path}.cwd")
+                elif not _is_repository_relative_path(receipt["cwd"]):
+                    _error(errors, "absolute_verification_cwd", "A verification receipt cwd must be repository-relative", f"{path}.cwd")
                 if not isinstance(receipt.get("head_sha"), str) or not receipt.get("head_sha", "").strip():
                     _error(errors, "invalid_verification_head", "A verification receipt needs head_sha", f"{path}.head_sha")
                 if not isinstance(receipt.get("exit_code"), int) or isinstance(receipt.get("exit_code"), bool):
@@ -610,15 +628,28 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
         if isinstance(receipt, dict)
         and receipt.get("provenance") == "cli_executed"
         and receipt.get("exit_code") == 0
+        and receipt.get("status") == "valid"
         and isinstance(receipt.get("argv"), list)
         and receipt.get("argv")
         and isinstance(receipt.get("cwd"), str)
         and receipt.get("cwd")
         and isinstance(receipt.get("head_sha"), str)
         and receipt.get("head_sha")
+        and receipt.get("head_sha_before") == receipt.get("head_sha") == receipt.get("head_sha_after")
+        and receipt.get("worktree_clean_before") is True
+        and receipt.get("worktree_clean_after") is True
     ] if isinstance(receipts, list) else []
     if not usable_receipts:
-        blockers.append({"code": "missing_executed_verification", "message": "Remote readiness needs a CLI-executed verification receipt with exit_code 0.", "path": "verification.receipts"})
+        executed_receipts = [
+            receipt for receipt in receipts
+            if isinstance(receipt, dict)
+            and receipt.get("provenance") == "cli_executed"
+            and receipt.get("exit_code") == 0
+        ] if isinstance(receipts, list) else []
+        if executed_receipts:
+            blockers.append({"code": "verification_worktree_unverified", "message": "Remote readiness needs a valid CLI verification receipt with clean worktree and stable HEAD proof.", "path": "verification.receipts"})
+        else:
+            blockers.append({"code": "missing_executed_verification", "message": "Remote readiness needs a CLI-executed verification receipt with exit_code 0.", "path": "verification.receipts"})
 
     diff = packet.get("diff", {})
     if not isinstance(diff, dict) or not all(isinstance(diff.get(key), str) and diff.get(key) for key in ("base_sha", "head_sha", "patch_sha256")):

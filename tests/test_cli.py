@@ -4,12 +4,14 @@ from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from reviewworthy.cli import main
-from reviewworthy.git import current_head
+from reviewworthy.git import capture_diff
 from reviewworthy.github import GhError
 from reviewworthy.packet import material_snapshot, skeleton_packet
 
@@ -17,6 +19,26 @@ from helpers import valid_packet
 
 
 class CliBoundaryTests(unittest.TestCase):
+    def _git(self, root: Path, *args: str) -> str:
+        completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+        return completed.stdout.strip()
+
+    def _pr_repository(self, root: Path) -> tuple[Path, dict[str, object]]:
+        repository_root = root / "git-repository"
+        repository_root.mkdir()
+        self._git(repository_root, "init", "-q")
+        self._git(repository_root, "config", "user.email", "test@example.invalid")
+        self._git(repository_root, "config", "user.name", "Reviewworthy Test")
+        self._git(repository_root, "branch", "-M", "main")
+        (repository_root / "src").mkdir()
+        (repository_root / "src" / "example.py").write_text("one\n", encoding="utf-8")
+        self._git(repository_root, "add", "src/example.py")
+        self._git(repository_root, "commit", "-qm", "base")
+        self._git(repository_root, "checkout", "-qb", "feature")
+        (repository_root / "src" / "example.py").write_text("one\ntwo\n", encoding="utf-8")
+        self._git(repository_root, "commit", "-qam", "feature")
+        return repository_root, capture_diff(repository_root, "main", "feature")
+
     def test_signal_init_and_require_confirmed_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             signal_path = Path(directory) / "signal.json"
@@ -242,6 +264,36 @@ class CliBoundaryTests(unittest.TestCase):
             })
             self.assertIn("unknown_policy", {violation["code"] for violation in result["violations"]})
 
+    def test_verify_cli_persists_invalid_receipt_and_returns_failure_when_head_moves(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, _ = self._pr_repository(root)
+            expected_head = self._git(repository_root, "rev-parse", "HEAD")
+            receipt_path = root / "verification.json"
+            command = (
+                "from pathlib import Path; import subprocess; "
+                "Path('src/example.py').write_text('one\\ntwo\\nthree\\n'); "
+                "subprocess.run(['git', 'add', 'src/example.py'], check=True); "
+                "subprocess.run(['git', 'commit', '-qm', 'verification mutation'], check=True)"
+            )
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main([
+                    "verify", "run", "--root", str(repository_root), "--head", expected_head,
+                    "--output", str(receipt_path), "--force", "--json", "--",
+                    sys.executable, "-c", command,
+                ])
+
+            result = json.loads(output.getvalue())
+            persisted = json.loads(receipt_path.read_text(encoding="utf-8"))
+            output_receipt = dict(result)
+            output_receipt.pop("captured")
+            self.assertEqual(code, 1)
+            self.assertEqual(result["status"], "invalid")
+            self.assertEqual(result["failure_reason"], "head_changed_after_execution")
+            self.assertEqual(persisted, output_receipt)
+
     def test_remote_plan_uses_the_approved_packet_narrative(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -296,6 +348,93 @@ class CliBoundaryTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(mismatch_code, 2)
+
+    def test_remote_plan_rejects_packet_when_recomputed_diff_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, actual_diff = self._pr_repository(root)
+            packet = valid_packet()
+            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["diff"] = dict(actual_diff)
+            packet["verification"]["receipts"][0].update({
+                "head_sha": actual_diff["head_sha"],
+                "head_sha_before": actual_diff["head_sha"],
+                "head_sha_after": actual_diff["head_sha"],
+                "cwd": ".",
+            })
+            packet["diff"]["additions"] = actual_diff["additions"] + 1
+            packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet_path = root / "packet.json"
+            body_path = root / "body.md"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = main([
+                    "remote", "plan", "--packet", str(packet_path), "--repo", "example/project",
+                    "--kind", "pull_request", "--title", packet["narrative"]["title"],
+                    "--body-file", str(body_path), "--base", "main", "--head", "feature",
+                    "--root", str(repository_root), "--json",
+                ])
+
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 0)
+            self.assertIn("remote_additions_mismatch", {item["code"] for item in result["readiness_blockers"]})
+
+    def test_remote_plan_compares_every_recomputed_diff_field(self) -> None:
+        fields = {
+            "base_sha": "0" * 40,
+            "head_sha": "1" * 40,
+            "patch_sha256": "0" * 64,
+            "changed_files": ["src/other.py"],
+            "additions": 1,
+            "deletions": 1,
+        }
+        blocker_codes = {
+            "base_sha": "remote_base_mismatch",
+            "head_sha": "remote_head_mismatch",
+            "patch_sha256": "remote_patch_mismatch",
+            "changed_files": "remote_changed_files_mismatch",
+            "additions": "remote_additions_mismatch",
+            "deletions": "remote_deletions_mismatch",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, actual_diff = self._pr_repository(root)
+            for field, value in fields.items():
+                packet = valid_packet()
+                packet["repository"]["base_sha"] = actual_diff["base_sha"]
+                packet["diff"] = dict(actual_diff)
+                packet["diff"][field] = actual_diff[field] + 1 if field in {"additions", "deletions"} else value
+                packet["verification"]["receipts"][0].update({
+                    "head_sha": actual_diff["head_sha"],
+                    "head_sha_before": actual_diff["head_sha"],
+                    "head_sha_after": actual_diff["head_sha"],
+                    "cwd": ".",
+                })
+                packet["materials"]["material_snapshot"] = material_snapshot(packet)
+                packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                packet_path = root / "packet.json"
+                body_path = root / "body.md"
+                packet_path.write_text(json.dumps(packet), encoding="utf-8")
+                body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = main([
+                        "remote", "plan", "--packet", str(packet_path), "--repo", "example/project",
+                        "--kind", "pull_request", "--title", packet["narrative"]["title"],
+                        "--body-file", str(body_path), "--base", "main", "--head", "feature",
+                        "--root", str(repository_root), "--json",
+                    ])
+
+                result = json.loads(output.getvalue())
+                self.assertEqual(code, 0, field)
+                self.assertIn(blocker_codes[field], {item["code"] for item in result["readiness_blockers"]})
 
     def test_remote_create_uses_local_receipt_on_immediate_retry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -379,13 +518,16 @@ class CliBoundaryTests(unittest.TestCase):
     def test_pull_request_create_links_issue_once_and_reuses_linked_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            repository_root = Path(__file__).parents[1]
-            head_sha = current_head(repository_root)
+            repository_root, actual_diff = self._pr_repository(root)
             packet = valid_packet()
-            packet["repository"]["base_sha"] = head_sha
-            packet["diff"].update({"base_sha": head_sha, "head_sha": head_sha})
-            packet["verification"]["receipts"][0]["head_sha"] = head_sha
-            packet["verification"]["receipts"][0]["cwd"] = str(repository_root)
+            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["diff"] = actual_diff
+            packet["verification"]["receipts"][0].update({
+                "head_sha": actual_diff["head_sha"],
+                "head_sha_before": actual_diff["head_sha"],
+                "head_sha_after": actual_diff["head_sha"],
+                "cwd": ".",
+            })
             packet["materials"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
@@ -400,7 +542,7 @@ class CliBoundaryTests(unittest.TestCase):
                 "--title", packet["narrative"]["title"],
                 "--body-file", str(body_path),
                 "--base", "main",
-                "--head", "main",
+                "--head", "feature",
                 "--root", str(repository_root),
             ]
             plan_output = io.StringIO()
@@ -442,13 +584,16 @@ class CliBoundaryTests(unittest.TestCase):
     def test_pull_request_link_failure_is_terminal_without_creating_another_pr(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            repository_root = Path(__file__).parents[1]
-            head_sha = current_head(repository_root)
+            repository_root, actual_diff = self._pr_repository(root)
             packet = valid_packet()
-            packet["repository"]["base_sha"] = head_sha
-            packet["diff"].update({"base_sha": head_sha, "head_sha": head_sha})
-            packet["verification"]["receipts"][0]["head_sha"] = head_sha
-            packet["verification"]["receipts"][0]["cwd"] = str(repository_root)
+            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["diff"] = actual_diff
+            packet["verification"]["receipts"][0].update({
+                "head_sha": actual_diff["head_sha"],
+                "head_sha_before": actual_diff["head_sha"],
+                "head_sha_after": actual_diff["head_sha"],
+                "cwd": ".",
+            })
             packet["materials"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
             packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
@@ -459,7 +604,7 @@ class CliBoundaryTests(unittest.TestCase):
             common = [
                 "--packet", str(packet_path), "--repo", "example/project", "--kind", "pull_request",
                 "--title", packet["narrative"]["title"], "--body-file", str(body_path), "--base", "main",
-                "--head", "main", "--root", str(repository_root),
+                "--head", "feature", "--root", str(repository_root),
             ]
             plan_output = io.StringIO()
             with redirect_stdout(plan_output):

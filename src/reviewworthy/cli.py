@@ -306,7 +306,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any]:
+def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any, dict[str, Any] | None]:
     packet = _load_object(args.packet)
     if not repository_matches(packet.get("repository"), args.repo):
         raise ValueError("Remote target repository must exactly match packet.repository")
@@ -318,8 +318,9 @@ def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any]:
         raise ValueError("Remote Body must exactly match the approved packet narrative Body")
     base_sha = resolve_ref(args.root, args.base) if args.kind == "pull_request" else None
     head_sha = resolve_ref(args.root, args.head) if args.kind == "pull_request" and args.head else None
+    actual_diff = capture_diff(args.root, args.base, args.head) if args.kind == "pull_request" else None
     operation = build_operation(packet, args.repo, args.kind, args.title, body, args.base, args.head, base_sha, head_sha)
-    return packet, operation
+    return packet, operation, actual_diff
 
 
 def _issue_revalidation_errors(packet: dict[str, Any], remote: dict[str, Any]) -> list[dict[str, str]]:
@@ -385,15 +386,22 @@ def _canonical_remote_url(value: Any, expected_type: str, repo: str) -> str:
     return str(parsed["url"])
 
 
-def _operation_diff_blockers(packet: dict[str, Any], operation: Any) -> list[dict[str, str]]:
+def _operation_diff_blockers(packet: dict[str, Any], operation: Any, actual_diff: dict[str, Any] | None) -> list[dict[str, str]]:
     diff = packet.get("diff", {})
-    if not isinstance(diff, dict):
-        return []
+    if not isinstance(diff, dict) or not isinstance(actual_diff, dict):
+        return [{"code": "remote_diff_unavailable", "message": "The current pull-request Diff could not be recomputed from its base/head commits; recapture evidence.", "path": "diff"}]
     blockers: list[dict[str, str]] = []
-    if diff.get("base_sha") and operation.base_sha and diff["base_sha"] != operation.base_sha:
-        blockers.append({"code": "remote_base_mismatch", "message": "The current PR base SHA differs from packet.diff.base_sha; recapture evidence.", "path": "diff.base_sha"})
-    if diff.get("head_sha") and operation.head_sha and diff["head_sha"] != operation.head_sha:
-        blockers.append({"code": "remote_head_mismatch", "message": "The current PR head SHA differs from packet.diff.head_sha; recapture evidence.", "path": "diff.head_sha"})
+    fields = (
+        ("base_sha", "remote_base_mismatch", "The current PR base SHA differs from packet.diff.base_sha; recapture evidence."),
+        ("head_sha", "remote_head_mismatch", "The current PR head SHA differs from packet.diff.head_sha; recapture evidence."),
+        ("patch_sha256", "remote_patch_mismatch", "The current PR patch hash differs from packet.diff.patch_sha256; recapture evidence."),
+        ("changed_files", "remote_changed_files_mismatch", "The current PR changed files differ from packet.diff.changed_files; recapture evidence."),
+        ("additions", "remote_additions_mismatch", "The current PR addition count differs from packet.diff.additions; recapture evidence."),
+        ("deletions", "remote_deletions_mismatch", "The current PR deletion count differs from packet.diff.deletions; recapture evidence."),
+    )
+    for key, code, message in fields:
+        if diff.get(key) != actual_diff.get(key):
+            blockers.append({"code": code, "message": message, "path": f"diff.{key}"})
     return blockers
 
 
@@ -779,7 +787,7 @@ def main(argv: list[str] | None = None) -> int:
             receipt = run_verification(args.root, args.head, command_argv)
             _write_json(args.output, receipt, args.force)
             _print({"captured": str(args.output), **receipt}, args.as_json)
-            return 0 if receipt["exit_code"] == 0 else 1
+            return 0 if receipt["exit_code"] == 0 and receipt.get("status") == "valid" else 1
 
         if args.command == "issue":
             packet = _load_object(args.packet)
@@ -788,13 +796,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["valid"] else 1
 
         if args.command == "remote":
-            packet, operation = _remote_operation(args)
+            packet, operation, actual_diff = _remote_operation(args)
             payload = operation.as_dict()
+            if actual_diff is not None:
+                payload["current_diff"] = actual_diff
             if args.remote_command == "plan":
                 blockers = readiness_blockers(packet)
                 if operation.kind == "pull_request":
                     blockers.extend(issue_link_blockers(packet, operation.body))
-                    blockers.extend(_operation_diff_blockers(packet, operation))
+                    blockers.extend(_operation_diff_blockers(packet, operation, actual_diff))
                 payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)
                 return 0
@@ -804,7 +814,7 @@ def main(argv: list[str] | None = None) -> int:
             blockers = readiness_blockers(packet)
             if operation.kind == "pull_request":
                 blockers.extend(issue_link_blockers(packet, operation.body))
-                blockers.extend(_operation_diff_blockers(packet, operation))
+                blockers.extend(_operation_diff_blockers(packet, operation, actual_diff))
             if blockers:
                 payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)

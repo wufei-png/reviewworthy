@@ -12,6 +12,35 @@ class PacketValidationTests(unittest.TestCase):
         result = validate_packet(valid_packet())
         self.assertTrue(result["valid"], result["errors"])
 
+    def test_absolute_verification_cwd_is_rejected(self) -> None:
+        packet = valid_packet()
+        packet["verification"]["receipts"][0]["cwd"] = "/workspace/reviewworthy"
+
+        codes = {error["code"] for error in validate_packet(packet)["errors"]}
+
+        self.assertIn("absolute_verification_cwd", codes)
+
+    def test_windows_absolute_verification_cwd_is_rejected_on_posix(self) -> None:
+        for cwd in (r"C:\Users\alice\reviewworthy", r"\\server\share\reviewworthy", r"C:verification", r"\verification"):
+            packet = valid_packet()
+            packet["verification"]["receipts"][0]["cwd"] = cwd
+
+            codes = {error["code"] for error in validate_packet(packet)["errors"]}
+
+            self.assertIn("absolute_verification_cwd", codes, cwd)
+
+    def test_remote_readiness_rejects_receipt_without_clean_worktree_proof(self) -> None:
+        packet = valid_packet()
+        packet["verification"]["receipts"][0].pop("worktree_clean_before")
+        packet["verification"]["receipts"][0].pop("worktree_clean_after")
+        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+
+        codes = {blocker["code"] for blocker in readiness_blockers(packet)}
+
+        self.assertIn("verification_worktree_unverified", codes)
+
     def test_unresolved_candidate_duplicate_disposition_blocks_readiness(self) -> None:
         packet = valid_packet()
         packet["candidate_selection"] = {

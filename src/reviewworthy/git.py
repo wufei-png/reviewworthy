@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from .util import utc_now
+from .util import relative_path, utc_now
 
 
 class GitError(RuntimeError):
@@ -33,6 +33,14 @@ def current_head(root: Path) -> str:
     return resolve_ref(root, "HEAD")
 
 
+def _worktree_status(root: Path) -> list[str]:
+    completed = _run_git(root.resolve(), ["status", "--porcelain=v1", "--untracked-files=all"])
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "git status failed").strip()
+        raise GitError(detail)
+    return [line for line in str(completed.stdout).splitlines() if line]
+
+
 def _parse_numstat(output: str) -> tuple[int, int]:
     additions = 0
     deletions = 0
@@ -55,7 +63,7 @@ def capture_diff(root: Path, base: str, head: str) -> dict[str, Any]:
     if patch.returncode != 0:
         detail = (patch.stderr or patch.stdout or b"git diff failed").decode("utf-8", errors="replace").strip()
         raise GitError(detail)
-    names = _run_git(root, ["diff", "--name-only", "--no-ext-diff", base_sha, head_sha])
+    names = _run_git(root, ["diff", "--name-only", "--no-ext-diff", "--no-renames", base_sha, head_sha])
     if names.returncode != 0:
         raise GitError((names.stderr or names.stdout or "git diff --name-only failed").strip())
     numstat = _run_git(root, ["diff", "--numstat", "--no-ext-diff", "--no-renames", base_sha, head_sha])
@@ -67,11 +75,11 @@ def capture_diff(root: Path, base: str, head: str) -> dict[str, Any]:
         "base_sha": base_sha,
         "head_sha": head_sha,
         "patch_sha256": sha256(patch_bytes).hexdigest(),
-        "changed_files": [line for line in str(names.stdout).splitlines() if line],
+        "changed_files": sorted(line for line in str(names.stdout).splitlines() if line),
         "additions": additions,
         "deletions": deletions,
         "captured_at": utc_now(),
-        "root": str(root),
+        "root": relative_path(root, root),
         "provenance": "cli_executed",
     }
 
@@ -81,9 +89,11 @@ def run_verification(root: Path, head: str, argv: list[str]) -> dict[str, Any]:
     if not argv:
         raise ValueError("verification command must not be empty")
     expected_head = resolve_ref(root, head)
-    actual_head = current_head(root)
-    if actual_head != expected_head:
-        raise GitError(f"Working tree HEAD moved: expected {expected_head}, found {actual_head}")
+    head_before = current_head(root)
+    if head_before != expected_head:
+        raise GitError(f"Working tree HEAD moved: expected {expected_head}, found {head_before}")
+    if _worktree_status(root):
+        raise GitError("Verification requires a clean worktree before execution")
     started_at = utc_now()
     try:
         completed = subprocess.run(argv, cwd=root, capture_output=True, text=False, check=False)
@@ -92,13 +102,27 @@ def run_verification(root: Path, head: str, argv: list[str]) -> dict[str, Any]:
     finished_at = utc_now()
     stdout = bytes(completed.stdout or b"")
     stderr = bytes(completed.stderr or b"")
+    head_after = current_head(root)
+    worktree_clean_after = not _worktree_status(root)
+    valid = head_before == head_after and worktree_clean_after
+    failure_reasons: list[str] = []
+    if head_before != head_after:
+        failure_reasons.append("head_changed_after_execution")
+    if not worktree_clean_after:
+        failure_reasons.append("worktree_dirty_after_execution")
     return {
         "argv": list(argv),
-        "cwd": str(root),
+        "cwd": relative_path(root, root),
         "exit_code": completed.returncode,
         "started_at": started_at,
         "finished_at": finished_at,
         "head_sha": expected_head,
+        "head_sha_before": head_before,
+        "head_sha_after": head_after,
+        "worktree_clean_before": True,
+        "worktree_clean_after": worktree_clean_after,
+        "status": "valid" if valid else "invalid",
+        **({"failure_reason": ",".join(failure_reasons)} if failure_reasons else {}),
         "stdout_sha256": sha256(stdout).hexdigest(),
         "stderr_sha256": sha256(stderr).hexdigest(),
         "provenance": "cli_executed",

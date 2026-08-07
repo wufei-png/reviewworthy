@@ -105,6 +105,12 @@
               "cwd": { "type": "string", "minLength": 1 },
               "exit_code": { "type": "integer" },
               "head_sha": { "type": "string", "minLength": 1 },
+              "head_sha_before": { "type": "string", "minLength": 1 },
+              "head_sha_after": { "type": "string", "minLength": 1 },
+              "worktree_clean_before": { "type": "boolean" },
+              "worktree_clean_after": { "type": "boolean" },
+              "status": { "enum": ["valid", "invalid"] },
+              "failure_reason": { "type": "string", "minLength": 1 },
               "stdout_sha256": { "type": "string", "minLength": 1 },
               "stderr_sha256": { "type": "string", "minLength": 1 },
               "provenance": { "enum": ["cli_executed", "self_reported"] }

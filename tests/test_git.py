@@ -39,7 +39,12 @@ class GitEvidenceTests(unittest.TestCase):
             receipt = run_verification(root, head, [sys.executable, "-c", "print('ok')"])
             self.assertEqual(receipt["exit_code"], 0)
             self.assertEqual(receipt["head_sha"], head)
-            self.assertEqual(receipt["cwd"], str(root.resolve()))
+            self.assertEqual(receipt["cwd"], ".")
+            self.assertEqual(receipt["head_sha_before"], head)
+            self.assertEqual(receipt["head_sha_after"], head)
+            self.assertTrue(receipt["worktree_clean_before"])
+            self.assertTrue(receipt["worktree_clean_after"])
+            self.assertEqual(receipt["status"], "valid")
             self.assertEqual(receipt["provenance"], "cli_executed")
             self.assertNotEqual(receipt["stdout_sha256"], receipt["stderr_sha256"])
 
@@ -58,3 +63,67 @@ class GitEvidenceTests(unittest.TestCase):
 
             with self.assertRaises(GitError):
                 run_verification(root, expected, [sys.executable, "-c", "pass"])
+
+    def test_verification_refuses_dirty_worktree_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            (root / "example.txt").write_text("one\n", encoding="utf-8")
+            self._git(root, "add", "example.txt")
+            self._git(root, "commit", "-qm", "one")
+            expected = current_head(root)
+            (root / "example.txt").write_text("dirty\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(GitError, "clean worktree"):
+                run_verification(root, expected, [sys.executable, "-c", "raise SystemExit(99)"])
+
+    def test_verification_records_invalid_receipt_when_command_dirties_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            (root / "example.txt").write_text("one\n", encoding="utf-8")
+            self._git(root, "add", "example.txt")
+            self._git(root, "commit", "-qm", "one")
+            expected = current_head(root)
+
+            receipt = run_verification(
+                root,
+                expected,
+                [sys.executable, "-c", "from pathlib import Path; Path('created.txt').write_text('unexpected')"],
+            )
+
+            self.assertEqual(receipt["exit_code"], 0)
+            self.assertEqual(receipt["status"], "invalid")
+            self.assertFalse(receipt["worktree_clean_after"])
+            self.assertEqual(receipt["head_sha_before"], expected)
+            self.assertEqual(receipt["head_sha_after"], expected)
+            self.assertEqual(receipt["failure_reason"], "worktree_dirty_after_execution")
+
+    def test_verification_records_invalid_receipt_when_command_moves_head(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            (root / "example.txt").write_text("one\n", encoding="utf-8")
+            self._git(root, "add", "example.txt")
+            self._git(root, "commit", "-qm", "one")
+            expected = current_head(root)
+            command = (
+                "from pathlib import Path; import subprocess; "
+                "Path('example.txt').write_text('two\\n'); "
+                "subprocess.run(['git', 'add', 'example.txt'], check=True); "
+                "subprocess.run(['git', 'commit', '-qm', 'two'], check=True)"
+            )
+
+            receipt = run_verification(root, expected, [sys.executable, "-c", command])
+
+            self.assertEqual(receipt["exit_code"], 0)
+            self.assertEqual(receipt["status"], "invalid")
+            self.assertEqual(receipt["head_sha_before"], expected)
+            self.assertNotEqual(receipt["head_sha_after"], expected)
+            self.assertEqual(receipt["failure_reason"], "head_changed_after_execution")
