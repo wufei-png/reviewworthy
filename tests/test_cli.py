@@ -457,8 +457,10 @@ class CliBoundaryTests(unittest.TestCase):
                         packet["narrative"]["title"],
                         "--body-file",
                         str(body_path),
+                        "--base",
+                        "HEAD",
                         "--head",
-                        "main",
+                        "HEAD",
                         "--json",
                     ]
                 )
@@ -480,8 +482,10 @@ class CliBoundaryTests(unittest.TestCase):
                         "Unapproved title",
                         "--body-file",
                         str(body_path),
+                        "--base",
+                        "HEAD",
                         "--head",
-                        "main",
+                        "HEAD",
                         "--json",
                     ]
                 )
