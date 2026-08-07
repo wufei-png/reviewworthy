@@ -6,7 +6,7 @@ Repository-authored human-facing documents are the semantic authority. Reviewwor
 
 If two sources disagree, emit `policy_conflict` and stop remote writes. If a claim is absent, use Conservative mode rather than inferring permission.
 
-`policy inspect` emits `claim_records` for each known claim. Each record has a `true`, `false`, or `unknown` state, the selected value, and provenance with source path, line range, and an excerpt hash. A structured claim can fill a silent document, but it does not hide document evidence. When sources conflict, the claim record becomes `unknown` and the policy result contains a `policy_conflict` hard-stop.
+`policy inspect` emits `claim_records` for each known claim. Each record has a `true`, `false`, or `unknown` state, the selected value, and provenance with source path, line range, and an excerpt hash. Document provenance points to the actual matched policy statement. Structured TOML provenance points to the parsed table/key that supplied the value, so an unrelated same-named key cannot become the evidence anchor. A structured claim can fill a silent document, but it does not hide document evidence. When sources conflict, the claim record becomes `unknown` and the policy result contains a `policy_conflict` hard-stop.
 
 The structured AI `allowed` claim may be `true`, `false`, or `"unknown"`; `"unknown"` is normalized to Conservative mode and never treated as permission.
 

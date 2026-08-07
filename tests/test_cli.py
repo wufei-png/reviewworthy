@@ -14,7 +14,7 @@ from unittest.mock import patch
 from reviewworthy.cli import _issue_revalidation_errors, main
 from reviewworthy.git import capture_diff
 from reviewworthy.github import GhError
-from reviewworthy.packet import material_snapshot, skeleton_packet
+from reviewworthy.packet import material_snapshot, readiness_blockers, skeleton_packet, validate_packet
 
 from helpers import valid_packet
 
@@ -278,6 +278,42 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(updated["candidate_selection"]["transition"]["to"], "plan_directly")
             self.assertTrue(updated["candidate_selection"]["transition"]["human_confirmed"])
 
+    def test_candidate_transition_command_migrates_old_packet_without_recommendation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet_path = Path(directory) / "packet.json"
+            packet = valid_packet()
+            packet["candidate_selection"] = {
+                "candidate_id": "candidate-old",
+                "repository": "example/project",
+                "menu_snapshot": "menu-sha",
+                "duplicate_disposition": "not_duplicate",
+                "confirmed": True,
+            }
+            packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+
+            with redirect_stdout(io.StringIO()):
+                code = main([
+                    "candidate", "transition", "--packet", str(packet_path),
+                    "--from", "issue_only", "--to", "plan_directly",
+                    "--reason", "The verified Issue now bounds the change.", "--confirm", "--json",
+                ])
+
+            updated = json.loads(packet_path.read_text(encoding="utf-8"))
+            self.assertEqual(code, 0)
+            self.assertEqual(updated["candidate_selection"]["recommendation"], "issue_only")
+            validation = validate_packet(updated)
+            self.assertFalse(validation["valid"])
+            self.assertIn("stale_assessment", {item["code"] for item in validation["errors"]})
+            readiness_codes = {item["code"] for item in readiness_blockers(updated)}
+            self.assertNotIn("candidate_transition_required", readiness_codes)
+            self.assertIn("stale_assessment", readiness_codes)
+            self.assertEqual(updated["materials"]["material_snapshot"], material_snapshot(updated))
+            self.assertNotEqual(updated["understanding"]["orientation"]["material_snapshot"], material_snapshot(updated))
+            self.assertNotEqual(updated["understanding"]["assessment"]["material_snapshot"], material_snapshot(updated))
+
     def test_action_can_mark_changed_file_evidence_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             packet_path = Path(directory) / "packet.json"
@@ -537,6 +573,67 @@ class CliBoundaryTests(unittest.TestCase):
                 result = json.loads(output.getvalue())
                 self.assertEqual(code, 0, field)
                 self.assertIn(blocker_codes[field], {item["code"] for item in result["readiness_blockers"]})
+
+    def test_remote_create_rejects_every_recomputed_diff_mismatch_before_create(self) -> None:
+        fields = {
+            "base_sha": "0" * 40,
+            "head_sha": "1" * 40,
+            "patch_sha256": "0" * 64,
+            "changed_files": ["src/other.py"],
+            "additions": 1,
+            "deletions": 1,
+        }
+        blocker_codes = {
+            "base_sha": "remote_base_mismatch",
+            "head_sha": "remote_head_mismatch",
+            "patch_sha256": "remote_patch_mismatch",
+            "changed_files": "remote_changed_files_mismatch",
+            "additions": "remote_additions_mismatch",
+            "deletions": "remote_deletions_mismatch",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, actual_diff = self._pr_repository(root)
+            for field, value in fields.items():
+                packet = valid_packet()
+                packet["repository"]["base_sha"] = actual_diff["base_sha"]
+                packet["diff"] = dict(actual_diff)
+                packet["diff"][field] = actual_diff[field] + 1 if field in {"additions", "deletions"} else value
+                packet["verification"]["receipts"][0].update({
+                    "head_sha": actual_diff["head_sha"],
+                    "head_sha_before": actual_diff["head_sha"],
+                    "head_sha_after": actual_diff["head_sha"],
+                    "cwd": ".",
+                })
+                packet["materials"]["material_snapshot"] = material_snapshot(packet)
+                packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                packet_path = root / "packet.json"
+                body_path = root / "body.md"
+                packet_path.write_text(json.dumps(packet), encoding="utf-8")
+                body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+                plan_output = io.StringIO()
+                plan_args = [
+                    "remote", "plan", "--packet", str(packet_path), "--repo", "example/project",
+                    "--kind", "pull_request", "--title", packet["narrative"]["title"],
+                    "--body-file", str(body_path), "--base", "main", "--head", "feature",
+                    "--root", str(repository_root), "--json",
+                ]
+                with redirect_stdout(plan_output):
+                    self.assertEqual(main(plan_args), 0, field)
+                operation_id = json.loads(plan_output.getvalue())["operation_id"]
+
+                create_output = io.StringIO()
+                create_args = list(plan_args)
+                create_args[1] = "create"
+                create_args = [*create_args[:-1], "--confirm-operation-id", operation_id, "--json"]
+                with patch("reviewworthy.cli.GhClient") as client_class, redirect_stdout(create_output):
+                    code = main(create_args)
+
+                result = json.loads(create_output.getvalue())
+                self.assertEqual(code, 1, field)
+                self.assertIn(blocker_codes[field], {item["code"] for item in result["readiness_blockers"]})
+                client_class.return_value.create.assert_not_called()
 
     def test_remote_create_uses_local_receipt_on_immediate_retry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
