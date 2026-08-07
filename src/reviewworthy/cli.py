@@ -11,7 +11,7 @@ from typing import Any
 from . import __version__
 from .action import check_packet, github_event_context
 from .brief import build_project_brief, render_project_brief, validate_project_brief
-from .candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, validate_candidate_menu
+from .candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, transition_candidate, validate_candidate_menu
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
@@ -33,11 +33,11 @@ from .github import (
 )
 from .packet import issue_link_blockers, issue_reference, material_snapshot, readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
-from .repository import parse_public_record, repository_matches
+from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .risk import assess_manifest
 from .signal import SIGNAL_KINDS, SIGNAL_STATUSES, skeleton_signal, validate_signal
 from .understanding import record_understanding, validate_understanding
-from .util import read_json, utc_now
+from .util import has_normalized_label, normalize_label, read_json, utc_now
 
 
 def _print(value: Any, as_json: bool) -> None:
@@ -230,6 +230,13 @@ def _build_parser() -> argparse.ArgumentParser:
     candidate_bind.add_argument("--output", type=Path)
     candidate_bind.add_argument("--force", action="store_true")
     _common_json(candidate_bind)
+    candidate_transition = candidate_commands.add_parser("transition", help="Record a human-confirmed recommendation transition")
+    candidate_transition.add_argument("--packet", type=Path, required=True)
+    candidate_transition.add_argument("--from", dest="from_recommendation", choices=("issue_only", "seek_maintainer_signal"))
+    candidate_transition.add_argument("--to", choices=("plan_directly",), required=True)
+    candidate_transition.add_argument("--reason", required=True)
+    candidate_transition.add_argument("--confirm", action="store_true")
+    _common_json(candidate_transition)
 
     contract = commands.add_parser("contract", help="Create or validate a Contribution Contract")
     contract_commands = contract.add_subparsers(dest="contract_command", required=True)
@@ -334,17 +341,19 @@ def _issue_revalidation_errors(packet: dict[str, Any], remote: dict[str, Any]) -
         errors.append({"code": "issue_revalidation_failed", "message": str(remote.get("error", "The supporting Issue could not be verified.")), "path": "basis.verification"})
         return errors
     parsed = parse_public_record(reference)
-    if not parsed or remote.get("record_type") != "issue" or remote.get("repository") != f"{parsed['owner']}/{parsed['name']}":
+    if not parsed or remote.get("record_type") != "issue" or not repository_slugs_match(remote.get("repository"), f"{parsed['owner']}/{parsed['name']}"):
         errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match the Packet Issue identity.", "path": "basis.verification"})
     if isinstance(repository, dict):
         expected_repository = f"{repository.get('owner')}/{repository.get('name')}"
-        if remote.get("repository") != expected_repository:
+        if not repository_slugs_match(remote.get("repository"), expected_repository):
             errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match packet.repository.", "path": "repository"})
         if repository.get("repository_id") is not None and remote.get("repository_id") != repository.get("repository_id"):
             errors.append({"code": "issue_revalidation_identity_mismatch", "message": "The live Issue verification has a different repository ID.", "path": "repository.repository_id"})
-    state_reason = str(remote.get("state_reason", "")).strip().lower()
-    if state_reason in {"not planned", "duplicate"}:
-        errors.append({"code": "issue_not_actionable", "message": f"The supporting Issue is closed as {state_reason}.", "path": "basis.verification.state_reason"})
+    state_reason = normalize_label(remote.get("state_reason", ""))
+    if state_reason == "not planned":
+        errors.append({"code": "issue_not_actionable", "message": "The supporting Issue is closed as not planned.", "path": "basis.verification.state_reason"})
+    if has_normalized_label(remote.get("labels"), "duplicate"):
+        errors.append({"code": "issue_duplicate", "message": "The supporting Issue has the duplicate label.", "path": "basis.verification.labels"})
     return errors
 
 
@@ -382,7 +391,7 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
 
 def _canonical_remote_url(value: Any, expected_type: str, repo: str) -> str:
     parsed = parse_public_record(value)
-    if not parsed or parsed.get("record_type") != expected_type or f"{parsed['owner']}/{parsed['name']}" != repo:
+    if not parsed or parsed.get("record_type") != expected_type or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", repo):
         raise GhError(f"GitHub returned a non-canonical {expected_type} URL for {repo}")
     return str(parsed["url"])
 
@@ -589,7 +598,11 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("Published signal has no recorded publication identity; reconcile before publishing again")
                 if not isinstance(signal_value.get("publication_subject_id"), str) or not signal_value["publication_subject_id"].strip():
                     raise ValueError("Published signal has no stable publication subject; reconcile before publishing again")
-                if any(publication.get(key) != expected for key, expected in {"repo": args.repo, "title": args.title, "body": body}.items()):
+                if (
+                    not repository_slugs_match(publication.get("repo"), args.repo)
+                    or publication.get("title") != args.title
+                    or publication.get("body") != body
+                ):
                     raise ValueError("Published signal publication inputs differ from the recorded operation")
             operation = build_signal_operation(signal_value, args.repo, args.title, body)
             payload = operation.as_dict()
@@ -617,7 +630,7 @@ def main(argv: list[str] | None = None) -> int:
                     and existing_target.get("publication_subject_id") == operation.subject_id
                     and isinstance(existing_publication, dict)
                     and existing_publication.get("operation_id") == operation.operation_id
-                    and existing_publication.get("repo") == args.repo
+                    and repository_slugs_match(existing_publication.get("repo"), args.repo)
                     and existing_publication.get("title") == args.title
                     and existing_publication.get("body") == body
                 ):
@@ -646,7 +659,7 @@ def main(argv: list[str] | None = None) -> int:
             updated_signal["reference"] = remote
             updated_signal["published"] = True
             updated_signal["publication_subject_id"] = operation.subject_id
-            updated_signal["publication"] = {"operation_id": operation.operation_id, "repo": args.repo, "title": args.title, "body": body}
+            updated_signal["publication"] = {"operation_id": operation.operation_id, "repo": operation.repo, "title": args.title, "body": body}
             _replace_json(target, updated_signal)
             payload.update({"signal": str(target), "published": True})
             _print(payload, args.as_json)
@@ -732,6 +745,23 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     _replace_json(target, updated)
                 _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "material_snapshot": snapshot}, args.as_json)
+                return 0
+            if args.candidate_command == "transition":
+                packet = _load_object(args.packet)
+                updated = transition_candidate(packet, to=args.to, reason=args.reason, human_confirmed=args.confirm, from_recommendation=args.from_recommendation)
+                snapshot = material_snapshot(updated)
+                materials = updated.setdefault("materials", {})
+                if not isinstance(materials, dict):
+                    raise ValueError("packet.materials must be an object")
+                materials["material_snapshot"] = snapshot
+                understanding = updated.get("understanding", {})
+                if isinstance(understanding, dict):
+                    for phase in ("orientation", "assessment"):
+                        record = understanding.get(phase)
+                        if isinstance(record, dict) and record.get("status") == "not_run":
+                            record["material_snapshot"] = snapshot
+                _replace_json(args.packet, updated)
+                _print({"updated": str(args.packet), "to": args.to, "material_snapshot": snapshot}, args.as_json)
                 return 0
             menu = _load_object(args.path)
             if args.candidate_command == "select":

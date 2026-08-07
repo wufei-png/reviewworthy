@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS
+from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS, RECOMMENDATIONS
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
-from .repository import parse_public_record, parse_repository_slug, validate_repository_identity
+from .repository import parse_public_record, parse_repository_slug, repository_slugs_match, validate_repository_identity
 from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .understanding import validate_understanding
-from .util import sha256_json
+from .util import has_normalized_label, normalize_label, sha256_json
 
 
 REQUIRED_NODES = (
@@ -390,6 +390,24 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
             disposition = candidate_selection.get("duplicate_disposition")
             if disposition not in DUPLICATE_DISPOSITIONS:
                 _error(errors, "invalid_duplicate_disposition", "candidate_selection.duplicate_disposition is required", "candidate_selection.duplicate_disposition")
+            recommendation = candidate_selection.get("recommendation")
+            if recommendation is not None and recommendation not in RECOMMENDATIONS:
+                _error(errors, "invalid_candidate_recommendation", "candidate_selection.recommendation must be a recognized recommendation when present", "candidate_selection.recommendation")
+            transition = candidate_selection.get("transition")
+            if transition is not None:
+                if not isinstance(transition, dict):
+                    _error(errors, "invalid_candidate_transition", "candidate_selection.transition must be an object", "candidate_selection.transition")
+                else:
+                    if transition.get("from") not in {"issue_only", "seek_maintainer_signal"}:
+                        _error(errors, "invalid_candidate_transition_from", "candidate_selection.transition.from must be an advisory recommendation", "candidate_selection.transition.from")
+                    if recommendation in {"issue_only", "seek_maintainer_signal"} and transition.get("from") != recommendation:
+                        _error(errors, "candidate_transition_origin_mismatch", "candidate_selection.transition.from must match candidate_selection.recommendation", "candidate_selection.transition.from")
+                    if transition.get("to") != "plan_directly":
+                        _error(errors, "invalid_candidate_transition_to", "candidate_selection.transition.to must be plan_directly", "candidate_selection.transition.to")
+                    if not isinstance(transition.get("reason"), str) or not transition.get("reason", "").strip():
+                        _error(errors, "missing_candidate_transition_reason", "candidate_selection.transition.reason is required", "candidate_selection.transition.reason")
+                    if transition.get("human_confirmed") is not True:
+                        _error(errors, "candidate_transition_not_confirmed", "candidate_selection.transition needs human_confirmed=true", "candidate_selection.transition.human_confirmed")
 
     return {"valid": not errors, "errors": errors, "result_nodes": sorted(result_by_node)}
 
@@ -494,22 +512,25 @@ def issue_basis_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
         return [{"code": "issue_reference_required", "message": "Issue-backed work needs a canonical GitHub Issue URL.", "path": "basis.references"}]
     repository = packet.get("repository", {})
     parsed = parse_public_record(reference)
-    if not isinstance(repository, dict) or parsed is None or parsed.get("owner") != repository.get("owner") or parsed.get("name") != repository.get("name"):
+    if not isinstance(repository, dict) or parsed is None or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", f"{repository.get('owner')}/{repository.get('name')}"):
         return [{"code": "issue_repository_mismatch", "message": "The Issue reference must belong to the Packet repository.", "path": "basis.references"}]
     verification = basis.get("verification") if basis.get("kind") == "issue" else (basis.get("signal", {}) or {}).get("verification")
     if not isinstance(verification, dict) or verification.get("status") != "verified" or verification.get("provider") != "github" or verification.get("reference") != reference:
         return [{"code": "issue_verification_required", "message": "The Issue reference needs a recorded successful GitHub verification.", "path": "basis.verification"}]
-    if verification.get("repository") and verification.get("repository") != f"{repository.get('owner')}/{repository.get('name')}":
+    if verification.get("repository") and not repository_slugs_match(verification.get("repository"), f"{repository.get('owner')}/{repository.get('name')}"):
         return [{"code": "issue_verification_repository_mismatch", "message": "The recorded Issue verification belongs to another repository.", "path": "basis.verification.repository"}]
-    state_reason = str(verification.get("state_reason", "")).strip().lower()
-    if state_reason in {"not planned", "duplicate"}:
-        return [{"code": "issue_not_actionable", "message": f"The Issue is recorded as closed for {state_reason}.", "path": "basis.verification.state_reason"}]
+    blockers: list[dict[str, str]] = []
+    state_reason = normalize_label(verification.get("state_reason", ""))
+    if state_reason == "not planned":
+        blockers.append({"code": "issue_not_actionable", "message": "The Issue is recorded as closed for not planned.", "path": "basis.verification.state_reason"})
+    if has_normalized_label(verification.get("labels"), "duplicate"):
+        blockers.append({"code": "issue_duplicate", "message": "The Issue is recorded with the duplicate label.", "path": "basis.verification.labels"})
     repository_id = repository.get("repository_id")
     if repository_id is not None and verification.get("repository_id") is None:
-        return [{"code": "issue_verification_identity_missing", "message": "The recorded Issue verification must include the Packet repository identity.", "path": "basis.verification.repository_id"}]
+        blockers.append({"code": "issue_verification_identity_missing", "message": "The recorded Issue verification must include the Packet repository identity.", "path": "basis.verification.repository_id"})
     if repository_id is not None and repository_id != verification.get("repository_id"):
-        return [{"code": "issue_verification_identity_mismatch", "message": "The recorded Issue verification has a different repository identity.", "path": "basis.verification.repository_id"}]
-    return []
+        blockers.append({"code": "issue_verification_identity_mismatch", "message": "The recorded Issue verification has a different repository identity.", "path": "basis.verification.repository_id"})
+    return blockers
 
 
 def issue_link_blockers(packet: dict[str, Any], body: str) -> list[dict[str, str]]:
@@ -587,14 +608,29 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     policy = packet.get("policy", {})
 
     candidate_selection = packet.get("candidate_selection")
-    if isinstance(candidate_selection, dict) and candidate_selection.get("duplicate_disposition") in DUPLICATE_BLOCKING_DISPOSITIONS:
-        blockers.append(
-            {
-                "code": "duplicate_work_unresolved",
-                "message": f"Candidate duplicate disposition {candidate_selection['duplicate_disposition']} blocks implementation until resolved.",
-                "path": "candidate_selection.duplicate_disposition",
-            }
-        )
+    if isinstance(candidate_selection, dict):
+        if candidate_selection.get("duplicate_disposition") in DUPLICATE_BLOCKING_DISPOSITIONS:
+            blockers.append(
+                {
+                    "code": "duplicate_work_unresolved",
+                    "message": f"Candidate duplicate disposition {candidate_selection['duplicate_disposition']} blocks implementation until resolved.",
+                    "path": "candidate_selection.duplicate_disposition",
+                }
+            )
+        recommendation = candidate_selection.get("recommendation")
+        if recommendation == "do_not_contribute":
+            blockers.append({"code": "candidate_do_not_contribute", "message": "The selected candidate is explicitly marked do_not_contribute.", "path": "candidate_selection.recommendation"})
+        elif recommendation in {"issue_only", "seek_maintainer_signal"}:
+            transition = candidate_selection.get("transition")
+            if (
+                not isinstance(transition, dict)
+                or transition.get("from") != recommendation
+                or transition.get("to") != "plan_directly"
+                or not isinstance(transition.get("reason"), str)
+                or not transition.get("reason", "").strip()
+                or transition.get("human_confirmed") is not True
+            ):
+                blockers.append({"code": "candidate_transition_required", "message": f"The {recommendation} recommendation needs a human-confirmed transition to plan_directly before readiness.", "path": "candidate_selection.transition"})
 
     for result in packet.get("results", []) if isinstance(packet.get("results", []), list) else []:
         if isinstance(result, dict) and result.get("status") != "passed":

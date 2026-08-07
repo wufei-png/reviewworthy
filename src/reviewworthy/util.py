@@ -30,3 +30,20 @@ def relative_path(path: Path, root: Path) -> str:
         return str(path.resolve().relative_to(root.resolve()))
     except ValueError:
         return str(path)
+
+
+def normalize_label(value: Any) -> str:
+    """Normalize GitHub state reasons and labels for exact policy checks."""
+
+    return " ".join(str(value).strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def has_normalized_label(labels: Any, expected: str) -> bool:
+    if not isinstance(labels, list):
+        return False
+    target = normalize_label(expected)
+    for label in labels:
+        value = label.get("name") if isinstance(label, dict) else label
+        if normalize_label(value) == target:
+            return True
+    return False

@@ -129,6 +129,21 @@ class PolicyInspectionTests(unittest.TestCase):
             self.assertEqual(record["provenance"][0]["line_start"], 2)
             self.assertEqual(len(record["provenance"][0]["excerpt_sha256"]), 64)
 
+    def test_claim_provenance_uses_the_matching_ai_line_not_a_substring_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text(
+                "This is a maintainer-first project.\nAI assistance is allowed for contributions.\nAI assistance is prohibited for this path.\n",
+                encoding="utf-8",
+            )
+
+            result = inspect_policy(root)
+            record = result["claim_records"]["ai_assistance"]
+
+            self.assertEqual(record["provenance"][0]["line_start"], 3)
+            self.assertEqual(record["provenance"][0]["line_end"], 3)
+            self.assertEqual(record["provenance"][0]["match_start"], len("This is a maintainer-first project.\nAI assistance is allowed for contributions.\n"))
+
     def test_structured_policy_provenance_fills_silence_without_becoming_opaque_authority(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -143,3 +158,20 @@ class PolicyInspectionTests(unittest.TestCase):
             self.assertEqual(record["state"], "true")
             self.assertEqual(record["value"], True)
             self.assertEqual(record["provenance"][0]["source"], ".reviewworthy/policy.toml")
+
+    def test_structured_policy_provenance_uses_the_parsed_table_not_a_same_named_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("A small project.\n", encoding="utf-8")
+            config_dir = root / ".reviewworthy"
+            config_dir.mkdir()
+            (config_dir / "policy.toml").write_text(
+                "[other]\nissue_required = false\n[contribution]\nissue_required = true\n",
+                encoding="utf-8",
+            )
+
+            result = inspect_policy(root)
+            provenance = result["claim_records"]["issue_required"]["provenance"][0]
+
+            self.assertEqual(result["authoritative_claims"]["issue_required"], True)
+            self.assertEqual(provenance["line_start"], 4)

@@ -5,10 +5,11 @@ import unittest
 from pathlib import Path
 
 from reviewworthy.brief import build_project_brief, render_project_brief, validate_project_brief
-from reviewworthy.candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, validate_candidate_menu
+from reviewworthy.candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, transition_candidate, validate_candidate_menu
 from reviewworthy.contract import skeleton_contract, validate_contract
 from reviewworthy.disclosure import disclosure_errors, render_disclosure
 from reviewworthy.packet import material_snapshot
+from reviewworthy.packet import readiness_blockers
 from reviewworthy.understanding import record_understanding, validate_understanding
 
 from helpers import valid_packet
@@ -344,6 +345,71 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(bound["candidate_selection"]["duplicate_disposition"], "potential_duplicate")
         with self.assertRaises(ValueError):
             select_candidate({**menu, "candidates": [{**menu["candidates"][0], "recommendation": "plan_directly"}]}, "candidate-potential", confirmed=True)
+
+    def test_advisory_candidate_recommendation_needs_confirmed_transition_before_readiness(self) -> None:
+        menu = skeleton_menu("example/project")
+        menu["candidates"] = [{
+            "id": "candidate-transition",
+            "title": "Issue-first work",
+            "basis": {"kind": "issue", "references": ["https://github.com/example/project/issues/10"], "evidence": []},
+            "duplicate_search": {"checked": True, "matches": [], "disposition": "not_duplicate"},
+            "value": {"summary": "Needs a public issue first"},
+            "scope": {"files": ["src/example.py"]},
+            "review_cost": "small",
+            "verifiability": "high",
+            "risk": [],
+            "recommendation": "issue_only",
+        }]
+        selected = select_candidate(menu, "candidate-transition", confirmed=True)
+        bound = bind_candidate(selected, valid_packet(), "candidate-transition")
+
+        self.assertIn("candidate_transition_required", {blocker["code"] for blocker in readiness_blockers(bound)})
+
+        transitioned = transition_candidate(
+            bound,
+            to="plan_directly",
+            reason="A valid public Issue now exists.",
+            human_confirmed=True,
+        )
+        self.assertEqual(transitioned["candidate_selection"]["transition"]["from"], "issue_only")
+        self.assertNotIn("candidate_transition_required", {blocker["code"] for blocker in readiness_blockers(transitioned)})
+
+    def test_candidate_transition_requires_reason_and_confirmation(self) -> None:
+        packet = valid_packet()
+        packet["candidate_selection"] = {
+            "candidate_id": "candidate-transition",
+            "repository": "example/project",
+            "menu_snapshot": "menu-sha",
+            "recommendation": "seek_maintainer_signal",
+            "duplicate_disposition": "not_duplicate",
+            "confirmed": True,
+        }
+
+        with self.assertRaises(ValueError):
+            transition_candidate(packet, to="plan_directly", reason="", human_confirmed=True)
+        with self.assertRaises(ValueError):
+            transition_candidate(packet, to="plan_directly", reason="A signal is public.", human_confirmed=False)
+
+    def test_candidate_transition_can_migrate_an_old_selection_without_recommendation(self) -> None:
+        packet = valid_packet()
+        packet["candidate_selection"] = {
+            "candidate_id": "candidate-old",
+            "repository": "example/project",
+            "menu_snapshot": "menu-sha",
+            "duplicate_disposition": "not_duplicate",
+            "confirmed": True,
+        }
+
+        transitioned = transition_candidate(
+            packet,
+            to="plan_directly",
+            reason="The previously advisory Issue path is now explicitly confirmed.",
+            human_confirmed=True,
+            from_recommendation="issue_only",
+        )
+
+        self.assertEqual(transitioned["candidate_selection"]["recommendation"], "issue_only")
+        self.assertEqual(transitioned["candidate_selection"]["transition"]["from"], "issue_only")
 
     def test_passed_assessment_requires_passed_orientation(self) -> None:
         understanding = {

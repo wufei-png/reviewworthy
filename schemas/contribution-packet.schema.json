@@ -133,6 +133,17 @@
         "menu_snapshot": { "type": "string", "minLength": 1 },
         "recommendation": { "type": "string" },
         "duplicate_disposition": { "enum": ["exact_duplicate", "potential_duplicate", "related", "not_duplicate", "stale", "superseded"] },
+        "transition": {
+          "type": "object",
+          "required": ["from", "to", "reason", "human_confirmed"],
+          "properties": {
+            "from": { "enum": ["seek_maintainer_signal", "issue_only"] },
+            "to": { "const": "plan_directly" },
+            "reason": { "type": "string", "minLength": 1 },
+            "human_confirmed": { "const": true }
+          },
+          "additionalProperties": true
+        },
         "confirmed": { "const": true }
       },
       "additionalProperties": true

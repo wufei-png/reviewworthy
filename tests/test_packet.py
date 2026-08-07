@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from reviewworthy.packet import material_snapshot, readiness_blockers, skeleton_packet, validate_packet
+from reviewworthy.packet import issue_basis_blockers, material_snapshot, readiness_blockers, skeleton_packet, validate_packet
 
 from helpers import valid_packet
 
@@ -40,6 +40,30 @@ class PacketValidationTests(unittest.TestCase):
         codes = {blocker["code"] for blocker in readiness_blockers(packet)}
 
         self.assertIn("verification_worktree_unverified", codes)
+
+    def test_issue_state_reason_normalization_and_duplicate_label_are_independent(self) -> None:
+        for state_reason in ("not_planned", "not-planned", "not planned"):
+            packet = valid_packet()
+            packet["basis"]["verification"]["state_reason"] = state_reason
+            self.assertIn("issue_not_actionable", {blocker["code"] for blocker in issue_basis_blockers(packet)})
+
+        for state_reason in ("completed", "reopened"):
+            packet = valid_packet()
+            packet["basis"]["verification"]["state_reason"] = state_reason
+            self.assertNotIn("issue_not_actionable", {blocker["code"] for blocker in issue_basis_blockers(packet)})
+
+        packet = valid_packet()
+        packet["basis"]["verification"]["state_reason"] = "duplicate"
+        self.assertNotIn("issue_not_actionable", {blocker["code"] for blocker in issue_basis_blockers(packet)})
+
+        packet = valid_packet()
+        packet["basis"]["verification"]["labels"] = ["Duplicate"]
+        self.assertIn("issue_duplicate", {blocker["code"] for blocker in issue_basis_blockers(packet)})
+
+        packet["basis"]["verification"]["state_reason"] = "not_planned"
+        codes = {blocker["code"] for blocker in issue_basis_blockers(packet)}
+        self.assertIn("issue_not_actionable", codes)
+        self.assertIn("issue_duplicate", codes)
 
     def test_unresolved_candidate_duplicate_disposition_blocks_readiness(self) -> None:
         packet = valid_packet()

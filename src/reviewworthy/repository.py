@@ -35,6 +35,10 @@ def repository_identity(
         name = str(value.get("name", "")).strip()
         if not owner or not name:
             raise ValueError("repository identity needs owner and name")
+        try:
+            owner, name = parse_repository_slug(f"{owner}/{name}")
+        except ValueError as exc:
+            raise ValueError("repository identity owner and name must use the owner/name form") from exc
         parsed_id = value.get("repository_id", repository_id)
         parsed_branch = str(value.get("default_branch", default_branch) or default_branch)
         parsed_base = str(value.get("base_sha", base_sha) or base_sha)
@@ -65,13 +69,29 @@ def repository_slug(value: str | dict[str, Any]) -> str:
     return f"{identity['owner']}/{identity['name']}"
 
 
+def canonical_repository_slug(value: str | dict[str, Any]) -> str:
+    identity = repository_identity(value)
+    return f"{identity['owner'].casefold()}/{identity['name'].casefold()}"
+
+
 def repository_matches(identity: Any, slug: str) -> bool:
     try:
         expected = repository_identity(identity)
         owner, name = parse_repository_slug(slug)
     except ValueError:
         return False
-    return expected["owner"] == owner and expected["name"] == name
+    return expected["owner"].casefold() == owner.casefold() and expected["name"].casefold() == name.casefold()
+
+
+def repository_slugs_match(left: Any, right: Any) -> bool:
+    """Compare two owner/name values using GitHub's case-insensitive identity."""
+
+    try:
+        left_owner, left_name = parse_repository_slug(left)
+        right_owner, right_name = parse_repository_slug(right)
+    except ValueError:
+        return False
+    return left_owner.casefold() == right_owner.casefold() and left_name.casefold() == right_name.casefold()
 
 
 def parse_public_record(reference: str) -> dict[str, Any] | None:
@@ -103,6 +123,11 @@ def validate_repository_identity(value: Any, path: str = "repository") -> list[d
     for key in ("provider", "host", "owner", "name", "default_branch"):
         if not isinstance(value.get(key), str) or not value.get(key, "").strip():
             errors.append({"code": "invalid_repository_identity", "message": f"repository.{key} is required", "path": f"{path}.{key}"})
+    if isinstance(value.get("owner"), str) and isinstance(value.get("name"), str) and value.get("owner", "").strip() and value.get("name", "").strip():
+        try:
+            parse_repository_slug(f"{value['owner']}/{value['name']}")
+        except ValueError:
+            errors.append({"code": "invalid_repository_identity", "message": "repository.owner and repository.name must use the owner/name form", "path": path})
     if value.get("provider") not in {None, "github"}:
         errors.append({"code": "unsupported_repository_provider", "message": "Only the github provider is supported", "path": f"{path}.provider"})
     if value.get("host") not in {None, GITHUB_HOST}:

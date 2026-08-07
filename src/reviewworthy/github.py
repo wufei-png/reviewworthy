@@ -12,8 +12,8 @@ from subprocess import CompletedProcess, run
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from .repository import parse_public_record
-from .util import canonical_json, utc_now
+from .repository import canonical_repository_slug, parse_public_record, repository_slugs_match
+from .util import canonical_json, has_normalized_label, normalize_label, utc_now
 
 
 class GhError(RuntimeError):
@@ -77,6 +77,7 @@ def build_operation(
         raise ValueError("kind must be issue or pull_request")
     if kind == "pull_request" and not head:
         raise ValueError("head is required for a pull_request")
+    canonical_repo = canonical_repository_slug(repo)
     issue_url = None
     basis = packet.get("basis")
     if isinstance(basis, dict):
@@ -94,7 +95,7 @@ def build_operation(
         "purpose": "contribution",
         "subject_id": str(packet.get("contribution_id", "")),
         "contribution_id": packet.get("contribution_id"),
-        "repo": repo,
+        "repo": canonical_repo,
         "kind": kind,
         "title": title,
         "body": body,
@@ -125,7 +126,7 @@ def build_operation(
         operation_id=operation_id,
         marker=marker,
         kind=kind,
-        repo=repo,
+        repo=canonical_repo,
         title=title,
         body=marked_body,
         permissions=permissions,
@@ -156,13 +157,14 @@ def build_signal_operation(
         raise ValueError("Only Issue-like Contribution Signals can be published as an Issue")
     if not isinstance(reference, str):
         raise ValueError("signal.reference must be a string")
+    canonical_repo = canonical_repository_slug(repo)
     subject_id = signal.get("publication_subject_id") or f"{kind}:{reference}"
     payload = {
         "purpose": "signal_publication",
         "subject_id": subject_id,
         "signal_kind": kind,
         "signal_reference": subject_id,
-        "repo": repo,
+        "repo": canonical_repo,
         "kind": "issue",
         "title": title,
         "body": body,
@@ -178,7 +180,7 @@ def build_signal_operation(
         operation_id=operation_id,
         marker=marker,
         kind="issue",
-        repo=repo,
+        repo=canonical_repo,
         title=title,
         body=marked_body,
         permissions=("issues:write",),
@@ -239,7 +241,7 @@ def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, 
     if operation.kind == "pull_request" and status in {"pr_created", "link_attempted", "linked", "needs_reconciliation"}:
         pr_url = receipt.get("pr_url")
         parsed_pr = parse_public_record(pr_url)
-        if not parsed_pr or parsed_pr.get("record_type") != "pull_request" or f"{parsed_pr['owner']}/{parsed_pr['name']}" != operation.repo:
+        if not parsed_pr or parsed_pr.get("record_type") != "pull_request" or not repository_slugs_match(f"{parsed_pr['owner']}/{parsed_pr['name']}", operation.repo):
             raise GhError(f"Pull-request receipt has no valid pr_url; reconcile before retrying: {path}")
         if operation.issue_url and receipt.get("issue_url") != operation.issue_url:
             raise GhError(f"Pull-request receipt has a mismatched issue_url; reconcile before retrying: {path}")
@@ -525,9 +527,11 @@ class GhClient:
             return {"commentable": False, "reason": "not_an_issue", "remote": remote}
         if remote.get("locked") is True:
             return {"commentable": False, "reason": "issue_locked", "remote": remote}
-        state_reason = str(remote.get("state_reason", "")).strip().lower()
-        if state_reason in {"not planned", "duplicate"}:
-            return {"commentable": False, "reason": f"issue_{state_reason.replace(' ', '_')}", "remote": remote}
+        state_reason = normalize_label(remote.get("state_reason", ""))
+        if state_reason == "not planned":
+            return {"commentable": False, "reason": "issue_not_planned", "remote": remote}
+        if has_normalized_label(remote.get("labels"), "duplicate"):
+            return {"commentable": False, "reason": "issue_duplicate", "remote": remote}
         return {"commentable": True, "remote": remote}
 
     def add_issue_note(self, issue_url: str, pr_url: str) -> dict[str, Any]:

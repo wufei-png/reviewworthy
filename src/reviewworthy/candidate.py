@@ -214,6 +214,44 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
     return bound
 
 
+def transition_candidate(
+    packet: dict[str, Any],
+    *,
+    to: str,
+    reason: str,
+    human_confirmed: bool,
+    from_recommendation: str | None = None,
+) -> dict[str, Any]:
+    """Record a human-confirmed transition from an advisory recommendation."""
+
+    if to != "plan_directly":
+        raise ValueError("Candidate transitions may only target plan_directly")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("A candidate transition needs a non-empty reason")
+    if human_confirmed is not True:
+        raise ValueError("A candidate transition needs explicit human confirmation")
+    selection = packet.get("candidate_selection") if isinstance(packet, dict) else None
+    if not isinstance(selection, dict) or selection.get("confirmed") is not True:
+        raise ValueError("A confirmed candidate selection is required before transition")
+    recommendation = selection.get("recommendation") or from_recommendation
+    if selection.get("recommendation") and from_recommendation and selection.get("recommendation") != from_recommendation:
+        raise ValueError("The transition origin does not match candidate_selection.recommendation")
+    if recommendation not in {"issue_only", "seek_maintainer_signal"}:
+        raise ValueError("Only issue_only or seek_maintainer_signal recommendations need a transition")
+    transitioned = deepcopy(packet)
+    # Older bound packets may omit the optional recommendation field.  An
+    # explicit transition can migrate that record while preserving its other
+    # evidence instead of making the packet unreadable.
+    transitioned["candidate_selection"]["recommendation"] = recommendation
+    transitioned["candidate_selection"]["transition"] = {
+        "from": recommendation,
+        "to": to,
+        "reason": reason.strip(),
+        "human_confirmed": True,
+    }
+    return transitioned
+
+
 def render_candidate_menu(menu: dict[str, Any]) -> str:
     validation = validate_candidate_menu(menu)
     if not validation["valid"]:

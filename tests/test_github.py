@@ -33,6 +33,15 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertIn(first.marker, first.body)
         self.assertEqual(first.permissions, ("contents:read", "pull-requests:write", "issues:write"))
 
+    def test_repository_casing_does_not_change_operation_identity(self) -> None:
+        packet = valid_packet()
+        lower = build_operation(packet, "owner/repo", "issue", "Fix input", "Body")
+        mixed = build_operation(packet, "Owner/Repo", "issue", "Fix input", "Body")
+
+        self.assertEqual(lower.operation_id, mixed.operation_id)
+        self.assertEqual(lower.marker, mixed.marker)
+        self.assertEqual(mixed.repo, "owner/repo")
+
     def test_changed_body_changes_confirmation_id(self) -> None:
         packet = valid_packet()
         first = build_operation(packet, "example/project", "issue", "Fix input", "Body")
@@ -126,6 +135,30 @@ class GitHubOperationTests(unittest.TestCase):
             GhClient().verify_public_reference("https://github.com/example/project/issues/2?state=open")
         with self.assertRaises(GhError):
             GhClient().verify_public_reference("https://github.com/example/project/issues/2#details")
+
+    def test_issue_commentability_normalizes_state_reason_and_duplicate_label(self) -> None:
+        def client_for(record: dict):
+            def fake_runner(argv, **kwargs):
+                if argv[2] == "repos/example/project":
+                    return CompletedProcess(argv, 0, json.dumps({"visibility": "public"}), "")
+                return CompletedProcess(argv, 0, json.dumps({
+                    "html_url": "https://github.com/example/project/issues/2",
+                    "state": "closed",
+                    **record,
+                }), "")
+            return GhClient(fake_runner)
+
+        for state_reason in ("not_planned", "not-planned"):
+            result = client_for({"state_reason": state_reason}).issue_commentability("https://github.com/example/project/issues/2")
+            self.assertFalse(result["commentable"])
+            self.assertEqual(result["reason"], "issue_not_planned")
+
+        duplicate = client_for({"labels": [{"name": "Duplicate"}]}).issue_commentability("https://github.com/example/project/issues/2")
+        self.assertFalse(duplicate["commentable"])
+        self.assertEqual(duplicate["reason"], "issue_duplicate")
+
+        reopened = client_for({"state_reason": "reopened"}).issue_commentability("https://github.com/example/project/issues/2")
+        self.assertTrue(reopened["commentable"])
 
     def test_issue_link_note_search_is_exact_and_note_write_is_one_line(self) -> None:
         calls = []

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from reviewworthy.cli import main
+from reviewworthy.cli import _issue_revalidation_errors, main
 from reviewworthy.git import capture_diff
 from reviewworthy.github import GhError
 from reviewworthy.packet import material_snapshot, skeleton_packet
@@ -104,7 +104,7 @@ class CliBoundaryTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()):
                     first_code = main(create_args)
                 retry_args = [
-                    "signal", "publish", "create", str(published_path), "--repo", "example/project",
+                    "signal", "publish", "create", str(published_path), "--repo", "Example/Project",
                     "--title", "Candidate request", "--body-file", str(body_path),
                     "--confirm-operation-id", operation_id, "--json",
                 ]
@@ -145,6 +145,25 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(json.loads(output.getvalue())["valid"])
             self.assertEqual(json.loads(signal_path.read_text()), signal)
+
+    def test_issue_revalidation_normalizes_state_reason_and_duplicate_label(self) -> None:
+        packet = valid_packet()
+        base_remote = {
+            "verified": True,
+            "record_type": "issue",
+            "repository": "Example/Project",
+            "repository_id": 101,
+        }
+        for state_reason in ("not_planned", "not-planned", "not planned"):
+            errors = _issue_revalidation_errors(packet, {**base_remote, "state_reason": state_reason})
+            self.assertIn("issue_not_actionable", {error["code"] for error in errors})
+        for state_reason in ("completed", "reopened"):
+            errors = _issue_revalidation_errors(packet, {**base_remote, "state_reason": state_reason})
+            self.assertNotIn("issue_not_actionable", {error["code"] for error in errors})
+        errors = _issue_revalidation_errors(packet, {**base_remote, "state_reason": "duplicate"})
+        self.assertNotIn("issue_not_actionable", {error["code"] for error in errors})
+        errors = _issue_revalidation_errors(packet, {**base_remote, "labels": ["Duplicate"]})
+        self.assertIn("issue_duplicate", {error["code"] for error in errors})
 
     def test_signal_verify_can_explicitly_record_successful_public_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -229,6 +248,35 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(assessment_code, 0)
             self.assertEqual(validate_code, 0)
             self.assertEqual(bound["candidate_selection"]["candidate_id"], "candidate-001")
+
+    def test_candidate_transition_command_records_human_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet_path = Path(directory) / "packet.json"
+            packet = valid_packet()
+            packet["candidate_selection"] = {
+                "candidate_id": "candidate-transition",
+                "repository": "example/project",
+                "menu_snapshot": "menu-sha",
+                "recommendation": "issue_only",
+                "duplicate_disposition": "not_duplicate",
+                "confirmed": True,
+            }
+            packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main([
+                    "candidate", "transition", "--packet", str(packet_path), "--to", "plan_directly",
+                    "--reason", "A valid public Issue now exists.", "--confirm", "--json",
+                ])
+
+            updated = json.loads(packet_path.read_text(encoding="utf-8"))
+            self.assertEqual(code, 0)
+            self.assertEqual(updated["candidate_selection"]["transition"]["to"], "plan_directly")
+            self.assertTrue(updated["candidate_selection"]["transition"]["human_confirmed"])
 
     def test_action_can_mark_changed_file_evidence_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
