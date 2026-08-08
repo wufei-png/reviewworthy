@@ -12,6 +12,7 @@ from subprocess import CompletedProcess, run
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from .git import PR_DIFF_FIELDS
 from .repository import canonical_repository_slug, parse_public_record, repository_slugs_match
 from .util import canonical_json, has_normalized_label, normalize_label, utc_now
 
@@ -31,8 +32,11 @@ class RemoteOperation:
     permissions: tuple[str, ...]
     base: str | None = None
     head: str | None = None
-    base_sha: str | None = None
+    comparison: str | None = None
+    base_tip_sha: str | None = None
+    merge_base_sha: str | None = None
     head_sha: str | None = None
+    patch_sha256: str | None = None
     draft: bool = False
     purpose: str = "contribution"
     subject_id: str = ""
@@ -41,7 +45,7 @@ class RemoteOperation:
     repository_id: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "operation_id": self.operation_id,
             "marker": self.marker,
             "kind": self.kind,
@@ -51,8 +55,6 @@ class RemoteOperation:
             "permissions": list(self.permissions),
             "base": self.base,
             "head": self.head,
-            "base_sha": self.base_sha,
-            "head_sha": self.head_sha,
             "draft": self.draft,
             "purpose": self.purpose,
             "subject_id": self.subject_id,
@@ -60,6 +62,19 @@ class RemoteOperation:
             "link_note_template": self.link_note_template,
             "repository_id": self.repository_id,
         }
+        if self.kind == "pull_request":
+            payload.update({
+                "comparison": self.comparison,
+                "base_tip_sha": self.base_tip_sha,
+                "merge_base_sha": self.merge_base_sha,
+                "head_sha": self.head_sha,
+                "patch_sha256": self.patch_sha256,
+            })
+        else:
+            # Packet 0.2 changes only pull-request Diff identity. Retain the
+            # pre-0.2 Issue receipt shape so existing idempotency state loads.
+            payload.update({"base_sha": None, "head_sha": None})
+        return payload
 
 
 def build_operation(
@@ -70,13 +85,18 @@ def build_operation(
     body: str,
     base: str | None = None,
     head: str | None = None,
-    base_sha: str | None = None,
-    head_sha: str | None = None,
+    diff: dict[str, Any] | None = None,
 ) -> RemoteOperation:
     if kind not in {"issue", "pull_request"}:
         raise ValueError("kind must be issue or pull_request")
     if kind == "pull_request" and not head:
         raise ValueError("head is required for a pull_request")
+    if kind == "pull_request" and (
+        not isinstance(diff, dict)
+        or any(field not in diff for field in PR_DIFF_FIELDS)
+        or diff.get("comparison") != "merge_base"
+    ):
+        raise ValueError("a complete merge-base PR Diff is required for a pull_request")
     canonical_repo = canonical_repository_slug(repo)
     issue_url = None
     basis = packet.get("basis")
@@ -91,7 +111,7 @@ def build_operation(
             if parsed and parsed.get("record_type") == "issue":
                 issue_url = parsed["url"]
     link_note_template = "{pr_url}" if kind == "pull_request" and issue_url else None
-    payload = {
+    payload: dict[str, Any] = {
         "purpose": "contribution",
         "subject_id": str(packet.get("contribution_id", "")),
         "contribution_id": packet.get("contribution_id"),
@@ -101,8 +121,6 @@ def build_operation(
         "body": body,
         "base": base,
         "head": head,
-        "base_sha": base_sha,
-        "head_sha": head_sha,
         "draft": kind == "pull_request" and bool(
             isinstance(packet.get("policy"), dict)
             and isinstance(packet["policy"].get("authoritative_claims"), dict)
@@ -112,6 +130,17 @@ def build_operation(
         "link_note_template": link_note_template,
         "repository_id": packet.get("repository", {}).get("repository_id") if isinstance(packet.get("repository"), dict) else None,
     }
+    if kind == "pull_request":
+        payload.update({
+            "comparison": diff.get("comparison"),
+            "base_tip_sha": diff.get("base_tip_sha"),
+            "merge_base_sha": diff.get("merge_base_sha"),
+            "head_sha": diff.get("head_sha"),
+            "patch_sha256": diff.get("patch_sha256"),
+        })
+    else:
+        # Preserve the historical contribution-Issue operation identity.
+        payload.update({"base_sha": None, "head_sha": None})
     digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
     operation_id = f"rw-{digest}"
     marker = f"<!-- reviewworthy:operation-id={operation_id} -->"
@@ -132,8 +161,11 @@ def build_operation(
         permissions=permissions,
         base=base,
         head=head,
-        base_sha=base_sha,
-        head_sha=head_sha,
+        comparison=payload.get("comparison"),
+        base_tip_sha=payload.get("base_tip_sha"),
+        merge_base_sha=payload.get("merge_base_sha"),
+        head_sha=payload.get("head_sha"),
+        patch_sha256=payload.get("patch_sha256"),
         draft=payload["draft"],
         purpose=payload["purpose"],
         subject_id=payload["subject_id"],

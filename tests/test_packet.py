@@ -8,6 +8,22 @@ from helpers import valid_packet
 
 
 class PacketValidationTests(unittest.TestCase):
+    def test_packet_01_is_rejected_without_implicit_migration(self) -> None:
+        packet = valid_packet()
+        packet["packet_version"] = "0.1"
+
+        errors = validate_packet(packet)["errors"]
+
+        self.assertIn("unsupported_packet_version", {error["code"] for error in errors})
+
+    def test_packet_02_requires_complete_merge_base_diff_identity(self) -> None:
+        packet = valid_packet()
+        packet["diff"].pop("merge_base_sha")
+
+        errors = validate_packet(packet)["errors"]
+
+        self.assertIn("missing_diff_field", {error["code"] for error in errors})
+
     def test_valid_packet_contains_every_result_and_current_assessment(self) -> None:
         result = validate_packet(valid_packet())
         self.assertTrue(result["valid"], result["errors"])

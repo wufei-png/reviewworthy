@@ -21,7 +21,7 @@
     "narrative"
   ],
   "properties": {
-    "packet_version": { "const": "0.1" },
+    "packet_version": { "const": "0.2" },
     "contribution_id": { "type": "string", "minLength": 1 },
     "repository": {
       "type": "object",
@@ -80,8 +80,11 @@
     },
     "diff": {
       "type": "object",
+      "required": ["comparison", "base_tip_sha", "merge_base_sha", "head_sha", "patch_sha256", "changed_files", "additions", "deletions"],
       "properties": {
-        "base_sha": { "type": "string", "minLength": 1 },
+        "comparison": { "const": "merge_base" },
+        "base_tip_sha": { "type": "string", "minLength": 1 },
+        "merge_base_sha": { "type": "string", "minLength": 1 },
         "head_sha": { "type": "string", "minLength": 1 },
         "patch_sha256": { "type": "string", "minLength": 1 },
         "changed_files": { "type": "array", "items": { "type": "string" } },

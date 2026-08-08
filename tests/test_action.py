@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from reviewworthy.action import check_packet, github_event_context
 from reviewworthy.contract import contract_snapshot
-from reviewworthy.git import capture_diff
+from reviewworthy.git import PR_DIFF_FIELDS, capture_pr_diff
 from reviewworthy.packet import material_snapshot
 
 from helpers import valid_packet
@@ -29,7 +29,7 @@ class ActionCheckTests(unittest.TestCase):
         self.assertIn("using: composite", content)
         self.assertIn("python -m reviewworthy action check", content)
         self.assertIn("fetch-depth: 0", (Path(__file__).parents[1] / ".github/workflows/reviewworthy.yml").read_text(encoding="utf-8"))
-        self.assertIn("capture_diff(", (Path(__file__).parents[1] / "src/reviewworthy/action.py").read_text(encoding="utf-8"))
+        self.assertIn("capture_pr_diff(", (Path(__file__).parents[1] / "src/reviewworthy/action.py").read_text(encoding="utf-8"))
         self.assertIn("GITHUB_EVENT_PATH", (Path(__file__).parents[1] / "src/reviewworthy/action.py").read_text(encoding="utf-8"))
         self.assertIn("pull_request", content)
         self.assertIn("--root .", content)
@@ -80,10 +80,16 @@ class ActionCheckTests(unittest.TestCase):
             self._git(repository_root, "checkout", "-qb", "feature")
             (repository_root / "src" / "example.py").write_text("one\ntwo\n", encoding="utf-8")
             self._git(repository_root, "commit", "-qam", "feature")
-            actual_diff = capture_diff(repository_root, "main", "feature")
+            self._git(repository_root, "checkout", "-q", "main")
+            (repository_root / "only-main.txt").write_text("base-only\n", encoding="utf-8")
+            self._git(repository_root, "add", "only-main.txt")
+            self._git(repository_root, "commit", "-qm", "advance base")
+            self._git(repository_root, "checkout", "-q", "feature")
+            actual_diff = capture_pr_diff(repository_root, "main", "feature")
+            self.assertEqual(actual_diff["changed_files"], ["src/example.py"])
 
             packet = valid_packet()
-            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = dict(actual_diff)
             packet["verification"]["receipts"][0].update({
                 "head_sha": actual_diff["head_sha"],
@@ -112,7 +118,7 @@ class ActionCheckTests(unittest.TestCase):
             event_path = root / "event.json"
             event_path.write_text(json.dumps({
                 "pull_request": {
-                    "base": {"sha": actual_diff["base_sha"]},
+                    "base": {"sha": actual_diff["base_tip_sha"]},
                     "head": {"sha": actual_diff["head_sha"]},
                 }
             }), encoding="utf-8")
@@ -190,8 +196,8 @@ class ActionCheckTests(unittest.TestCase):
             packet_path = Path(directory) / "packet.json"
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
 
-            current_diff = {key: packet["diff"][key] for key in ("base_sha", "head_sha", "patch_sha256", "changed_files", "additions", "deletions")}
-            with patch("reviewworthy.action.capture_diff", return_value=current_diff) as capture:
+            current_diff = {key: packet["diff"][key] for key in PR_DIFF_FIELDS}
+            with patch("reviewworthy.action.capture_pr_diff", return_value=current_diff) as capture:
                 result = check_packet(
                     packet_path,
                     current_diff["changed_files"],
@@ -230,7 +236,7 @@ class ActionCheckTests(unittest.TestCase):
             packet["understanding"]["assessment"]["material_snapshot"] = snapshot
             packet_path = Path(directory) / "packet.json"
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
-            current_diff = {key: packet["diff"][key] for key in ("base_sha", "head_sha", "patch_sha256", "changed_files", "additions", "deletions")}
+            current_diff = {key: packet["diff"][key] for key in PR_DIFF_FIELDS}
 
             context_result = check_packet(
                 packet_path,
@@ -244,7 +250,7 @@ class ActionCheckTests(unittest.TestCase):
             context_codes = {violation["code"] for violation in context_result["violations"]}
             self.assertIn("pull_request_context_required", context_codes)
 
-            with patch("reviewworthy.action.capture_diff", return_value=current_diff):
+            with patch("reviewworthy.action.capture_pr_diff", return_value=current_diff):
                 binding_result = check_packet(
                     packet_path,
                     current_diff=current_diff,
@@ -279,10 +285,10 @@ class ActionCheckTests(unittest.TestCase):
             packet["understanding"]["assessment"]["material_snapshot"] = snapshot
             packet_path = Path(directory) / "packet.json"
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
-            current_diff = {key: packet["diff"][key] for key in ("base_sha", "head_sha", "patch_sha256", "changed_files", "additions", "deletions")}
+            current_diff = {key: packet["diff"][key] for key in PR_DIFF_FIELDS}
             current_diff["deletions"] = 2
 
-            with patch("reviewworthy.action.capture_diff", return_value=current_diff):
+            with patch("reviewworthy.action.capture_pr_diff", return_value=current_diff):
                 result = check_packet(
                     packet_path,
                     current_diff=current_diff,

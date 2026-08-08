@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.cli import _issue_revalidation_errors, main
-from reviewworthy.git import capture_diff
+from reviewworthy.git import capture_pr_diff
 from reviewworthy.github import GhError
 from reviewworthy.packet import material_snapshot, readiness_blockers, skeleton_packet, validate_packet
 
@@ -38,7 +38,12 @@ class CliBoundaryTests(unittest.TestCase):
         self._git(repository_root, "checkout", "-qb", "feature")
         (repository_root / "src" / "example.py").write_text("one\ntwo\n", encoding="utf-8")
         self._git(repository_root, "commit", "-qam", "feature")
-        return repository_root, capture_diff(repository_root, "main", "feature")
+        self._git(repository_root, "checkout", "-q", "main")
+        (repository_root / "only-main.txt").write_text("base-only\n", encoding="utf-8")
+        self._git(repository_root, "add", "only-main.txt")
+        self._git(repository_root, "commit", "-qm", "advance base")
+        self._git(repository_root, "checkout", "-q", "feature")
+        return repository_root, capture_pr_diff(repository_root, "main", "feature")
 
     def test_signal_init_and_require_confirmed_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -354,7 +359,7 @@ class CliBoundaryTests(unittest.TestCase):
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
             packet = valid_packet()
-            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = dict(actual_diff)
             packet["verification"]["receipts"][0].update({
                 "head_sha": actual_diff["head_sha"],
@@ -382,7 +387,7 @@ class CliBoundaryTests(unittest.TestCase):
             event_path = root / "event.json"
             event_path.write_text(json.dumps({
                 "pull_request": {
-                    "base": {"sha": actual_diff["base_sha"]},
+                    "base": {"sha": actual_diff["base_tip_sha"]},
                     "head": {"sha": actual_diff["head_sha"]},
                 }
             }), encoding="utf-8")
@@ -496,7 +501,7 @@ class CliBoundaryTests(unittest.TestCase):
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
             packet = valid_packet()
-            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = dict(actual_diff)
             packet["verification"]["receipts"][0].update({
                 "head_sha": actual_diff["head_sha"],
@@ -528,7 +533,9 @@ class CliBoundaryTests(unittest.TestCase):
 
     def test_remote_plan_compares_every_recomputed_diff_field(self) -> None:
         fields = {
-            "base_sha": "0" * 40,
+            "comparison": "two_tip",
+            "base_tip_sha": "0" * 40,
+            "merge_base_sha": "2" * 40,
             "head_sha": "1" * 40,
             "patch_sha256": "0" * 64,
             "changed_files": ["src/other.py"],
@@ -536,19 +543,14 @@ class CliBoundaryTests(unittest.TestCase):
             "deletions": 1,
         }
         blocker_codes = {
-            "base_sha": "remote_base_mismatch",
-            "head_sha": "remote_head_mismatch",
-            "patch_sha256": "remote_patch_mismatch",
-            "changed_files": "remote_changed_files_mismatch",
-            "additions": "remote_additions_mismatch",
-            "deletions": "remote_deletions_mismatch",
+            field: f"remote_{field}_mismatch" for field in fields
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
             for field, value in fields.items():
                 packet = valid_packet()
-                packet["repository"]["base_sha"] = actual_diff["base_sha"]
+                packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
                 packet["diff"] = dict(actual_diff)
                 packet["diff"][field] = actual_diff[field] + 1 if field in {"additions", "deletions"} else value
                 packet["verification"]["receipts"][0].update({
@@ -580,7 +582,9 @@ class CliBoundaryTests(unittest.TestCase):
 
     def test_remote_create_rejects_every_recomputed_diff_mismatch_before_create(self) -> None:
         fields = {
-            "base_sha": "0" * 40,
+            "comparison": "two_tip",
+            "base_tip_sha": "0" * 40,
+            "merge_base_sha": "2" * 40,
             "head_sha": "1" * 40,
             "patch_sha256": "0" * 64,
             "changed_files": ["src/other.py"],
@@ -588,19 +592,14 @@ class CliBoundaryTests(unittest.TestCase):
             "deletions": 1,
         }
         blocker_codes = {
-            "base_sha": "remote_base_mismatch",
-            "head_sha": "remote_head_mismatch",
-            "patch_sha256": "remote_patch_mismatch",
-            "changed_files": "remote_changed_files_mismatch",
-            "additions": "remote_additions_mismatch",
-            "deletions": "remote_deletions_mismatch",
+            field: f"remote_{field}_mismatch" for field in fields
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
             for field, value in fields.items():
                 packet = valid_packet()
-                packet["repository"]["base_sha"] = actual_diff["base_sha"]
+                packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
                 packet["diff"] = dict(actual_diff)
                 packet["diff"][field] = actual_diff[field] + 1 if field in {"additions", "deletions"} else value
                 packet["verification"]["receipts"][0].update({
@@ -723,7 +722,7 @@ class CliBoundaryTests(unittest.TestCase):
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
             packet = valid_packet()
-            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = actual_diff
             packet["verification"]["receipts"][0].update({
                 "head_sha": actual_diff["head_sha"],
@@ -789,7 +788,7 @@ class CliBoundaryTests(unittest.TestCase):
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
             packet = valid_packet()
-            packet["repository"]["base_sha"] = actual_diff["base_sha"]
+            packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = actual_diff
             packet["verification"]["receipts"][0].update({
                 "head_sha": actual_diff["head_sha"],

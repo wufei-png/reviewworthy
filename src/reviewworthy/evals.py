@@ -100,7 +100,9 @@ def _base_packet() -> dict[str, Any]:
         "disclosure": {"text": "AI assistance was reviewed by the contributor.", "locations": ["pr_body"], "human_confirmed": True},
     }
     packet["diff"] = {
-        "base_sha": "base-sha",
+        "comparison": "merge_base",
+        "base_tip_sha": "base-sha",
+        "merge_base_sha": "merge-base-sha",
         "head_sha": "head-sha",
         "patch_sha256": "patch-sha256",
         "changed_files": ["src/example.py"],

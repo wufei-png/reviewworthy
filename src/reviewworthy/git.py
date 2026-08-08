@@ -10,6 +10,18 @@ from typing import Any
 from .util import relative_path, utc_now
 
 
+PR_DIFF_FIELDS = (
+    "comparison",
+    "base_tip_sha",
+    "merge_base_sha",
+    "head_sha",
+    "patch_sha256",
+    "changed_files",
+    "additions",
+    "deletions",
+)
+
+
 class GitError(RuntimeError):
     """A requested Git evidence operation could not be completed."""
 
@@ -77,15 +89,6 @@ def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str
         "root": relative_path(root, root),
         "provenance": "cli_executed",
     }
-
-
-def capture_diff(root: Path, base: str, head: str) -> dict[str, Any]:
-    """Capture the legacy two-tip tree Diff between explicit Git refs."""
-
-    root = root.resolve()
-    base_sha = resolve_ref(root, base)
-    head_sha = resolve_ref(root, head)
-    return {"base_sha": base_sha, "head_sha": head_sha, **_capture_diff_between(root, base_sha, head_sha)}
 
 
 def capture_pr_diff(root: Path, base: str, head: str) -> dict[str, Any]:

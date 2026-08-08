@@ -6,14 +6,14 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .git import GitError, capture_diff
+from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff
 from .packet import deterministic_evidence_checks, policy_violations, validate_packet
 from .policy import CLAIM_KEYS
 from .util import read_json
 
 
 ACTION_MODES = {"report", "enforce"}
-CURRENT_DIFF_FIELDS = ("base_sha", "head_sha", "patch_sha256", "changed_files", "additions", "deletions")
+CURRENT_DIFF_FIELDS = PR_DIFF_FIELDS
 
 
 def github_event_context() -> tuple[str | None, str | None, str | None]:
@@ -108,7 +108,7 @@ def check_packet(
     has_current_diff = changed_files is not None if current_diff_available is None else current_diff_available
     if event_name == "pull_request" and root is not None and event_base_sha and event_head_sha:
         try:
-            captured_diff = capture_diff(root, event_base_sha, event_head_sha)
+            captured_diff = capture_pr_diff(root, event_base_sha, event_head_sha)
         except GitError:
             captured_diff = None
         if enforce or captured_diff is not None:
@@ -247,12 +247,12 @@ def check_packet(
                 path="event_head_sha",
             )
         if has_complete_current_diff and event_name == "pull_request":
-            if event_base_sha and current_diff.get("base_sha") != event_base_sha:
+            if event_base_sha and current_diff.get("base_tip_sha") != event_base_sha:
                 violations.append(
                     {
-                        "code": "current_base_sha_mismatch",
-                        "message": "The recomputed Diff base SHA does not match the current pull_request base SHA.",
-                        "path": "current_diff.base_sha",
+                        "code": "current_base_tip_sha_mismatch",
+                        "message": "The recomputed Diff base tip SHA does not match the current pull_request base SHA.",
+                        "path": "current_diff.base_tip_sha",
                     }
                 )
             if event_head_sha and current_diff.get("head_sha") != event_head_sha:

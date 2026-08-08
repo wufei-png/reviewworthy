@@ -8,6 +8,7 @@ from typing import Any
 from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS, RECOMMENDATIONS
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
+from .git import PR_DIFF_FIELDS
 from .repository import parse_public_record, parse_repository_slug, repository_slugs_match, validate_repository_identity
 from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .understanding import validate_understanding
@@ -24,6 +25,8 @@ REQUIRED_NODES = (
     "narrative",
 )
 ALLOWED_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run"}
+PACKET_VERSION = "0.2"
+PR_DIFF_STRING_FIELDS = ("base_tip_sha", "merge_base_sha", "head_sha", "patch_sha256")
 
 
 def _is_repository_relative_path(value: str) -> bool:
@@ -95,7 +98,7 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
         owner, name = parse_repository_slug(repository)
         repository_value.update({"owner": owner, "name": name})
     packet: dict[str, Any] = {
-        "packet_version": "0.1",
+        "packet_version": PACKET_VERSION,
         "contribution_id": contribution_id,
         "repository": repository_value,
         "entry": {"mode": mode, "source": ""},
@@ -122,7 +125,16 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
             "stages": [],
             "disclosure": {"text": "", "locations": [], "human_confirmed": False},
         },
-        "diff": {"changed_files": [], "additions": 0, "deletions": 0},
+        "diff": {
+            "comparison": "merge_base",
+            "base_tip_sha": "",
+            "merge_base_sha": "",
+            "head_sha": "",
+            "patch_sha256": "",
+            "changed_files": [],
+            "additions": 0,
+            "deletions": 0,
+        },
         "verification": {"commands": [], "evidence": [], "receipts": []},
         "materials": {},
         "results": [result_record(node, "not_run") for node in REQUIRED_NODES],
@@ -173,8 +185,8 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         if key not in packet:
             _error(errors, "missing_field", f"Required field is missing: {key}", key)
 
-    if packet.get("packet_version") != "0.1":
-        _error(errors, "unsupported_version", "packet_version must be 0.1", "packet_version")
+    if packet.get("packet_version") != PACKET_VERSION:
+        _error(errors, "unsupported_packet_version", f"packet_version must be {PACKET_VERSION}", "packet_version")
     if not isinstance(packet.get("contribution_id"), str) or not packet.get("contribution_id"):
         _error(errors, "invalid_contribution_id", "contribution_id must be a non-empty string", "contribution_id")
 
@@ -290,6 +302,11 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(diff, dict):
         _error(errors, "invalid_diff", "diff must be an object", "diff")
     else:
+        for field in PR_DIFF_FIELDS:
+            if field not in diff:
+                _error(errors, "missing_diff_field", f"Required PR Diff field is missing: {field}", f"diff.{field}")
+        if diff.get("comparison") != "merge_base":
+            _error(errors, "invalid_diff_comparison", "diff.comparison must be merge_base", "diff.comparison")
         changed_files = diff.get("changed_files", [])
         if not isinstance(changed_files, list):
             _error(errors, "invalid_changed_files", "diff.changed_files must be a list", "diff.changed_files")
@@ -298,7 +315,7 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         for count_key in ("additions", "deletions"):
             if count_key in diff and (not isinstance(diff[count_key], int) or isinstance(diff[count_key], bool) or diff[count_key] < 0):
                 _error(errors, "invalid_diff_count", f"diff.{count_key} must be a non-negative integer", f"diff.{count_key}")
-        for sha_key in ("base_sha", "head_sha", "patch_sha256"):
+        for sha_key in PR_DIFF_STRING_FIELDS:
             if sha_key in diff and (not isinstance(diff[sha_key], str) or not diff[sha_key].strip()):
                 _error(errors, "invalid_diff_receipt", f"diff.{sha_key} must be a non-empty string when present", f"diff.{sha_key}")
 
@@ -688,8 +705,12 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
             blockers.append({"code": "missing_executed_verification", "message": "Remote readiness needs a CLI-executed verification receipt with exit_code 0.", "path": "verification.receipts"})
 
     diff = packet.get("diff", {})
-    if not isinstance(diff, dict) or not all(isinstance(diff.get(key), str) and diff.get(key) for key in ("base_sha", "head_sha", "patch_sha256")):
-        blockers.append({"code": "missing_diff_receipt", "message": "Remote readiness needs a real Git diff receipt bound to base_sha and head_sha.", "path": "diff"})
+    if (
+        not isinstance(diff, dict)
+        or diff.get("comparison") != "merge_base"
+        or not all(isinstance(diff.get(key), str) and diff.get(key) for key in PR_DIFF_STRING_FIELDS)
+    ):
+        blockers.append({"code": "missing_diff_receipt", "message": "Remote readiness needs a merge-base PR Diff receipt bound to base tip, merge base, and head.", "path": "diff"})
     elif usable_receipts and not any(receipt.get("head_sha") == diff.get("head_sha") for receipt in usable_receipts):
         blockers.append({"code": "verification_head_mismatch", "message": "No executed verification receipt matches diff.head_sha.", "path": "verification.receipts"})
 

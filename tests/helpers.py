@@ -6,7 +6,7 @@ from reviewworthy.packet import REQUIRED_NODES, material_snapshot
 
 def valid_packet() -> dict:
     packet = {
-        "packet_version": "0.1",
+        "packet_version": "0.2",
         "contribution_id": "contrib-test-001",
         "repository": {
             "provider": "github",
@@ -60,7 +60,9 @@ def valid_packet() -> dict:
             "disclosure": {"text": "AI assistance was reviewed by the contributor.", "locations": ["pr_body"], "human_confirmed": True},
         },
         "diff": {
-            "base_sha": "base-sha",
+            "comparison": "merge_base",
+            "base_tip_sha": "base-sha",
+            "merge_base_sha": "merge-base-sha",
             "head_sha": "head-sha",
             "patch_sha256": "patch-sha256",
             "changed_files": ["src/example.py"],

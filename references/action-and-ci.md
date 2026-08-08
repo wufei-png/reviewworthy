@@ -6,7 +6,7 @@ The composite Action is intentionally read-only. Its default `report` mode prese
 
 - a Contribution Packet must exist and be valid;
 - the event must be a real `pull_request` with base/head SHAs and those local commit objects must already exist;
-- the Action recomputes the complete Diff through the shared `capture_diff()` implementation and compares base SHA, head SHA, patch hash, changed files, additions, and deletions with the Packet;
+- the Action recomputes the merge-base contribution Diff through the shared `capture_pr_diff()` implementation and compares comparison mode, base tip SHA, merge base SHA, head SHA, patch hash, changed files, additions, and deletions with the Packet;
 - a successful CLI verification receipt must have `exit_code=0`, a valid status, clean worktree before/after, stable `head_sha_before == head_sha == head_sha_after`, and a head bound to the current PR;
 - unknown policy or deterministic evidence becomes a violation.
 

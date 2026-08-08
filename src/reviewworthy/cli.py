@@ -15,7 +15,7 @@ from .candidate import bind_candidate, render_candidate_menu, select_candidate, 
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
-from .git import GitError, capture_diff, resolve_ref, run_verification
+from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff, run_verification
 from .github import (
     GhClient,
     GhError,
@@ -324,10 +324,8 @@ def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any, di
         raise ValueError("Remote title must exactly match the approved packet narrative title")
     if body.strip() != str(narrative.get("body", "")).strip():
         raise ValueError("Remote Body must exactly match the approved packet narrative Body")
-    base_sha = resolve_ref(args.root, args.base) if args.kind == "pull_request" else None
-    head_sha = resolve_ref(args.root, args.head) if args.kind == "pull_request" and args.head else None
-    actual_diff = capture_diff(args.root, args.base, args.head) if args.kind == "pull_request" else None
-    operation = build_operation(packet, args.repo, args.kind, args.title, body, args.base, args.head, base_sha, head_sha)
+    actual_diff = capture_pr_diff(args.root, args.base, args.head) if args.kind == "pull_request" else None
+    operation = build_operation(packet, args.repo, args.kind, args.title, body, args.base, args.head, actual_diff)
     return packet, operation, actual_diff
 
 
@@ -401,17 +399,13 @@ def _operation_diff_blockers(packet: dict[str, Any], operation: Any, actual_diff
     if not isinstance(diff, dict) or not isinstance(actual_diff, dict):
         return [{"code": "remote_diff_unavailable", "message": "The current pull-request Diff could not be recomputed from its base/head commits; recapture evidence.", "path": "diff"}]
     blockers: list[dict[str, str]] = []
-    fields = (
-        ("base_sha", "remote_base_mismatch", "The current PR base SHA differs from packet.diff.base_sha; recapture evidence."),
-        ("head_sha", "remote_head_mismatch", "The current PR head SHA differs from packet.diff.head_sha; recapture evidence."),
-        ("patch_sha256", "remote_patch_mismatch", "The current PR patch hash differs from packet.diff.patch_sha256; recapture evidence."),
-        ("changed_files", "remote_changed_files_mismatch", "The current PR changed files differ from packet.diff.changed_files; recapture evidence."),
-        ("additions", "remote_additions_mismatch", "The current PR addition count differs from packet.diff.additions; recapture evidence."),
-        ("deletions", "remote_deletions_mismatch", "The current PR deletion count differs from packet.diff.deletions; recapture evidence."),
-    )
-    for key, code, message in fields:
+    for key in PR_DIFF_FIELDS:
         if diff.get(key) != actual_diff.get(key):
-            blockers.append({"code": code, "message": message, "path": f"diff.{key}"})
+            blockers.append({
+                "code": f"remote_{key}_mismatch",
+                "message": f"The current PR Diff {key} differs from packet.diff.{key}; recapture evidence.",
+                "path": f"diff.{key}",
+            })
     return blockers
 
 
@@ -811,7 +805,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["result"] == "passed" else 1
 
         if args.command == "diff":
-            diff_value = capture_diff(args.root, args.base, args.head)
+            diff_value = capture_pr_diff(args.root, args.base, args.head)
             _write_json(args.output, diff_value, args.force)
             _print({"captured": str(args.output), **diff_value}, args.as_json)
             return 0

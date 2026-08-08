@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -22,13 +23,14 @@ from reviewworthy.github import (
 )
 
 from helpers import valid_packet
+from reviewworthy.util import canonical_json
 
 
 class GitHubOperationTests(unittest.TestCase):
     def test_operation_marker_and_id_are_stable_for_same_rendered_request(self) -> None:
         packet = valid_packet()
-        first = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input")
-        second = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input")
+        first = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", packet["diff"])
+        second = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", packet["diff"])
         self.assertEqual(first.operation_id, second.operation_id)
         self.assertIn(first.marker, first.body)
         self.assertEqual(first.permissions, ("contents:read", "pull-requests:write", "issues:write"))
@@ -41,6 +43,47 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual(lower.operation_id, mixed.operation_id)
         self.assertEqual(lower.marker, mixed.marker)
         self.assertEqual(mixed.repo, "owner/repo")
+
+    def test_packet_02_preserves_legacy_contribution_issue_identity(self) -> None:
+        packet = valid_packet()
+        operation = build_operation(packet, "example/project", "issue", "Fix input", "Body")
+        legacy_payload = {
+            "purpose": "contribution",
+            "subject_id": packet["contribution_id"],
+            "contribution_id": packet["contribution_id"],
+            "repo": "example/project",
+            "kind": "issue",
+            "title": "Fix input",
+            "body": "Body",
+            "base": None,
+            "head": None,
+            "base_sha": None,
+            "head_sha": None,
+            "draft": False,
+            "issue_url": operation.issue_url,
+            "link_note_template": None,
+            "repository_id": packet["repository"]["repository_id"],
+        }
+        expected = f"rw-{hashlib.sha256(canonical_json(legacy_payload).encode('utf-8')).hexdigest()[:20]}"
+
+        self.assertEqual(operation.operation_id, expected)
+        self.assertIn("base_sha", operation.as_dict())
+        self.assertNotIn("merge_base_sha", operation.as_dict())
+
+    def test_pull_request_diff_identity_changes_confirmation_id(self) -> None:
+        packet = valid_packet()
+        baseline = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", packet["diff"])
+
+        for field, value in (
+            ("base_tip_sha", "other-base"),
+            ("merge_base_sha", "other-merge-base"),
+            ("head_sha", "other-head"),
+            ("patch_sha256", "other-patch"),
+        ):
+            changed = dict(packet["diff"])
+            changed[field] = value
+            operation = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", changed)
+            self.assertNotEqual(operation.operation_id, baseline.operation_id, field)
 
     def test_changed_body_changes_confirmation_id(self) -> None:
         packet = valid_packet()
@@ -64,6 +107,27 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual(first.permissions, ("issues:write",))
         self.assertEqual(first.purpose, "signal_publication")
 
+    def test_legacy_signal_receipt_shape_remains_loadable(self) -> None:
+        operation = build_signal_operation({"kind": "maintainer-request", "reference": ""}, "example/project", "Request", "Body")
+        legacy_operation = operation.as_dict()
+        self.assertIn("base_sha", legacy_operation)
+        self.assertNotIn("merge_base_sha", legacy_operation)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            path.write_text(json.dumps({
+                "operation_id": operation.operation_id,
+                "marker": operation.marker,
+                "repo": operation.repo,
+                "kind": operation.kind,
+                "operation": legacy_operation,
+                "status": "succeeded",
+                "remote": "https://github.com/example/project/issues/7",
+                "recorded_at": "2026-08-06T00:00:00Z",
+            }), encoding="utf-8")
+
+            self.assertEqual(load_operation_receipt(path, operation)["status"], "succeeded")
+
     def test_discussion_signal_cannot_be_silently_published_as_an_issue(self) -> None:
         with self.assertRaises(ValueError):
             build_signal_operation({"kind": "discussion", "reference": ""}, "example/project", "Request", "Body")
@@ -71,7 +135,7 @@ class GitHubOperationTests(unittest.TestCase):
     def test_policy_required_draft_is_part_of_operation_and_gh_command(self) -> None:
         packet = valid_packet()
         packet["policy"]["authoritative_claims"]["draft_pr_required"] = True
-        operation = build_operation(packet, "example/project", "pull_request", "Fix", "Body", "main", "fix/input")
+        operation = build_operation(packet, "example/project", "pull_request", "Fix", "Body", "main", "fix/input", packet["diff"])
         calls = []
 
         def fake_runner(argv, **kwargs):
@@ -183,7 +247,8 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual(calls[-1][4], "POST")
 
     def test_pull_request_receipt_lifecycle_never_uses_issue_receipt_shape(self) -> None:
-        operation = build_operation(valid_packet(), "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", "base-sha", "head-sha")
+        packet = valid_packet()
+        operation = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", packet["diff"])
         pr_url = "https://github.com/example/project/pull/7"
         with tempfile.TemporaryDirectory() as directory:
             path = operation_receipt_path(Path(directory) / ".reviewworthy" / "contribution.json", operation.operation_id)
