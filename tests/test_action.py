@@ -49,6 +49,7 @@ class ActionCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
             event_path.write_text(json.dumps({
+                "repository": {"full_name": "Example/Project", "id": 101},
                 "pull_request": {
                     "base": {"sha": "base-from-event"},
                     "head": {"sha": "head-from-event"},
@@ -61,7 +62,7 @@ class ActionCheckTests(unittest.TestCase):
             }, clear=False):
                 self.assertEqual(
                     github_event_context(),
-                    ("pull_request", "base-from-event", "head-from-event"),
+                    ("pull_request", "Example/Project", 101, "base-from-event", "head-from-event"),
                 )
 
     def test_composite_enforce_script_runs_against_real_pull_request_checkout(self) -> None:
@@ -117,6 +118,7 @@ class ActionCheckTests(unittest.TestCase):
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
             event_path = root / "event.json"
             event_path.write_text(json.dumps({
+                "repository": {"full_name": "example/project", "id": 101},
                 "pull_request": {
                     "base": {"sha": actual_diff["base_tip_sha"]},
                     "head": {"sha": actual_diff["head_sha"]},
@@ -205,6 +207,8 @@ class ActionCheckTests(unittest.TestCase):
                     current_diff=current_diff,
                     current_diff_available=True,
                     event_name="pull_request",
+                    event_repository="EXAMPLE/PROJECT",
+                    event_repository_id=101,
                     event_base_sha="base-sha",
                     event_head_sha="head-sha",
                     mode="enforce",
@@ -256,6 +260,8 @@ class ActionCheckTests(unittest.TestCase):
                     current_diff=current_diff,
                     root=Path(directory),
                     event_name="pull_request",
+                    event_repository="example/project",
+                    event_repository_id=101,
                     event_base_sha="base-sha",
                     event_head_sha="new-head-sha",
                     mode="enforce",
@@ -263,6 +269,69 @@ class ActionCheckTests(unittest.TestCase):
 
             binding_codes = {violation["code"] for violation in binding_result["violations"]}
             self.assertIn("verification_head_mismatch", binding_codes)
+
+    def test_action_repository_identity_missing_is_unknown_in_report_and_fails_in_enforce(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet = valid_packet()
+            packet["repository"]["repository_id"] = None
+            packet_path = Path(directory) / "packet.json"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+
+            report = check_packet(
+                packet_path,
+                current_diff=packet["diff"],
+                event_name="pull_request",
+                event_repository="example/project",
+                event_repository_id=None,
+                event_base_sha="base-sha",
+                event_head_sha="head-sha",
+            )
+            enforced = check_packet(
+                packet_path,
+                current_diff=packet["diff"],
+                event_name="pull_request",
+                event_repository="example/project",
+                event_repository_id=None,
+                event_base_sha="base-sha",
+                event_head_sha="head-sha",
+                mode="enforce",
+            )
+
+            self.assertEqual(report["conclusion"], "success")
+            self.assertTrue(any("runner-owned numeric repository ID" in message for message in report["unknowns"]))
+            self.assertTrue(any("packet numeric repository ID" in message for message in report["unknowns"]))
+            enforced_codes = {violation["code"] for violation in enforced["violations"]}
+            self.assertIn("repository_id_context_required", enforced_codes)
+            self.assertIn("packet_repository_id_required", enforced_codes)
+
+    def test_action_repository_identity_uses_case_insensitive_slug_and_exact_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet = valid_packet()
+            packet_path = Path(directory) / "packet.json"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+
+            casing_only = check_packet(
+                packet_path,
+                current_diff=packet["diff"],
+                event_name="pull_request",
+                event_repository="EXAMPLE/PROJECT",
+                event_repository_id=101,
+                event_base_sha="base-sha",
+                event_head_sha="head-sha",
+            )
+            mismatch = check_packet(
+                packet_path,
+                current_diff=packet["diff"],
+                event_name="pull_request",
+                event_repository="other/project",
+                event_repository_id=202,
+                event_base_sha="base-sha",
+                event_head_sha="head-sha",
+            )
+
+            self.assertEqual(casing_only["conclusion"], "success")
+            mismatch_codes = {violation["code"] for violation in mismatch["violations"]}
+            self.assertEqual(mismatch_codes, {"repository_slug_mismatch", "repository_id_mismatch"})
 
     def test_enforce_mode_compares_complete_current_diff_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -294,6 +363,8 @@ class ActionCheckTests(unittest.TestCase):
                     current_diff=current_diff,
                     root=Path(directory),
                     event_name="pull_request",
+                    event_repository="example/project",
+                    event_repository_id=101,
                     event_base_sha="base-sha",
                     event_head_sha="head-sha",
                     mode="enforce",

@@ -683,13 +683,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 changed_files = args.changed_file or None
                 current_diff_available = None
-            event_name, event_base_sha, event_head_sha = github_event_context()
+            event_name, event_repository, event_repository_id, event_base_sha, event_head_sha = github_event_context()
             result = check_packet(
                 args.path,
                 changed_files,
                 root=args.root,
                 current_diff_available=current_diff_available,
                 event_name=event_name,
+                event_repository=event_repository,
+                event_repository_id=event_repository_id,
                 event_base_sha=event_base_sha,
                 event_head_sha=event_head_sha,
                 mode=args.mode,

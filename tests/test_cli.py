@@ -386,6 +386,7 @@ class CliBoundaryTests(unittest.TestCase):
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
             event_path = root / "event.json"
             event_path.write_text(json.dumps({
+                "repository": {"full_name": "example/project", "id": 101},
                 "pull_request": {
                     "base": {"sha": actual_diff["base_tip_sha"]},
                     "head": {"sha": actual_diff["head_sha"]},

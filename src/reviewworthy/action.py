@@ -9,6 +9,7 @@ from typing import Any
 from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff
 from .packet import deterministic_evidence_checks, policy_violations, validate_packet
 from .policy import CLAIM_KEYS
+from .repository import repository_slugs_match
 from .util import read_json
 
 
@@ -16,27 +17,31 @@ ACTION_MODES = {"report", "enforce"}
 CURRENT_DIFF_FIELDS = PR_DIFF_FIELDS
 
 
-def github_event_context() -> tuple[str | None, str | None, str | None]:
-    """Read the runner-owned GitHub event and return pull-request identity."""
+def github_event_context() -> tuple[str | None, str | None, int | None, str | None, str | None]:
+    """Read runner-owned repository and pull-request identity."""
 
     event_name = os.environ.get("GITHUB_EVENT_NAME") or None
     if event_name != "pull_request":
-        return event_name, None, None
+        return event_name, None, None, None, None
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if not event_path:
-        return event_name, None, None
+        return event_name, None, None, None, None
     try:
         event = read_json(Path(event_path))
     except (OSError, ValueError):
-        return event_name, None, None
+        return event_name, None, None, None, None
     if not isinstance(event, dict) or not isinstance(event.get("pull_request"), dict):
-        return event_name, None, None
+        return event_name, None, None, None, None
+    repository = event.get("repository") if isinstance(event.get("repository"), dict) else {}
+    repository_slug = repository.get("full_name") if isinstance(repository.get("full_name"), str) else None
+    raw_repository_id = repository.get("id")
+    repository_id = raw_repository_id if isinstance(raw_repository_id, int) and not isinstance(raw_repository_id, bool) and raw_repository_id > 0 else None
     pull_request = event["pull_request"]
     base = pull_request.get("base") if isinstance(pull_request.get("base"), dict) else {}
     head = pull_request.get("head") if isinstance(pull_request.get("head"), dict) else {}
     base_sha = base.get("sha") if isinstance(base.get("sha"), str) else None
     head_sha = head.get("sha") if isinstance(head.get("sha"), str) else None
-    return event_name, base_sha, head_sha
+    return event_name, repository_slug, repository_id, base_sha, head_sha
 
 
 def _complete_diff(value: Any) -> bool:
@@ -84,6 +89,8 @@ def check_packet(
     current_diff: dict[str, Any] | None = None,
     current_diff_available: bool | None = None,
     event_name: str | None = None,
+    event_repository: str | None = None,
+    event_repository_id: int | None = None,
     event_base_sha: str | None = None,
     event_head_sha: str | None = None,
     mode: str = "report",
@@ -218,7 +225,7 @@ def check_packet(
                     }
                 )
 
-    if enforce or event_name or event_base_sha or event_head_sha:
+    if enforce or event_name or event_repository or event_repository_id or event_base_sha or event_head_sha:
         if event_name != "pull_request":
             _append_required_action_evidence(
                 enforce=enforce,
@@ -246,6 +253,50 @@ def check_packet(
                 message="The current pull_request head SHA is unavailable.",
                 path="event_head_sha",
             )
+        repository = packet.get("repository") if isinstance(packet.get("repository"), dict) else {}
+        packet_owner = repository.get("owner") if isinstance(repository.get("owner"), str) else None
+        packet_name = repository.get("name") if isinstance(repository.get("name"), str) else None
+        packet_repository = f"{packet_owner}/{packet_name}" if packet_owner and packet_name else None
+        packet_repository_id = repository.get("repository_id")
+        if event_name == "pull_request" and not event_repository:
+            _append_required_action_evidence(
+                enforce=enforce,
+                violations=violations,
+                unknowns=unknowns,
+                code="repository_context_required",
+                message="The runner-owned repository slug is unavailable.",
+                path="event_repository",
+            )
+        elif event_name == "pull_request" and packet_repository and not repository_slugs_match(packet_repository, event_repository):
+            violations.append({
+                "code": "repository_slug_mismatch",
+                "message": "The packet repository slug does not match the runner-owned repository slug.",
+                "path": "repository",
+            })
+        if event_name == "pull_request" and event_repository_id is None:
+            _append_required_action_evidence(
+                enforce=enforce,
+                violations=violations,
+                unknowns=unknowns,
+                code="repository_id_context_required",
+                message="The runner-owned numeric repository ID is unavailable.",
+                path="event_repository_id",
+            )
+        if event_name == "pull_request" and packet_repository_id is None:
+            _append_required_action_evidence(
+                enforce=enforce,
+                violations=violations,
+                unknowns=unknowns,
+                code="packet_repository_id_required",
+                message="The packet numeric repository ID is unavailable.",
+                path="repository.repository_id",
+            )
+        elif event_name == "pull_request" and event_repository_id is not None and packet_repository_id != event_repository_id:
+            violations.append({
+                "code": "repository_id_mismatch",
+                "message": "The packet numeric repository ID does not match the runner-owned repository ID.",
+                "path": "repository.repository_id",
+            })
         if has_complete_current_diff and event_name == "pull_request":
             if event_base_sha and current_diff.get("base_tip_sha") != event_base_sha:
                 violations.append(
