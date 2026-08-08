@@ -235,6 +235,8 @@ class PolicyInspectionTests(unittest.TestCase):
         cases = {
             "ai_not_permitted": ("AI assistance is not permitted.\n", "ai_assistance", "prohibited"),
             "ai_not_welcome": ("AI assistance is not welcome.\n", "ai_assistance", "prohibited"),
+            "ai_leading_no_allowed": ("No AI assistance is allowed.\n", "ai_assistance", "prohibited"),
+            "ai_leading_no_permitted": ("No AI use is permitted.\n", "ai_assistance", "prohibited"),
             "ai_unwelcome": ("AI assistance is unwelcome.\n", "ai_assistance", "prohibited"),
             "ai_disallowed": ("AI assistance is disallowed.\n", "ai_assistance", "prohibited"),
             "ai_not_prohibited": ("AI assistance is not prohibited.\n", "ai_assistance", "allowed"),

@@ -231,6 +231,7 @@ def _claims_from_document(
         ),
         "prohibited",
         (
+            r"\bno\s+(?:ai\b|artificial intelligence)[^.!?\n]{0,80}?(?:allowed|permitted|welcome)\b",
             r"\bai\b[^.!?\n]{0,80}?(?:not\s+allowed|(?<!not )disallowed|not\s+permitted|not\s+welcome|(?<!not )unwelcome|(?<!not )prohibited|(?<!not )forbidden|must\s+not|do\s+not\s+use|禁止|不得|不允许)",
             r"(?:do not|don't|must not|禁止|不得|不允许)[^.!?\n]{0,80}\bai\b",
         ),
