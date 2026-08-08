@@ -434,6 +434,20 @@ def _operation_diff_blockers(packet: dict[str, Any], operation: Any, actual_diff
     return blockers
 
 
+def _remote_pr_head_reconciliation(
+    client: GhClient,
+    operation: Any,
+    pr_url: str,
+) -> tuple[str | None, str | None]:
+    try:
+        remote_head_sha = client.pull_request_head(pr_url)
+    except GhError as exc:
+        return f"remote_pr_head_unavailable: {exc}", None
+    if remote_head_sha != operation.head_sha:
+        return "remote_pr_head_mismatch", remote_head_sha
+    return None, remote_head_sha
+
+
 def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_url: str) -> tuple[str, str]:
     """Reconcile exactly one Issue note after a PR has been created."""
 
@@ -448,11 +462,19 @@ def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_
         save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
         return "needs_reconciliation", reason
     if matches:
+        reason, _ = _remote_pr_head_reconciliation(client, operation, pr_url)
+        if reason:
+            save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
+            return "needs_reconciliation", reason
         save_operation_linked(receipt_path, operation, pr_url)
         return "linked", "existing_exact_note"
     commentability = client.issue_commentability(operation.issue_url)
     if not commentability.get("commentable"):
         reason = str(commentability.get("reason", "issue_not_commentable"))
+        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
+        return "needs_reconciliation", reason
+    reason, _ = _remote_pr_head_reconciliation(client, operation, pr_url)
+    if reason:
         save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
         return "needs_reconciliation", reason
     try:
@@ -909,10 +931,26 @@ def main(argv: list[str] | None = None) -> int:
                         pr_url = _canonical_remote_url(client.create(operation), "pull_request", operation.repo)
                         source = "created"
                     save_operation_pr_created(receipt_path, operation, pr_url)
+                    reason, remote_head_sha = _remote_pr_head_reconciliation(client, operation, pr_url)
+                    if reason:
+                        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
+                        payload.update({
+                            "outcome": "needs_reconciliation",
+                            "source": source,
+                            "status": "needs_reconciliation",
+                            "pr_url": pr_url,
+                            "issue_url": operation.issue_url or "",
+                            "reason": reason,
+                        })
+                        if remote_head_sha is not None:
+                            payload.update({"expected_head_sha": operation.head_sha, "remote_head_sha": remote_head_sha})
+                        _print(payload, args.as_json)
+                        return 1
                     link_status, link_source = _link_pull_request(client, operation, receipt_path, pr_url)
                     payload.update({"source": source, "pr_url": pr_url, "issue_url": operation.issue_url or "", "status": link_status, "link_source": link_source})
                     if link_status != "linked":
                         payload["outcome"] = "needs_reconciliation"
+                        payload["reason"] = link_source
                         _print(payload, args.as_json)
                         return 1
                     payload["outcome"] = "created" if source == "created" else "already_exists"

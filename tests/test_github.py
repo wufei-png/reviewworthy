@@ -296,6 +296,28 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertIn("--paginate", calls[0])
         self.assertIn("--slurp", calls[0])
 
+    def test_pull_request_head_reads_the_canonical_remote_commit(self) -> None:
+        calls = []
+
+        def fake_runner(argv, **kwargs):
+            calls.append(argv)
+            return CompletedProcess(argv, 0, json.dumps({"head": {"sha": "a" * 40}}), "")
+
+        head_sha = GhClient(fake_runner).pull_request_head("https://github.com/example/project/pull/8")
+
+        self.assertEqual(head_sha, "a" * 40)
+        self.assertEqual(
+            calls[0],
+            ["gh", "api", "repos/example/project/pulls/8", "--method", "GET"],
+        )
+
+    def test_pull_request_head_rejects_missing_remote_identity(self) -> None:
+        def fake_runner(argv, **kwargs):
+            return CompletedProcess(argv, 0, json.dumps({"head": {}}), "")
+
+        with self.assertRaisesRegex(GhError, "head.sha"):
+            GhClient(fake_runner).pull_request_head("https://github.com/example/project/pull/8")
+
     def test_operation_receipt_round_trip(self) -> None:
         operation = build_operation(valid_packet(), "example/project", "issue", "Fix input", "Body", "main")
         with tempfile.TemporaryDirectory() as directory:

@@ -424,6 +424,26 @@ class GhClient:
                     items.append(normalized)
         return items
 
+    def pull_request_head(self, pr_url: str) -> str:
+        """Read the current head commit for one canonical GitHub pull request."""
+
+        parsed = parse_public_record(pr_url)
+        if not parsed or parsed.get("record_type") != "pull_request":
+            raise GhError("Pull-request head lookup needs a canonical GitHub pull-request URL")
+        record = self._json(
+            [
+                "api",
+                f"repos/{parsed['owner']}/{parsed['name']}/pulls/{parsed['number']}",
+                "--method",
+                "GET",
+            ]
+        )
+        head = record.get("head") if isinstance(record, dict) else None
+        head_sha = head.get("sha") if isinstance(head, dict) else None
+        if not isinstance(head_sha, str) or not head_sha.strip():
+            raise GhError("GitHub pull-request response did not include head.sha")
+        return head_sha.strip()
+
     def search_candidates(self, repo: str, query: str, kind: str = "both") -> list[dict[str, Any]]:
         """Search Issues/PRs for duplicate-work evidence without mutating GitHub."""
 

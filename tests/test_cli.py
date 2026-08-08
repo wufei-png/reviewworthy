@@ -808,6 +808,7 @@ class CliBoundaryTests(unittest.TestCase):
             }
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/pull/8"
+            fake_client.pull_request_head.return_value = actual_diff["head_sha"]
             fake_client.find_issue_link_note.return_value = []
             fake_client.issue_commentability.return_value = {"commentable": True}
             fake_client.add_issue_note.return_value = {}
@@ -827,7 +828,96 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(receipt["pr_url"], "https://github.com/example/project/pull/8")
             self.assertEqual(receipt["issue_url"], "https://github.com/example/project/issues/1")
             self.assertEqual(fake_client.create.call_count, 1)
+            self.assertEqual(fake_client.pull_request_head.call_count, 2)
             self.assertEqual(fake_client.add_issue_note.call_count, 1)
+
+    def test_pull_request_remote_head_uncertainty_requires_reconciliation_before_linking(self) -> None:
+        cases = (
+            ("created_mismatch", False, "mismatch", "remote_pr_head_mismatch"),
+            ("created_unavailable", False, "unavailable", "remote_pr_head_unavailable"),
+            ("existing_mismatch", True, "mismatch", "remote_pr_head_mismatch"),
+            ("head_moves_before_note", False, "moves", "remote_pr_head_mismatch"),
+        )
+        for name, use_existing, remote_mode, expected_reason in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                repository_root, actual_diff = self._pr_repository(root)
+                packet = valid_packet()
+                packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
+                packet["diff"] = actual_diff
+                packet["verification"]["receipts"][0].update({
+                    "head_sha": actual_diff["head_sha"],
+                    "head_sha_before": actual_diff["head_sha"],
+                    "head_sha_after": actual_diff["head_sha"],
+                    "cwd": ".",
+                })
+                packet["materials"]["material_snapshot"] = material_snapshot(packet)
+                packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                packet_path = root / "packet.json"
+                body_path = root / "body.md"
+                packet_path.write_text(json.dumps(packet), encoding="utf-8")
+                body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+                common = [
+                    "--packet", str(packet_path), "--repo", "example/project", "--kind", "pull_request",
+                    "--title", packet["narrative"]["title"], "--body-file", str(body_path), "--base", "main",
+                    "--head", "feature", "--root", str(repository_root),
+                ]
+                plan_output = io.StringIO()
+                with redirect_stdout(plan_output):
+                    self.assertEqual(main(["remote", "plan", *common, "--json"]), 0)
+                operation_id = json.loads(plan_output.getvalue())["operation_id"]
+                fake_client = unittest.mock.MagicMock()
+                fake_client.verify_public_reference.return_value = {
+                    "verified": True,
+                    "provider": "github",
+                    "host": "github.com",
+                    "repository": "example/project",
+                    "repository_id": 101,
+                    "record_type": "issue",
+                    "number": 1,
+                    "url": "https://github.com/example/project/issues/1",
+                    "visibility": "public",
+                    "labels": [],
+                }
+                fake_client.find_existing.return_value = (
+                    [{"url": "https://github.com/example/project/pull/10"}]
+                    if use_existing
+                    else []
+                )
+                fake_client.create.return_value = "https://github.com/example/project/pull/10"
+                fake_client.find_issue_link_note.return_value = []
+                fake_client.issue_commentability.return_value = {"commentable": True}
+                if remote_mode == "unavailable":
+                    fake_client.pull_request_head.side_effect = GhError("head unavailable")
+                elif remote_mode == "moves":
+                    fake_client.pull_request_head.side_effect = [actual_diff["head_sha"], "f" * 40]
+                else:
+                    fake_client.pull_request_head.return_value = "f" * 40
+                create_args = ["remote", "create", *common, "--confirm-operation-id", operation_id, "--json"]
+                first_output = io.StringIO()
+                second_output = io.StringIO()
+                with patch("reviewworthy.cli.GhClient", return_value=fake_client):
+                    with redirect_stdout(first_output):
+                        first_code = main(create_args)
+                    with redirect_stdout(second_output):
+                        second_code = main(create_args)
+
+                result = json.loads(first_output.getvalue())
+                receipt_files = list((root / "local" / "operations").glob("*.json"))
+                self.assertEqual((first_code, second_code), (1, 1))
+                self.assertEqual(result["outcome"], "needs_reconciliation")
+                self.assertTrue(result["reason"].startswith(expected_reason))
+                self.assertEqual(json.loads(receipt_files[0].read_text())["status"], "needs_reconciliation")
+                self.assertEqual(fake_client.create.call_count, 0 if use_existing else 1)
+                self.assertEqual(fake_client.pull_request_head.call_count, 2 if remote_mode == "moves" else 1)
+                if remote_mode == "moves":
+                    self.assertEqual(fake_client.find_issue_link_note.call_count, 1)
+                    self.assertEqual(fake_client.issue_commentability.call_count, 1)
+                else:
+                    fake_client.find_issue_link_note.assert_not_called()
+                    fake_client.issue_commentability.assert_not_called()
+                fake_client.add_issue_note.assert_not_called()
 
     def test_pull_request_create_checks_live_good_first_label_before_remote_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -927,6 +1017,7 @@ class CliBoundaryTests(unittest.TestCase):
             }
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/pull/9"
+            fake_client.pull_request_head.return_value = actual_diff["head_sha"]
             fake_client.find_issue_link_note.side_effect = GhError("Issue comments unavailable")
             create_args = ["remote", "create", *common, "--confirm-operation-id", operation_id, "--json"]
             with patch("reviewworthy.cli.GhClient", return_value=fake_client):
