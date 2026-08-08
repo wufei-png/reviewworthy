@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-from reviewworthy.git import GitError, capture_diff, current_head, run_verification
+from reviewworthy.git import GitError, capture_diff, capture_pr_diff, current_head, run_verification
 
 
 class GitEvidenceTests(unittest.TestCase):
@@ -47,6 +47,41 @@ class GitEvidenceTests(unittest.TestCase):
             self.assertEqual(receipt["status"], "valid")
             self.assertEqual(receipt["provenance"], "cli_executed")
             self.assertNotEqual(receipt["stdout_sha256"], receipt["stderr_sha256"])
+
+    def test_capture_pr_diff_attributes_only_changes_since_merge_base(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            self._git(root, "branch", "-M", "main")
+            (root / "common.txt").write_text("common\n", encoding="utf-8")
+            self._git(root, "add", "common.txt")
+            self._git(root, "commit", "-qm", "common base")
+            merge_base = current_head(root)
+
+            self._git(root, "checkout", "-qb", "feature")
+            (root / "only-feature.txt").write_text("feature\n", encoding="utf-8")
+            self._git(root, "add", "only-feature.txt")
+            self._git(root, "commit", "-qm", "feature change")
+            head = current_head(root)
+
+            self._git(root, "checkout", "-q", "main")
+            (root / "only-main.txt").write_text("main\n", encoding="utf-8")
+            self._git(root, "add", "only-main.txt")
+            self._git(root, "commit", "-qm", "main change")
+            base_tip = current_head(root)
+
+            diff = capture_pr_diff(root, "main", "feature")
+
+            self.assertEqual(diff["comparison"], "merge_base")
+            self.assertEqual(diff["base_tip_sha"], base_tip)
+            self.assertEqual(diff["merge_base_sha"], merge_base)
+            self.assertEqual(diff["head_sha"], head)
+            self.assertEqual(diff["changed_files"], ["only-feature.txt"])
+            self.assertEqual(diff["additions"], 1)
+            self.assertEqual(diff["deletions"], 0)
+            self.assertEqual(len(diff["patch_sha256"]), 64)
 
     def test_verification_refuses_when_worktree_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

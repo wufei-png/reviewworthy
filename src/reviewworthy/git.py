@@ -55,25 +55,20 @@ def _parse_numstat(output: str) -> tuple[int, int]:
     return additions, deletions
 
 
-def capture_diff(root: Path, base: str, head: str) -> dict[str, Any]:
-    root = root.resolve()
-    base_sha = resolve_ref(root, base)
-    head_sha = resolve_ref(root, head)
-    patch = _run_git(root, ["diff", "--binary", "--no-ext-diff", "--no-renames", base_sha, head_sha], text=False)
+def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str, Any]:
+    patch = _run_git(root, ["diff", "--binary", "--no-ext-diff", "--no-renames", start_sha, head_sha], text=False)
     if patch.returncode != 0:
         detail = (patch.stderr or patch.stdout or b"git diff failed").decode("utf-8", errors="replace").strip()
         raise GitError(detail)
-    names = _run_git(root, ["diff", "--name-only", "--no-ext-diff", "--no-renames", base_sha, head_sha])
+    names = _run_git(root, ["diff", "--name-only", "--no-ext-diff", "--no-renames", start_sha, head_sha])
     if names.returncode != 0:
         raise GitError((names.stderr or names.stdout or "git diff --name-only failed").strip())
-    numstat = _run_git(root, ["diff", "--numstat", "--no-ext-diff", "--no-renames", base_sha, head_sha])
+    numstat = _run_git(root, ["diff", "--numstat", "--no-ext-diff", "--no-renames", start_sha, head_sha])
     if numstat.returncode != 0:
         raise GitError((numstat.stderr or numstat.stdout or "git diff --numstat failed").strip())
     additions, deletions = _parse_numstat(str(numstat.stdout))
     patch_bytes = bytes(patch.stdout)
     return {
-        "base_sha": base_sha,
-        "head_sha": head_sha,
         "patch_sha256": sha256(patch_bytes).hexdigest(),
         "changed_files": sorted(line for line in str(names.stdout).splitlines() if line),
         "additions": additions,
@@ -81,6 +76,37 @@ def capture_diff(root: Path, base: str, head: str) -> dict[str, Any]:
         "captured_at": utc_now(),
         "root": relative_path(root, root),
         "provenance": "cli_executed",
+    }
+
+
+def capture_diff(root: Path, base: str, head: str) -> dict[str, Any]:
+    """Capture the legacy two-tip tree Diff between explicit Git refs."""
+
+    root = root.resolve()
+    base_sha = resolve_ref(root, base)
+    head_sha = resolve_ref(root, head)
+    return {"base_sha": base_sha, "head_sha": head_sha, **_capture_diff_between(root, base_sha, head_sha)}
+
+
+def capture_pr_diff(root: Path, base: str, head: str) -> dict[str, Any]:
+    """Capture the contribution introduced from the merge base to PR head."""
+
+    root = root.resolve()
+    base_tip_sha = resolve_ref(root, base)
+    head_sha = resolve_ref(root, head)
+    completed = _run_git(root, ["merge-base", base_tip_sha, head_sha])
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "git merge-base failed").strip()
+        raise GitError(detail)
+    merge_base_sha = str(completed.stdout).strip()
+    if not merge_base_sha:
+        raise GitError("git merge-base returned no commit")
+    return {
+        "comparison": "merge_base",
+        "base_tip_sha": base_tip_sha,
+        "merge_base_sha": merge_base_sha,
+        "head_sha": head_sha,
+        **_capture_diff_between(root, merge_base_sha, head_sha),
     }
 
 
