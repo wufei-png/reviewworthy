@@ -31,7 +31,7 @@ from .github import (
     save_operation_pr_created,
     save_operation_receipt,
 )
-from .packet import issue_link_blockers, issue_reference, material_snapshot, readiness_blockers, skeleton_packet, validate_packet
+from .packet import good_first_issue_policy_errors, issue_link_blockers, issue_reference, material_snapshot, readiness_blockers, skeleton_packet, validate_packet
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .risk import assess_manifest
@@ -339,19 +339,44 @@ def _issue_revalidation_errors(packet: dict[str, Any], remote: dict[str, Any]) -
         errors.append({"code": "issue_revalidation_failed", "message": str(remote.get("error", "The supporting Issue could not be verified.")), "path": "basis.verification"})
         return errors
     parsed = parse_public_record(reference)
-    if not parsed or remote.get("record_type") != "issue" or not repository_slugs_match(remote.get("repository"), f"{parsed['owner']}/{parsed['name']}"):
+    if (
+        not parsed
+        or remote.get("record_type") != "issue"
+        or remote.get("host") != "github.com"
+        or remote.get("url") != reference
+        or not isinstance(remote.get("number"), int)
+        or isinstance(remote.get("number"), bool)
+        or remote.get("number") != parsed.get("number")
+        or remote.get("visibility") != "public"
+        or not repository_slugs_match(remote.get("repository"), f"{parsed['owner']}/{parsed['name']}")
+    ):
         errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match the Packet Issue identity.", "path": "basis.verification"})
     if isinstance(repository, dict):
         expected_repository = f"{repository.get('owner')}/{repository.get('name')}"
         if not repository_slugs_match(remote.get("repository"), expected_repository):
             errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match packet.repository.", "path": "repository"})
-        if repository.get("repository_id") is not None and remote.get("repository_id") != repository.get("repository_id"):
+        if repository.get("repository_id") is not None and (
+            not isinstance(remote.get("repository_id"), int)
+            or isinstance(remote.get("repository_id"), bool)
+            or remote.get("repository_id") != repository.get("repository_id")
+        ):
             errors.append({"code": "issue_revalidation_identity_mismatch", "message": "The live Issue verification has a different repository ID.", "path": "repository.repository_id"})
     state_reason = normalize_label(remote.get("state_reason", ""))
     if state_reason == "not planned":
         errors.append({"code": "issue_not_actionable", "message": "The supporting Issue is closed as not planned.", "path": "basis.verification.state_reason"})
     if has_normalized_label(remote.get("labels"), "duplicate"):
         errors.append({"code": "issue_duplicate", "message": "The supporting Issue has the duplicate label.", "path": "basis.verification.labels"})
+    if not isinstance(remote.get("labels"), list) or not all(isinstance(label, str) for label in remote.get("labels", [])):
+        policy = packet.get("policy", {})
+        claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
+        ai_assistance = packet.get("ai_assistance", {})
+        if isinstance(claims, dict) and claims.get("good_first_issue_ai_allowed") is False and isinstance(ai_assistance, dict) and ai_assistance.get("used") is not False:
+            errors.append({
+                "code": "good_first_issue_label_verification_required",
+                "message": "Live good-first-issue policy enforcement requires a complete label list.",
+                "path": "basis.verification.labels",
+            })
+    errors.extend(good_first_issue_policy_errors(packet, remote.get("labels"), path="basis.verification.labels"))
     return errors
 
 
@@ -573,7 +598,7 @@ def main(argv: list[str] | None = None) -> int:
                             "reference": signal_value["reference"],
                             "verified_at": utc_now(),
                         }
-                        for key in ("repository", "record_type", "number", "url", "visibility"):
+                        for key in ("host", "repository", "repository_id", "record_type", "number", "url", "visibility", "state", "state_reason", "locked", "labels"):
                             if remote.get(key) is not None:
                                 verification[key] = remote[key]
                     updated_signal["verification"] = verification

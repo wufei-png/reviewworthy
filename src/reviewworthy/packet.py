@@ -557,6 +557,32 @@ def issue_link_blockers(packet: dict[str, Any], body: str) -> list[dict[str, str
     return []
 
 
+def good_first_issue_policy_errors(
+    packet: dict[str, Any],
+    labels: Any,
+    *,
+    path: str,
+) -> list[dict[str, str]]:
+    """Apply the good-first AI rule to provider-verified labels only."""
+
+    policy = packet.get("policy", {})
+    claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
+    ai_assistance = packet.get("ai_assistance", {})
+    ai_used = ai_assistance.get("used") if isinstance(ai_assistance, dict) else None
+    if (
+        isinstance(claims, dict)
+        and claims.get("good_first_issue_ai_allowed") is False
+        and has_normalized_label(labels, "good first issue")
+        and ai_used is not False
+    ):
+        return [{
+            "code": "good_first_issue_ai_disallowed",
+            "message": "The repository does not allow AI-assisted work on good-first-issue items.",
+            "path": path,
+        }]
+    return []
+
+
 def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> list[dict[str, str]]:
     """Return only deterministic violations from known policy claims."""
 
@@ -567,6 +593,8 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
     violations: list[dict[str, str]] = []
     if policy.get("conflicts"):
         violations.append({"code": "policy_conflict", "message": "Policy sources conflict.", "path": "policy.conflicts"})
+    if policy.get("ambiguities"):
+        violations.append({"code": "policy_ambiguity", "message": "A policy source contains opposed explicit claims.", "path": "policy.ambiguities"})
 
     claims = policy.get("authoritative_claims", {})
     if not isinstance(claims, dict):
@@ -597,10 +625,69 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
         narrative = {}
     if claims.get("human_pr_narrative_required") is True and not str(narrative.get("human_expression", "")).strip():
         violations.append({"code": "missing_human_expression", "message": "The repository policy requires human-owned PR motivation and trade-offs.", "path": "narrative.human_expression"})
-    if claims.get("good_first_issue_ai_allowed") is False:
-        labels = basis.get("labels", []) if isinstance(basis, dict) else []
-        if any(str(label).lower() in {"good first issue", "good-first-issue"} for label in labels) and ai_used is not False:
-            violations.append({"code": "good_first_issue_ai_disallowed", "message": "The repository does not allow AI-assisted work on good-first-issue items.", "path": "basis.labels"})
+    if isinstance(basis, dict) and basis.get("kind") == "issue":
+        verification = basis.get("verification")
+        labels_path = "basis.verification.labels"
+        issue_label_target = True
+    elif (
+        isinstance(basis, dict)
+        and basis.get("kind") == "signal"
+        and isinstance(basis.get("signal"), dict)
+        and basis["signal"].get("kind") == "issue"
+    ):
+        verification = basis["signal"].get("verification")
+        labels_path = "basis.signal.verification.labels"
+        issue_label_target = True
+    else:
+        verification = None
+        labels_path = "basis.verification.labels"
+        issue_label_target = False
+    repository = packet.get("repository", {})
+    reference = issue_reference(packet)
+    expected_repository = (
+        f"{repository.get('owner')}/{repository.get('name')}"
+        if isinstance(repository, dict) and repository.get("owner") and repository.get("name")
+        else None
+    )
+    parsed_reference = parse_public_record(reference) if reference is not None else None
+    trusted_verification = (
+        isinstance(verification, dict)
+        and verification.get("status") == "verified"
+        and verification.get("provider") == "github"
+        and verification.get("record_type") == "issue"
+        and parsed_reference is not None
+        and verification.get("reference") == reference
+        and verification.get("host") == "github.com"
+        and verification.get("url") == reference
+        and isinstance(verification.get("number"), int)
+        and not isinstance(verification.get("number"), bool)
+        and verification.get("number") == parsed_reference.get("number")
+        and verification.get("visibility") == "public"
+        and isinstance(verification.get("labels"), list)
+        and all(isinstance(label, str) for label in verification.get("labels"))
+        and expected_repository is not None
+        and repository_slugs_match(verification.get("repository"), expected_repository)
+        and isinstance(repository.get("repository_id"), int)
+        and not isinstance(repository.get("repository_id"), bool)
+        and repository.get("repository_id") > 0
+        and isinstance(verification.get("repository_id"), int)
+        and not isinstance(verification.get("repository_id"), bool)
+        and verification.get("repository_id") == repository.get("repository_id")
+    )
+    trusted_labels = verification.get("labels") if trusted_verification else []
+    if (
+        claims.get("good_first_issue_ai_allowed") is False
+        and ai_used is not False
+        and issue_label_target
+        and not trusted_verification
+    ):
+        violations.append({
+            "code": "good_first_issue_label_verification_required",
+            "message": "The good-first-issue AI policy requires a complete verified GitHub Issue identity and labels.",
+            "path": labels_path,
+        })
+    else:
+        violations.extend(good_first_issue_policy_errors(packet, trusted_labels, path=labels_path))
     return violations
 
 

@@ -3,7 +3,7 @@
   "kind": "packet",
   "mutations": [
     {"path": "policy.authoritative_claims.good_first_issue_ai_allowed", "value": false},
-    {"path": "basis.labels", "value": ["good first issue"]}
+    {"path": "basis.verification.labels", "value": ["good first issue"]}
   ],
   "assert": {
     "result": "blocked",

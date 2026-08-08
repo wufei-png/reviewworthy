@@ -62,6 +62,11 @@ def _base_packet() -> dict[str, Any]:
             "reference": "https://github.com/example/project/issues/1",
             "repository": "example/project",
             "repository_id": 101,
+            "record_type": "issue",
+            "host": "github.com",
+            "number": 1,
+            "url": "https://github.com/example/project/issues/1",
+            "visibility": "public",
             "verified_at": "2026-08-07T00:00:00Z",
         },
     }

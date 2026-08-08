@@ -2,12 +2,97 @@ from __future__ import annotations
 
 import unittest
 
-from reviewworthy.packet import issue_basis_blockers, material_snapshot, readiness_blockers, skeleton_packet, validate_packet
+from reviewworthy.packet import issue_basis_blockers, material_snapshot, policy_violations, readiness_blockers, skeleton_packet, validate_packet
 
 from helpers import valid_packet
 
 
 class PacketValidationTests(unittest.TestCase):
+    def test_good_first_policy_uses_only_verified_issue_labels(self) -> None:
+        packet = valid_packet()
+        packet["policy"]["authoritative_claims"]["good_first_issue_ai_allowed"] = False
+        packet["basis"]["labels"] = ["good-first-issue"]
+
+        self.assertNotIn("good_first_issue_ai_disallowed", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+
+        packet["basis"]["verification"]["labels"] = ["Good First Issue"]
+        violations = policy_violations(packet, enforce_disclosure=False)
+
+        self.assertIn("good_first_issue_ai_disallowed", {item["code"] for item in violations})
+        self.assertEqual(next(item["path"] for item in violations if item["code"] == "good_first_issue_ai_disallowed"), "basis.verification.labels")
+
+        packet["basis"]["verification"].pop("record_type")
+        self.assertIn("good_first_issue_label_verification_required", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+
+        packet["basis"]["verification"]["record_type"] = "issue"
+        packet["repository"]["repository_id"] = None
+        packet["basis"]["verification"]["repository_id"] = None
+        self.assertIn("good_first_issue_label_verification_required", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+        packet["repository"]["repository_id"] = 101
+        packet["basis"]["verification"]["repository_id"] = 101
+
+        packet["basis"]["verification"].update({
+            "host": "attacker.invalid",
+            "number": 999,
+            "url": "https://github.com/example/project/issues/999",
+        })
+        self.assertIn("good_first_issue_label_verification_required", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+        packet["basis"]["verification"].update({
+            "host": "github.com",
+            "number": 1,
+            "url": "https://github.com/example/project/issues/1",
+        })
+
+        packet["basis"]["verification"]["labels"] = None
+        self.assertIn("good_first_issue_label_verification_required", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+        packet["basis"]["verification"]["labels"] = ["Good First Issue"]
+        packet["basis"]["verification"]["number"] = True
+        self.assertIn("good_first_issue_label_verification_required", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+        packet["basis"]["verification"]["number"] = 1
+        packet["basis"]["verification"]["repository_id"] = True
+        self.assertIn("good_first_issue_label_verification_required", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+        packet["basis"]["verification"]["repository_id"] = 101
+
+        packet["basis"] = {
+            "kind": "signal",
+            "signal": {
+                "kind": "issue",
+                "reference": "https://github.com/example/project/issues/1",
+                "verification": {
+                    "status": "verified",
+                    "provider": "github",
+                    "record_type": "issue",
+                    "reference": "https://github.com/example/project/issues/1",
+                    "repository": "example/project",
+                    "repository_id": 101,
+                    "host": "github.com",
+                    "number": 1,
+                    "url": "https://github.com/example/project/issues/1",
+                    "visibility": "public",
+                    "labels": ["good-first-issue"],
+                },
+            },
+        }
+        signal_violations = policy_violations(packet, enforce_disclosure=False)
+
+        self.assertEqual(next(item["path"] for item in signal_violations if item["code"] == "good_first_issue_ai_disallowed"), "basis.signal.verification.labels")
+
+        packet["basis"]["signal"] = {
+            "kind": "accepted-proposal",
+            "verification": {"status": "verified", "record_type": "pull_request", "labels": ["good-first-issue"]},
+        }
+
+        self.assertNotIn("good_first_issue_ai_disallowed", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+
+    def test_policy_ambiguity_is_not_reported_as_policy_conflict(self) -> None:
+        packet = valid_packet()
+        packet["policy"]["ambiguities"] = [{"key": "issue_required"}]
+
+        codes = {item["code"] for item in policy_violations(packet, enforce_disclosure=False)}
+
+        self.assertIn("policy_ambiguity", codes)
+        self.assertNotIn("policy_conflict", codes)
+
     def test_packet_01_is_rejected_without_implicit_migration(self) -> None:
         packet = valid_packet()
         packet["packet_version"] = "0.1"

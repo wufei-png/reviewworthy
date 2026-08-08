@@ -155,9 +155,14 @@ class CliBoundaryTests(unittest.TestCase):
         packet = valid_packet()
         base_remote = {
             "verified": True,
+            "host": "github.com",
             "record_type": "issue",
             "repository": "Example/Project",
             "repository_id": 101,
+            "number": 1,
+            "url": "https://github.com/example/project/issues/1",
+            "visibility": "public",
+            "labels": [],
         }
         for state_reason in ("not_planned", "not-planned", "not planned"):
             errors = _issue_revalidation_errors(packet, {**base_remote, "state_reason": state_reason})
@@ -169,6 +174,30 @@ class CliBoundaryTests(unittest.TestCase):
         self.assertNotIn("issue_not_actionable", {error["code"] for error in errors})
         errors = _issue_revalidation_errors(packet, {**base_remote, "labels": ["Duplicate"]})
         self.assertIn("issue_duplicate", {error["code"] for error in errors})
+
+    def test_issue_revalidation_applies_good_first_policy_to_live_labels(self) -> None:
+        packet = valid_packet()
+        packet["policy"]["authoritative_claims"]["good_first_issue_ai_allowed"] = False
+        packet["basis"]["labels"] = ["good first issue"]
+        base_remote = {
+            "verified": True,
+            "host": "github.com",
+            "record_type": "issue",
+            "repository": "example/project",
+            "repository_id": 101,
+            "number": 1,
+            "url": "https://github.com/example/project/issues/1",
+            "visibility": "public",
+            "labels": [],
+        }
+
+        self.assertNotIn("good_first_issue_ai_disallowed", {error["code"] for error in _issue_revalidation_errors(packet, base_remote)})
+        self.assertIn("good_first_issue_label_verification_required", {error["code"] for error in _issue_revalidation_errors(packet, {key: value for key, value in base_remote.items() if key != "labels"})})
+        self.assertIn("issue_revalidation_repository_mismatch", {error["code"] for error in _issue_revalidation_errors(packet, {**base_remote, "number": True})})
+        self.assertIn("issue_revalidation_identity_mismatch", {error["code"] for error in _issue_revalidation_errors(packet, {**base_remote, "repository_id": True})})
+        errors = _issue_revalidation_errors(packet, {**base_remote, "labels": ["Good-First-Issue"]})
+
+        self.assertIn("good_first_issue_ai_disallowed", {error["code"] for error in errors})
 
     def test_signal_verify_can_explicitly_record_successful_public_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -188,11 +217,14 @@ class CliBoundaryTests(unittest.TestCase):
             fake_client.verify_public_reference.return_value = {
                 "verified": True,
                 "provider": "github",
+                "host": "github.com",
                 "repository": "example/project",
+                "repository_id": 101,
                 "record_type": "issue",
                 "number": 2,
                 "url": signal["reference"],
                 "visibility": "public",
+                "labels": ["Good First Issue"],
             }
             with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(io.StringIO()):
                 code = main(["signal", "verify", str(signal_path), "--record", "--json"])
@@ -201,6 +233,14 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(recorded["verification"]["status"], "verified")
             self.assertEqual(recorded["verification"]["reference"], signal["reference"])
+            self.assertEqual(recorded["verification"]["host"], "github.com")
+            self.assertEqual(recorded["verification"]["repository_id"], 101)
+            self.assertEqual(recorded["verification"]["labels"], ["Good First Issue"])
+
+            packet = valid_packet()
+            packet["policy"]["authoritative_claims"]["good_first_issue_ai_allowed"] = False
+            packet["basis"] = {"kind": "signal", "signal": recorded}
+            self.assertIn("good_first_issue_ai_disallowed", {item["code"] for item in readiness_blockers(packet)})
 
     def test_candidate_select_bind_and_understanding_record_commands(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -756,9 +796,14 @@ class CliBoundaryTests(unittest.TestCase):
             fake_client.verify_public_reference.return_value = {
                 "verified": True,
                 "provider": "github",
+                "host": "github.com",
                 "repository": "example/project",
                 "repository_id": 101,
                 "record_type": "issue",
+                "number": 1,
+                "url": "https://github.com/example/project/issues/1",
+                "visibility": "public",
+                "labels": [],
                 "state": "open",
             }
             fake_client.find_existing.return_value = []
@@ -783,6 +828,61 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(receipt["issue_url"], "https://github.com/example/project/issues/1")
             self.assertEqual(fake_client.create.call_count, 1)
             self.assertEqual(fake_client.add_issue_note.call_count, 1)
+
+    def test_pull_request_create_checks_live_good_first_label_before_remote_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, actual_diff = self._pr_repository(root)
+            packet = valid_packet()
+            packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
+            packet["diff"] = actual_diff
+            packet["verification"]["receipts"][0].update({
+                "head_sha": actual_diff["head_sha"],
+                "head_sha_before": actual_diff["head_sha"],
+                "head_sha_after": actual_diff["head_sha"],
+                "cwd": ".",
+            })
+            packet["policy"]["authoritative_claims"]["good_first_issue_ai_allowed"] = False
+            packet["basis"]["verification"]["labels"] = []
+            packet["materials"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
+            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet_path = root / "packet.json"
+            body_path = root / "body.md"
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+            common = [
+                "--packet", str(packet_path), "--repo", "example/project", "--kind", "pull_request",
+                "--title", packet["narrative"]["title"], "--body-file", str(body_path), "--base", "main",
+                "--head", "feature", "--root", str(repository_root),
+            ]
+            plan_output = io.StringIO()
+            with redirect_stdout(plan_output):
+                self.assertEqual(main(["remote", "plan", *common, "--json"]), 0)
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "host": "github.com",
+                "repository": "example/project",
+                "repository_id": 101,
+                "record_type": "issue",
+                "number": 1,
+                "url": "https://github.com/example/project/issues/1",
+                "visibility": "public",
+                "labels": ["Good First Issue"],
+            }
+            output = io.StringIO()
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
+                code = main(["remote", "create", *common, "--confirm-operation-id", operation_id, "--json"])
+
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 1)
+            self.assertIn("good_first_issue_ai_disallowed", {item["code"] for item in result["readiness_blockers"]})
+            fake_client.find_existing.assert_not_called()
+            fake_client.create.assert_not_called()
+            fake_client.add_issue_note.assert_not_called()
 
     def test_pull_request_link_failure_is_terminal_without_creating_another_pr(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -814,7 +914,17 @@ class CliBoundaryTests(unittest.TestCase):
                 main(["remote", "plan", *common, "--json"])
             operation_id = json.loads(plan_output.getvalue())["operation_id"]
             fake_client = unittest.mock.MagicMock()
-            fake_client.verify_public_reference.return_value = {"verified": True, "repository": "example/project", "repository_id": 101, "record_type": "issue"}
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "host": "github.com",
+                "repository": "example/project",
+                "repository_id": 101,
+                "record_type": "issue",
+                "number": 1,
+                "url": "https://github.com/example/project/issues/1",
+                "visibility": "public",
+                "labels": [],
+            }
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/pull/9"
             fake_client.find_issue_link_note.side_effect = GhError("Issue comments unavailable")

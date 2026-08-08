@@ -39,6 +39,7 @@ class PolicySource:
     claims: dict[str, Any]
     error: str | None = None
     provenance: dict[str, dict[str, Any]] = field(default_factory=dict)
+    ambiguities: list[dict[str, Any]] = field(default_factory=list)
 
 
 _DOCUMENT_PROVENANCE_PATTERNS = {
@@ -139,50 +140,142 @@ def _first_match(text: str, patterns: Iterable[str]) -> re.Match[str] | None:
     return None
 
 
-def _claims_from_document(text: str, path: Path, root: Path) -> tuple[dict[str, Any], dict[str, re.Match[str]]]:
+def _policy_clause_ranges(text: str) -> list[tuple[int, int]]:
+    repeated_subject = r"(?:an?\s+)?(?:ai\b|artificial intelligence|issues?\b|bug reports?\b|disclos|pr\b|pull request|security reports?\b|draft\b|work in progress|discovery\b|good[- ]first[- ]issue)"
+    boundaries = re.finditer(
+        rf"[.!?\n;,]+|\b(?:but|however|whereas)\b|\band\b(?=\s+{repeated_subject})",
+        text,
+        re.IGNORECASE,
+    )
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    for boundary in boundaries:
+        if start < boundary.start():
+            ranges.append((start, boundary.start()))
+        start = boundary.end()
+    if start < len(text):
+        ranges.append((start, len(text)))
+    return ranges
+
+
+def _clause_matches(text: str, patterns: Iterable[str]) -> list[re.Match[str]]:
+    matches = [
+        match
+        for start, end in _policy_clause_ranges(text)
+        for pattern in patterns
+        for match in re.compile(pattern, re.IGNORECASE | re.DOTALL).finditer(text, start, end)
+    ]
+    return sorted(matches, key=lambda item: (item.start(), item.end()))
+
+
+def _first_distinct_match(
+    text: str,
+    patterns: Iterable[str],
+    excluded: Iterable[re.Match[str]],
+) -> re.Match[str] | None:
+    excluded_matches = list(excluded)
+    for match in _clause_matches(text, patterns):
+        # A broad positive pattern can land on the same terminal word as an
+        # explicit negative within one clause (for example, "not required").
+        # Ignore that duplicate parse; opposed clauses have distinct spans.
+        if all(match.end() != item.end() for item in excluded_matches):
+            return match
+    return None
+
+
+def _claims_from_document(
+    text: str,
+    path: Path,
+    root: Path,
+) -> tuple[dict[str, Any], dict[str, re.Match[str]], dict[str, list[tuple[Any, re.Match[str]]]]]:
     claims: dict[str, Any] = {}
     matches: dict[str, re.Match[str]] = {}
+    ambiguities: dict[str, list[tuple[Any, re.Match[str]]]] = {}
 
     def record(key: str, value: Any, match: re.Match[str] | None) -> None:
         claims[key] = value
         if match:
             matches[key] = match
 
-    prohibited_ai_match = _first_match(
-        text,
+    def record_opposed(
+        key: str,
+        positive_value: Any,
+        positive_patterns: Iterable[str],
+        negative_value: Any,
+        negative_patterns: Iterable[str],
+    ) -> Any:
+        negative_matches = [
+            match
+            for match in _clause_matches(text, negative_patterns)
+            if not re.search(r"\bnot\s+(?:disallowed|forbidden|insufficient|optional|prohibited|unwelcome)\b", match.group(), re.IGNORECASE)
+        ]
+        negative_match = negative_matches[0] if negative_matches else None
+        positive_match = _first_distinct_match(text, positive_patterns, negative_matches)
+        if positive_match and negative_match:
+            ambiguities[key] = [(positive_value, positive_match), (negative_value, negative_match)]
+            return None
+        if negative_match:
+            record(key, negative_value, negative_match)
+            return negative_value
+        if positive_match:
+            record(key, positive_value, positive_match)
+            return positive_value
+        return None
+
+    record_opposed(
+        "ai_assistance",
+        "allowed",
         (
-            r"\bai\b[^.!?\n]{0,80}(?:not allowed|prohibited|forbidden|must not|do not use|禁止|不得|不允许)",
+            r"\bai\b[^.!?\n]{0,80}?(?:(?<!not )permitted\b|(?<!not )(?<!un)welcome\b|(?<!dis)(?<!not )(?<!not-)allowed\b)",
+            r"\bai\b[^.!?\n]{0,80}?(?:not\s+prohibited|not\s+forbidden|not\s+disallowed|not\s+unwelcome)\b",
+        ),
+        "prohibited",
+        (
+            r"\bai\b[^.!?\n]{0,80}?(?:not\s+allowed|(?<!not )disallowed|not\s+permitted|not\s+welcome|(?<!not )unwelcome|(?<!not )prohibited|(?<!not )forbidden|must\s+not|do\s+not\s+use|禁止|不得|不允许)",
             r"(?:do not|don't|must not|禁止|不得|不允许)[^.!?\n]{0,80}\bai\b",
         ),
     )
-    if prohibited_ai_match:
-        record("ai_assistance", "prohibited", prohibited_ai_match)
-    else:
-        allowed_ai_match = _first_match(text, (r"\bai\b[^.!?\n]{0,80}(?:allowed|permitted|welcome)",))
-        if allowed_ai_match:
-            record("ai_assistance", "allowed", allowed_ai_match)
-
-    issue_match = _first_match(
-        text,
+    record_opposed(
+        "issue_required",
+        True,
         (
-            r"(?:issue|bug report)[^.!?\n]{0,50}(?:is )?(?:required|must come first)",
+            r"(?:issue|bug report)[^.!?\n]{0,50}?(?:is )?(?:required|must come first)",
+            r"(?:an?\s+)?(?:issues?|bug reports?)\s+(?:(?:is|are)\s+)?not\s+optional\b",
             r"(?:open|file|create)\s+(?:an?\s+)?issue[^.!?\n]{0,50}(?:before|first|prior)",
+            r"(?:contribution|pull request|pr)[^.!?\n]{0,50}must begin with[^.!?\n]{0,20}(?:an?\s+)?(?:public\s+)?(?:github\s+)?issue",
+            r"(?:pull request|pr)[^.!?\n]{0,50}(?:not\s+accepted|may\s+not\s+proceed|cannot\s+proceed)[^.!?\n]{0,30}without[^.!?\n]{0,20}(?:an?\s+)?(?:issue|bug report)",
         ),
-    )
-    if issue_match:
-        record("issue_required", True, issue_match)
-
-    disclosure_match = _first_match(
-        text,
+        False,
         (
-            r"(?:must|should|required|please)[^.!?\n]{0,50}(?:disclos|declare|mention)[^.!?\n]{0,50}(?:\bai\b|artificial intelligence)",
-            r"(?:disclos|declare|mention)[^.!?\n]{0,50}(?:\bai\b|artificial intelligence)[^.!?\n]{0,50}(?:required|must)",
-            r"(?:\bai\b|artificial intelligence)[^.!?\n]{0,50}(?:must|should|required)[^.!?\n]{0,50}(?:disclos|declare|mention)",
+            r"(?:an?\s+)?(?:issues?|bug reports?)\s+(?:(?:is|are)\s+)?(?:not\s+required|optional)\b",
+            r"(?:issue|bug report)[^.!?\n]{0,30}?required\s+and\s+not\s+required\b",
+            r"(?:do not|don't)[^.!?\n]{0,40}(?:need|have)[^.!?\n]{0,30}(?:issue|bug report)",
+            r"(?:you|contributors?)[^.!?\n]{0,30}(?:are\s+)?not\s+required\s+to[^.!?\n]{0,20}(?:open|file|create)[^.!?\n]{0,20}(?:an?\s+)?issue",
+            r"(?:pull request|pr)[^.!?\n]{0,40}(?:may|can)\s+(?:be\s+)?(?:opened|submitted|created|proceed)[^.!?\n]{0,30}without[^.!?\n]{0,20}(?:an?\s+)?(?:issue|bug report)",
+            r"(?:pull request|pr)[^.!?\n]{0,40}does not require[^.!?\n]{0,20}(?:an?\s+)?(?:issue|bug report)",
         ),
     )
-    if disclosure_match:
-        record("disclosure_required", True, disclosure_match)
-
+    disclosure_value = record_opposed(
+        "disclosure_required",
+        True,
+        (
+            r"(?:must|should|required|please)[^.!?\n]{0,50}?(?:disclos|declare|mention)[^.!?\n]{0,50}?(?:\bai\b|artificial intelligence)",
+            r"(?:disclos|declare|mention)[^.!?\n]{0,50}?(?:\bai\b|artificial intelligence)[^.!?\n]{0,50}?(?:required|must)",
+            r"(?:\bai\b|artificial intelligence)[^.!?\n]{0,50}?(?:must|should|required)[^.!?\n]{0,50}?(?:disclos|declare|mention)",
+            r"(?:\bai\b|artificial intelligence)[^.!?\n]{0,30}(?:disclosure|declaration)[^.!?\n]{0,20}(?:is|are)\s+not\s+optional\b",
+            r"(?:disclosure|declaration)[^.!?\n]{0,20}(?:of\s+)?(?:\bai\b|artificial intelligence)[^.!?\n]{0,20}(?:is|are)\s+not\s+optional\b",
+        ),
+        False,
+        (
+            r"(?:\bai\b|artificial intelligence)[^.!?\n]{0,60}(?:disclosure|declaration)[^.!?\n]{0,30}(?:not\s+required|optional)",
+            r"(?:disclosure|declaration)[^.!?\n]{0,20}(?:of\s+)?(?:\bai\b|artificial intelligence)[^.!?\n]{0,20}(?:is|are)\s+(?:not\s+required|optional)",
+            r"(?:disclosure|declaration)[^.!?\n]{0,30}(?:\bai\b|artificial intelligence)[^.!?\n]{0,20}required\s+and\s+not\s+required\b",
+            r"(?:you|contributors?)[^.!?\n]{0,30}(?:are\s+)?not\s+required\s+to[^.!?\n]{0,20}(?:disclos|declare|mention)[^.!?\n]{0,40}(?:\bai\b|artificial intelligence)",
+            r"(?:do not|don't)[^.!?\n]{0,40}(?:need|have)[^.!?\n]{0,30}(?:disclos|declare|mention)[^.!?\n]{0,40}(?:\bai\b|artificial intelligence)",
+            r"(?:contributors?|you)[^.!?\n]{0,30}(?:must\s+not|cannot|may\s+not)[^.!?\n]{0,20}(?:disclos|declare|mention)[^.!?\n]{0,40}(?:\bai\b|artificial intelligence)",
+        ),
+    )
+    if disclosure_value is True:
         locations: list[str] = []
         location_matches: list[re.Match[str]] = []
         pr_body_match = _first_match(text, (r"(?:disclos|declare|mention)[^.!?\n]{0,120}(?:pr|pull request)[^.!?\n]{0,50}(?:body|description)",))
@@ -198,62 +291,89 @@ def _claims_from_document(text: str, path: Path, root: Path) -> tuple[dict[str, 
             locations.append("commit_trailer")
             location_matches.append(commit_trailer_match)
         if locations:
-            record("disclosure_locations", sorted(set(locations)), location_matches[0] if location_matches else disclosure_match)
+            record("disclosure_locations", sorted(set(locations)), location_matches[0])
 
-    human_narrative_match = _first_match(
-        text,
+    record_opposed(
+        "human_pr_narrative_required",
+        True,
         (
-            r"(?:pr|pull request)[^.!?\n]{0,100}(?:own words|your own|human[- ]written)",
+            r"(?:pr|pull request)[^.!?\n]{0,100}?(?:own words|your own|human[- ]written)",
             r"(?:ai|artificial intelligence)[^.!?\n]{0,100}(?:must not|cannot|should not)[^.!?\n]{0,50}(?:pr|pull request|description)",
+            r"(?:pr|pull request)[^.!?\n]{0,60}(?:must not|cannot|may not)[^.!?\n]{0,30}(?:be\s+)?(?:ai[- ]written|generated by ai)",
+            r"(?:human[- ]written|own words|your own words)[^.!?\n]{0,50}(?:pr|pull request|description|narrative)[^.!?\n]{0,20}not\s+optional\b",
+        ),
+        False,
+        (
+            r"(?:human[- ]written|own words|your own words)[^.!?\n]{0,50}(?:not\s+required|optional)",
+            r"(?:pr|pull request)[^.!?\n]{0,40}(?:human[- ]written|own words)[^.!?\n]{0,20}required\s+and\s+not\s+required\b",
+            r"(?:pr|pull request)[^.!?\n]{0,60}(?:must not|cannot|may not)[^.!?\n]{0,30}(?:be\s+)?human[- ]written",
+            r"(?:pr|pull request)[^.!?\n]{0,30}(?:description|narrative)?[^.!?\n]{0,20}(?:does not need|need not)[^.!?\n]{0,20}(?:to be\s+)?human[- ]written",
+            r"(?:pr|pull request)[^.!?\n]{0,50}(?:may|can)\b\s+(?:be\s+)?(?:ai[- ]written|generated by ai)",
         ),
     )
-    if human_narrative_match:
-        record("human_pr_narrative_required", True, human_narrative_match)
-
-    security_match = _first_match(
-        text,
+    record_opposed(
+        "security_private_reporting",
+        True,
         (
-            r"security[^.!?\n]{0,100}(?:private|email|do not (?:open|file)[^.!?\n]{0,30}(?:public|issue))",
+            r"security[^.!?\n]{0,100}?(?:private|email|do not (?:open|file)[^.!?\n]{0,30}(?:public|issue))",
             r"(?:private|email)[^.!?\n]{0,60}security report",
+            r"security reports?[^.!?\n]{0,60}(?:must not|cannot|may not)[^.!?\n]{0,30}(?:be\s+)?public",
+        ),
+        False,
+        (
+            r"security reports?[^.!?\n]{0,60}(?:do not need|need not)[^.!?\n]{0,30}(?:private|email)",
+            r"security reports?[^.!?\n]{0,40}(?:are\s+)?not\s+required\s+to\s+be[^.!?\n]{0,20}private",
+            r"security reports?[^.!?\n]{0,60}(?:must not|cannot|may not)[^.!?\n]{0,30}(?:be\s+)?private",
+            r"security reports?[^.!?\n]{0,50}(?:may|can)\b\s+(?:be\s+)?(?:public|filed publicly)",
         ),
     )
-    if security_match:
-        record("security_private_reporting", True, security_match)
-
-    draft_match = _first_match(text, (r"(?:draft|work in progress)[^.!?\n]{0,80}(?:pr|pull request)[^.!?\n]{0,60}(?:required|must)",))
-    if draft_match:
-        record("draft_pr_required", True, draft_match)
-
-    discovery_match = _first_match(
-        text,
+    record_opposed(
+        "draft_pr_required",
+        True,
         (
-            r"discovery[^.!?\n]{0,100}(?:evidence|reproduction)[^.!?\n]{0,100}(?:sufficient|enough|allowed)",
+            r"(?:draft|work in progress)[^.!?\n]{0,80}?(?:pr|pull request)[^.!?\n]{0,60}?(?:required|must)",
+            r"(?:draft|work in progress)[^.!?\n]{0,80}(?:pr|pull request)[^.!?\n]{0,30}not\s+optional\b",
+        ),
+        False,
+        (
+            r"(?:draft|work in progress)[^.!?\n]{0,80}(?:pr|pull request)[^.!?\n]{0,40}(?:not\s+required|optional)",
+            r"(?:draft|work in progress)[^.!?\n]{0,80}(?:pr|pull request)[^.!?\n]{0,30}required\s+and\s+not\s+required\b",
+            r"(?:pr|pull request)[^.!?\n]{0,60}(?:need not|does not need to)[^.!?\n]{0,30}(?:draft|work in progress)",
+            r"(?:pr|pull request)[^.!?\n]{0,40}(?:is|are)\s+not\s+required\s+to\s+be[^.!?\n]{0,20}(?:draft|work in progress)",
+        ),
+    )
+    record_opposed(
+        "discovery_evidence_allowed",
+        True,
+        (
+            r"discovery[^.!?\n]{0,100}?(?:evidence|reproduction)[^.!?\n]{0,100}?(?:(?<!in)(?<!not )sufficient\b|enough|(?<!dis)(?<!not )allowed\b)",
+            r"discovery[^.!?\n]{0,100}?(?:evidence|reproduction)[^.!?\n]{0,80}?(?:not\s+insufficient|not\s+disallowed|not\s+prohibited|not\s+forbidden)\b",
             r"reproducible[^.!?\n]{0,100}(?:defect|failure)[^.!?\n]{0,100}(?:may|can)[^.!?\n]{0,50}(?:pr|contribution)",
         ),
-    )
-    if discovery_match:
-        record("discovery_evidence_allowed", True, discovery_match)
-
-    prohibited_good_first_match = _first_match(
-        text,
+        False,
         (
-            r"good[- ]first[- ]issue[^.!?\n]{0,120}(?:ai|artificial intelligence)[^.!?\n]{0,60}(?:not allowed|prohibited|forbidden|must not)",
-            r"(?:ai|artificial intelligence)[^.!?\n]{0,120}good[- ]first[- ]issue[^.!?\n]{0,60}(?:not allowed|prohibited|forbidden|must not)",
+            r"discovery[^.!?\n]{0,100}?(?:evidence|reproduction)[^.!?\n]{0,80}?(?:not\s+allowed|(?<!not )disallowed|prohibited|(?<!not )insufficient|not\s+sufficient|not\s+enough)",
+            r"(?:do not|don't)[^.!?\n]{0,60}(?:accept|allow)[^.!?\n]{0,60}discovery[^.!?\n]{0,40}(?:evidence|reproduction)",
         ),
     )
-    if prohibited_good_first_match:
-        record("good_first_issue_ai_allowed", False, prohibited_good_first_match)
-    else:
-        allowed_good_first_match = _first_match(
-            text,
+    record_opposed(
+        "good_first_issue_ai_allowed",
+        True,
         (
-            r"good[- ]first[- ]issue[^.!?\n]{0,120}(?:ai|artificial intelligence)[^.!?\n]{0,60}(?:allowed|permitted)",
+            r"good[- ]first[- ]issue[^.!?\n]{0,120}?(?:ai|artificial intelligence)[^.!?\n]{0,60}?(?:(?<!not )permitted\b|(?<!not )(?<!un)welcome\b|(?<!dis)(?<!not )(?<!not-)allowed\b)",
+            r"(?:ai|artificial intelligence)[^.!?\n]{0,120}?good[- ]first[- ]issue[^.!?\n]{0,60}?(?:(?<!not )permitted\b|(?<!not )(?<!un)welcome\b|(?<!dis)(?<!not )(?<!not-)allowed\b)",
+            r"good[- ]first[- ]issue[^.!?\n]{0,120}?(?:ai|artificial intelligence)[^.!?\n]{0,60}?(?:not\s+prohibited|not\s+forbidden|not\s+disallowed|not\s+unwelcome)\b",
+            r"(?:ai|artificial intelligence)[^.!?\n]{0,120}?good[- ]first[- ]issue[^.!?\n]{0,60}?(?:not\s+prohibited|not\s+forbidden|not\s+disallowed|not\s+unwelcome)\b",
         ),
-        )
-        if allowed_good_first_match:
-            record("good_first_issue_ai_allowed", True, allowed_good_first_match)
+        False,
+        (
+            r"good[- ]first[- ]issue[^.!?\n]{0,120}?(?:ai|artificial intelligence)[^.!?\n]{0,60}?(?:not\s+allowed|(?<!not )disallowed|not\s+permitted|not\s+welcome|(?<!not )unwelcome|(?<!not )prohibited|(?<!not )forbidden|must\s+not)",
+            r"(?:ai|artificial intelligence)[^.!?\n]{0,120}?good[- ]first[- ]issue[^.!?\n]{0,60}?(?:not\s+allowed|(?<!not )disallowed|not\s+permitted|not\s+welcome|(?<!not )unwelcome|(?<!not )prohibited|(?<!not )forbidden|must\s+not)",
+            r"(?:ai|artificial intelligence)[^.!?\n]{0,60}?(?:not\s+allowed|(?<!not )disallowed|not\s+permitted|not\s+welcome|(?<!not )unwelcome|(?<!not )prohibited|(?<!not )forbidden|must\s+not)[^.!?\n]{0,80}?good[- ]first[- ]issue",
+        ),
+    )
 
-    return claims, matches
+    return claims, matches, ambiguities
 
 
 def _candidate_document_paths(root: Path) -> list[Path]:
@@ -376,12 +496,26 @@ def inspect_policy(root: Path) -> dict[str, Any]:
     root = root.resolve()
     document_sources: list[PolicySource] = []
     document_claims: dict[str, list[dict[str, Any]]] = {}
+    document_ambiguities: list[dict[str, Any]] = []
     for path in _candidate_document_paths(root):
         try:
             text = path.read_text(encoding="utf-8")
-            claims, matches = _claims_from_document(text, path, root)
+            claims, matches, ambiguities = _claims_from_document(text, path, root)
             provenance = {key: _provenance(path, root, text, key, matches.get(key)) for key in claims}
-            document_sources.append(PolicySource(relative_path(path, root), "repository_document", claims, provenance=provenance))
+            source_ambiguities = [
+                {
+                    "key": key,
+                    "kind": "single_repository_document",
+                    "source": relative_path(path, root),
+                    "claims": [
+                        {"value": value, **_provenance(path, root, text, key, match)}
+                        for value, match in opposed
+                    ],
+                }
+                for key, opposed in ambiguities.items()
+            ]
+            document_ambiguities.extend(source_ambiguities)
+            document_sources.append(PolicySource(relative_path(path, root), "repository_document", claims, provenance=provenance, ambiguities=source_ambiguities))
             for key, value in claims.items():
                 _claim(document_claims, key, value, path, root, text, matches.get(key))
         except OSError as exc:
@@ -424,13 +558,22 @@ def inspect_policy(root: Path) -> dict[str, Any]:
     for key in CLAIM_KEYS:
         values = {str(item["value"]): item["value"] for item in document_claims.get(key, [])}
         conflicting_key = any(conflict.get("key") == key for conflict in conflicts)
+        ambiguous_claims = [ambiguity for ambiguity in document_ambiguities if ambiguity.get("key") == key]
         provenance: list[dict[str, Any]] = [
             {field: item[field] for field in ("source", "line_start", "line_end", "match_start", "match_end", "excerpt_sha256") if field in item}
             for item in document_claims.get(key, [])
         ]
         if key in structured_provenance:
             provenance.append(structured_provenance[key])
-        if len(values) == 1:
+        for ambiguity in ambiguous_claims:
+            provenance.extend(
+                {field: item[field] for field in ("source", "line_start", "line_end", "match_start", "match_end", "excerpt_sha256") if field in item}
+                for item in ambiguity.get("claims", [])
+            )
+        if ambiguous_claims:
+            authoritative[key] = None
+            unknown.append(key)
+        elif len(values) == 1:
             value = next(iter(values.values()))
             if value == "unknown":
                 authoritative[key] = None
@@ -450,7 +593,7 @@ def inspect_policy(root: Path) -> dict[str, Any]:
         else:
             authoritative[key] = None
             unknown.append(key)
-        recorded_value = None if conflicting_key else authoritative[key]
+        recorded_value = None if conflicting_key or ambiguous_claims else authoritative[key]
         if recorded_value is None:
             state = "unknown"
         elif recorded_value is False or recorded_value == "prohibited":
@@ -472,7 +615,7 @@ def inspect_policy(root: Path) -> dict[str, Any]:
             }
         )
 
-    posture = "conservative" if unknown or conflicts else "explicit"
+    posture = "conservative" if unknown or conflicts or document_ambiguities else "explicit"
     disclosure_locations = authoritative.get("disclosure_locations")
     if not isinstance(disclosure_locations, list) or not disclosure_locations:
         disclosure_locations = ["pr_body"] if authoritative.get("disclosure_required") is True or posture == "conservative" else []
@@ -489,12 +632,16 @@ def inspect_policy(root: Path) -> dict[str, Any]:
         "claim_records": claim_records,
         "unknown_claims": sorted(set(unknown)),
         "conflicts": conflicts,
-        "hard_stops": [{"code": "policy_conflict", "reason": "Policy sources contradict each other."}] if conflicts else [],
+        "ambiguities": document_ambiguities,
+        "hard_stops": (
+            ([{"code": "policy_conflict", "reason": "Policy sources contradict each other."}] if conflicts else [])
+            + ([{"code": "policy_ambiguity", "reason": "One policy source makes opposed explicit claims."}] if document_ambiguities else [])
+        ),
         "posture": posture,
         "disclosure": {
             "required": authoritative.get("disclosure_required") is True or posture == "conservative",
             "locations": disclosure_locations,
             "stages": disclosure_stages,
         },
-        "result": "blocked" if conflicts else "passed",
+        "result": "blocked" if conflicts or document_ambiguities else "passed",
     }
