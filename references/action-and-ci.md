@@ -15,8 +15,10 @@ The Action does not fetch missing objects. A hand-supplied `changed-files` input
 
 The Action still does not infer maintainer approval, call `gh`, create Issues/PRs, or decide whether a human explanation is substantively correct.
 
+Reviewworthy enforcement is scoped to external contributions. The consuming repository owns the workflow routing that decides when `mode: enforce` runs; the core Action does not query permissions or infer whether an event actor is a maintainer. A maintainer-authorized direct push may bypass the external-contribution PR protocol while still running the repository's ordinary push CI. This separation avoids turning provider role lookup into part of the portable evidence contract.
+
 Fixture evals are provider-free and intentionally narrow. Packet cases assert the exact sorted blocker set plus `ready` or `blocked`; Action cases assert the exact sorted violation set plus both `conclusion` and `passed` or `failed`. They do not snapshot the complete response object.
 
 JSON Schema validation is test/CI-only. `requirements-dev.txt` installs `jsonschema` for `tests/test_schema.py`; the package's runtime dependency list remains empty. Python validators continue to own stateful semantics such as material snapshots, repository identity, Git receipts, policy conflicts, and remote-write readiness.
 
-The repository dogfoods the policy and workflow in [`CONTRIBUTING.md`](../CONTRIBUTING.md), [`SECURITY.md`](../SECURITY.md), [`.reviewworthy/policy.toml`](../.reviewworthy/policy.toml), and [`examples/contribution/README.md`](../examples/contribution/README.md). Branch protection and required-check settings are external maintainer controls, not repository-file side effects.
+The repository exercises policy inspection and deterministic artifacts in [`CONTRIBUTING.md`](../CONTRIBUTING.md), [`SECURITY.md`](../SECURITY.md), [`.reviewworthy/policy.toml`](../.reviewworthy/policy.toml), and [`examples/contribution/README.md`](../examples/contribution/README.md). Its regression workflow runs on both Pull Requests and pushes to `main`; that CI coverage does not make a Reviewworthy PR mandatory for a Maintainer Change. Branch protection and required-check settings are external maintainer controls, not repository-file side effects.

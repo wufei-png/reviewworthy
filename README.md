@@ -4,6 +4,8 @@ Reviewworthy is a maintainer-first workflow for human-owned, AI-assisted open-so
 
 It does not optimize for the number of generated pull requests. It records why a contribution is wanted, checks repository policy, keeps a bounded contribution contract, preserves verification evidence, tests contributor understanding, and makes remote writes explicit and idempotent.
 
+Reviewworthy's mandatory gates target External Contributions. Maintainer-authorized changes remain governed by the repository and may use direct push without a forced Reviewworthy PR; ordinary tests, CI, release evidence, and security handling still apply. Repository workflows decide when to invoke enforcement, and the core Action does not infer maintainer status.
+
 The project brand is **Reviewworthy**. The portable Agent Skill is **`maintainer-first-contribution`**.
 
 ## Current slice

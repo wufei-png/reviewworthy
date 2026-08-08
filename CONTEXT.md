@@ -16,6 +16,14 @@ _Avoid_: maintainer-only, maintainer-over-contributor
 A contribution for which a person can explain the problem, scope, design, evidence, risks, and public narrative, regardless of how AI assisted the work.
 _Avoid_: human-written, AI-free contribution
 
+**External Contribution**:
+A change proposed by someone who is not acting with repository maintainer authority. Reviewworthy's contribution gates, evidence Packet, and PR workflow apply to this boundary.
+_Avoid_: untrusted contribution, outsider code
+
+**Maintainer Change**:
+A repository change explicitly authorized under the project's maintainer governance. It remains subject to the project's engineering and CI standards, but may use direct push and is not forced through Reviewworthy's external-contribution PR workflow.
+_Avoid_: automatically safe change, policy-free change
+
 ## Contribution lifecycle
 
 **Contribution candidate**:
@@ -107,6 +115,10 @@ _Avoid_: generated teaching transcript, authorship certificate
 **Contribution policy**:
 The project-specific rules governing acceptable contribution paths, required evidence, AI assistance, disclosure, and remote actions.
 _Avoid_: generic AI policy, repository etiquette
+
+**Enforcement routing**:
+The repository-owned workflow decision about which events and actors invoke Reviewworthy enforcement. The core Action validates the evidence it receives and does not infer whether an actor is a maintainer.
+_Avoid_: maintainer detection, universal PR gate
 
 **Disclosure location**:
 The policy-approved public or repository record where AI assistance is disclosed, such as a PR Body, commit message, commit trailer, issue Body, or checklist.
