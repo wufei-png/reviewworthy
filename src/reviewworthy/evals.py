@@ -9,7 +9,8 @@ from typing import Any
 
 from .candidate import validate_candidate_menu
 from .contract import contract_snapshot
-from .packet import REQUIRED_NODES, material_snapshot, readiness_blockers, skeleton_packet
+from .git import verification_plan_digest
+from .packet import REQUIRED_NODES, semantic_snapshot, readiness_blockers, skeleton_packet
 from .policy import inspect_policy
 from .risk import assess_manifest
 
@@ -94,7 +95,7 @@ def _base_packet() -> dict[str, Any]:
         "conflicts": [],
         "posture": "explicit",
     }
-    packet["review"] = {"depth": "standard", "signals": [], "hard_stops": []}
+    packet["review"] = {"profile": "standard", "signals": [], "hard_stops": []}
     packet["ai_assistance"] = {
         "used": True,
         "stages": [
@@ -115,22 +116,38 @@ def _base_packet() -> dict[str, Any]:
         "deletions": 1,
     }
     packet["verification"] = {
-        "commands": ["python -m unittest"],
-        "evidence": ["exit 0"],
+        "plan": {
+            "plan_version": "0.1",
+            "checks": [{"id": "unit", "argv": ["python", "-m", "unittest"], "cwd": ".", "required": True}],
+        },
         "receipts": [{
+            "receipt_version": "0.3",
+            "check_id": "unit",
+            "plan_digest": "",
+            "subject_digest": "subject-digest",
             "argv": ["python", "-m", "unittest"],
             "cwd": ".",
             "exit_code": 0,
+            "command_outcome": "passed",
+            "integrity_status": "stable",
             "head_sha": "head-sha",
             "head_sha_before": "head-sha",
             "head_sha_after": "head-sha",
             "worktree_clean_before": True,
             "worktree_clean_after": True,
-            "status": "valid",
             "stdout_sha256": "stdout-sha256",
             "stderr_sha256": "stderr-sha256",
-            "provenance": "cli_executed",
+            "provenance": "contributor_local",
         }],
+    }
+    packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
+    packet["verification"]["receipts"][0]["plan_digest"] = packet["verification"]["plan_digest"]
+    packet["ownership"] = {
+        "status": "passed",
+        "problem": "The contributor can explain the failure.",
+        "scope": "Only the input boundary changes.",
+        "verification": "The focused unit check covers the boundary.",
+        "risks": ["Existing callers may rely on the old exception path."],
     }
     packet["results"] = [{"node": node, "status": "passed", "evidence": [f"{node} recorded"]} for node in REQUIRED_NODES]
     packet["understanding"] = {
@@ -139,11 +156,15 @@ def _base_packet() -> dict[str, Any]:
             "summary": "The contract and evidence were explained.",
             "topics": ["contract", "diff", "verification", "policy"],
             "rubric": {
-                "covered": ["behavior", "invariant", "test"],
+                "covered": ["behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"],
                 "evidence": {
                     "behavior": "The boundary rejects the invalid input.",
                     "invariant": "Existing callers retain their behavior.",
                     "test": "The focused regression test exercises the boundary.",
+                    "flow": "The input flows through the existing validation boundary.",
+                    "tradeoffs": "A narrow guard avoids a larger caller refactor.",
+                    "failures": "Invalid input is rejected before the old failure path.",
+                    "regressions": "The focused test protects the existing caller contract.",
                 },
             },
             "evidence": ["Orientation covered the material snapshot."],
@@ -153,11 +174,15 @@ def _base_packet() -> dict[str, Any]:
             "questions": ["What boundary protects the invariant?"],
             "answers": ["The existing input boundary validates before the old path runs."],
             "rubric": {
-                "covered": ["behavior", "invariant", "test"],
+                "covered": ["behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"],
                 "evidence": {
                     "behavior": "The invalid input follows the guarded path.",
                     "invariant": "The existing caller contract remains unchanged.",
                     "test": "The regression command covers the changed path.",
+                    "flow": "The answer traces the input through the guard.",
+                    "tradeoffs": "It explains why the caller was not refactored.",
+                    "failures": "It identifies the prior exception path.",
+                    "regressions": "It identifies the protected caller behavior.",
                 },
             },
             "evidence": ["The contributor answered a non-repeating question."],
@@ -172,9 +197,9 @@ def _base_packet() -> dict[str, Any]:
     }
     packet["contract"]["approval"] = {"status": "approved", "human_confirmed": True}
     packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
-    packet["materials"]["material_snapshot"] = material_snapshot(packet)
-    packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-    packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+    packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+    packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+    packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
     return packet
 
 
@@ -201,8 +226,8 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
             if expected.get("readiness_blocker"):
                 packet = _base_packet()
                 packet["policy"]["authoritative_claims"]["ai_assistance"] = actual["authoritative_claims"]["ai_assistance"]
-                packet["materials"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+                packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
                 blocker_codes = {item["code"] for item in readiness_blockers(packet)}
                 checks.append(("readiness_blocker", expected["readiness_blocker"] in blocker_codes, True))
         elif kind == "candidate":
@@ -213,11 +238,11 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
             packet = _base_packet()
             for mutation in fixture.get("mutations", []):
                 _set_path(packet, mutation["path"], mutation["value"])
-            if fixture.get("refresh_materials", True):
-                snapshot = material_snapshot(packet)
-                packet["materials"]["material_snapshot"] = snapshot
-                packet["understanding"]["orientation"]["material_snapshot"] = snapshot
-                packet["understanding"]["assessment"]["material_snapshot"] = snapshot
+            if fixture.get("refresh_semantics", True):
+                snapshot = semantic_snapshot(packet)
+                packet["snapshots"]["semantic"] = snapshot
+                packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
+                packet["understanding"]["assessment"]["semantic_snapshot"] = snapshot
             actual = {"blocker_codes": sorted({item["code"] for item in readiness_blockers(packet)})}
             if not isinstance(expected.get("blocker_codes"), list) or not isinstance(expected.get("result"), str):
                 raise ValueError("packet evals must assert exact blocker_codes and result")
@@ -228,7 +253,7 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
             ]
         elif kind == "risk":
             actual = assess_manifest(fixture["manifest"])
-            checks = [("hard_stop", actual["hard_stops"][0]["code"] if actual["hard_stops"] else None, expected.get("hard_stop")), ("review_depth", actual["review_depth"], expected.get("review_depth", actual["review_depth"]))]
+            checks = [("hard_stop", actual["hard_stops"][0]["code"] if actual["hard_stops"] else None, expected.get("hard_stop")), ("review_profile", actual["review_profile"], expected.get("review_profile", actual["review_profile"]))]
         else:
             raise ValueError(f"Unsupported fixture kind: {kind}")
 

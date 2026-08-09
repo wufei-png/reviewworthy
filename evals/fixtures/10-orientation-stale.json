@@ -1,8 +1,9 @@
 {
   "id": "stale-orientation",
   "kind": "packet",
-  "refresh_materials": false,
+  "refresh_semantics": false,
   "mutations": [
+    {"path": "review.profile", "value": "learning"},
     {"path": "basis.references", "value": ["https://github.com/example/project/issues/2"]}
   ],
   "assert": {
@@ -10,7 +11,7 @@
     "blocker_codes": [
       "assessment_requires_current_orientation",
       "issue_verification_required",
-      "material_snapshot_mismatch",
+      "semantic_snapshot_mismatch",
       "stale_assessment",
       "stale_orientation"
     ]

@@ -15,7 +15,7 @@ from .candidate import bind_candidate, render_candidate_menu, select_candidate, 
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
-from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff, local_state_path, run_verification
+from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff, local_state_path, run_verification, verification_plan_digest
 from .github import (
     GhClient,
     GhError,
@@ -31,7 +31,7 @@ from .github import (
     save_operation_pr_created,
     save_operation_receipt,
 )
-from .packet import good_first_issue_policy_errors, issue_link_blockers, issue_reference, material_snapshot, readiness_blockers, require_contribution_id, skeleton_packet, validate_packet
+from .packet import good_first_issue_policy_errors, issue_link_blockers, issue_reference, semantic_snapshot, readiness_blockers, require_contribution_id, skeleton_packet, validate_packet
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .risk import assess_manifest
@@ -127,7 +127,7 @@ def _build_parser() -> argparse.ArgumentParser:
     understanding_record.add_argument("--rubric", action="append", default=[], help="Human evidence as category=text; repeat for each rubric category")
     _common_json(understanding_record)
 
-    risk = commands.add_parser("risk", help="Assess deterministic review-depth signals")
+    risk = commands.add_parser("risk", help="Assess deterministic review-profile signals")
     risk_commands = risk.add_subparsers(dest="risk_command", required=True)
     risk_assess = risk_commands.add_parser("assess")
     risk_assess.add_argument("manifest", type=Path)
@@ -227,7 +227,6 @@ def _build_parser() -> argparse.ArgumentParser:
     _common_json(candidate_bind)
     candidate_transition = candidate_commands.add_parser("transition", help="Record a human-confirmed recommendation transition")
     candidate_transition.add_argument("--packet", type=Path, required=True)
-    candidate_transition.add_argument("--from", dest="from_recommendation", choices=("issue_only", "seek_maintainer_signal"))
     candidate_transition.add_argument("--to", choices=("plan_directly",), required=True)
     candidate_transition.add_argument("--reason", required=True)
     candidate_transition.add_argument("--confirm", action="store_true")
@@ -274,14 +273,12 @@ def _build_parser() -> argparse.ArgumentParser:
     diff_capture.add_argument("--force", action="store_true")
     _common_json(diff_capture)
 
-    verify = commands.add_parser("verify", help="Execute a verification command and record its Git-bound receipt")
+    verify = commands.add_parser("verify", help="Execute one check from the Packet verification plan")
     verify_commands = verify.add_subparsers(dest="verify_command", required=True)
     verify_run = verify_commands.add_parser("run")
     verify_run.add_argument("--root", type=Path, default=Path("."))
-    verify_run.add_argument("--head", required=True)
-    verify_run.add_argument("--output", type=Path, default=Path(".reviewworthy/verification.json"))
-    verify_run.add_argument("--force", action="store_true")
-    verify_run.add_argument("argv", nargs=argparse.REMAINDER, help="Command to execute; place it after --")
+    verify_run.add_argument("--packet", type=Path, required=True)
+    verify_run.add_argument("--check-id", required=True)
     _common_json(verify_run)
 
     issue = commands.add_parser("issue", help="Verify a supporting GitHub Issue reference")
@@ -401,7 +398,7 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
             basis["signal"]["verification"] = verification
         else:
             raise ValueError("Packet basis does not contain an Issue verification target")
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         _replace_json(path, packet)
         result["recorded"] = str(path)
     return result
@@ -508,11 +505,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "understanding":
             packet = _load_object(args.path)
             if args.understanding_command == "validate":
-                depth = packet.get("review", {}).get("depth", "standard") if isinstance(packet.get("review"), dict) else "standard"
-                result = validate_understanding(packet.get("understanding"), material_snapshot(packet), review_depth=depth)
+                depth = packet.get("review", {}).get("profile", "standard") if isinstance(packet.get("review"), dict) else "standard"
+                result = validate_understanding(packet.get("understanding"), semantic_snapshot(packet), review_profile=depth)
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
-            snapshot = material_snapshot(packet)
+            snapshot = semantic_snapshot(packet)
             rubric: dict[str, str] = {}
             for item in args.rubric:
                 if "=" not in item:
@@ -542,8 +539,8 @@ def main(argv: list[str] | None = None) -> int:
                     result_record["evidence"] = list(args.evidence) or [f"{args.phase}:{args.status}"]
                     result_record.setdefault("details", {})["phase"] = args.phase
             _replace_json(args.path, updated)
-            depth = updated.get("review", {}).get("depth", "standard") if isinstance(updated.get("review"), dict) else "standard"
-            result = validate_understanding(updated.get("understanding"), material_snapshot(updated), review_depth=depth)
+            depth = updated.get("review", {}).get("profile", "standard") if isinstance(updated.get("review"), dict) else "standard"
+            result = validate_understanding(updated.get("understanding"), semantic_snapshot(updated), review_profile=depth)
             result["updated"] = str(args.path)
             _print(result, args.as_json)
             return 0 if result["valid"] else 1
@@ -758,40 +755,40 @@ def main(argv: list[str] | None = None) -> int:
                 menu = _load_object(args.menu)
                 packet = _load_object(args.packet)
                 updated = bind_candidate(menu, packet, args.candidate_id)
-                snapshot = material_snapshot(updated)
-                materials = updated.setdefault("materials", {})
-                if not isinstance(materials, dict):
-                    raise ValueError("packet.materials must be an object")
-                materials["material_snapshot"] = snapshot
+                snapshot = semantic_snapshot(updated)
+                snapshots = updated.setdefault("snapshots", {})
+                if not isinstance(snapshots, dict):
+                    raise ValueError("packet.snapshots must be an object")
+                snapshots["semantic"] = snapshot
                 understanding = updated.get("understanding", {})
                 if isinstance(understanding, dict):
                     for phase in ("orientation", "assessment"):
                         record = understanding.get(phase)
                         if isinstance(record, dict) and record.get("status") == "not_run":
-                            record["material_snapshot"] = snapshot
+                            record["semantic_snapshot"] = snapshot
                 target = args.output or args.packet
                 if target != args.packet:
                     _write_json(target, updated, args.force)
                 else:
                     _replace_json(target, updated)
-                _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "material_snapshot": snapshot}, args.as_json)
+                _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "semantic_snapshot": snapshot}, args.as_json)
                 return 0
             if args.candidate_command == "transition":
                 packet = _load_object(args.packet)
-                updated = transition_candidate(packet, to=args.to, reason=args.reason, human_confirmed=args.confirm, from_recommendation=args.from_recommendation)
-                snapshot = material_snapshot(updated)
-                materials = updated.setdefault("materials", {})
-                if not isinstance(materials, dict):
-                    raise ValueError("packet.materials must be an object")
-                materials["material_snapshot"] = snapshot
+                updated = transition_candidate(packet, to=args.to, reason=args.reason, human_confirmed=args.confirm)
+                snapshot = semantic_snapshot(updated)
+                snapshots = updated.setdefault("snapshots", {})
+                if not isinstance(snapshots, dict):
+                    raise ValueError("packet.snapshots must be an object")
+                snapshots["semantic"] = snapshot
                 understanding = updated.get("understanding", {})
                 if isinstance(understanding, dict):
                     for phase in ("orientation", "assessment"):
                         record = understanding.get(phase)
                         if isinstance(record, dict) and record.get("status") == "not_run":
-                            record["material_snapshot"] = snapshot
+                            record["semantic_snapshot"] = snapshot
                 _replace_json(args.packet, updated)
-                _print({"updated": str(args.packet), "to": args.to, "material_snapshot": snapshot}, args.as_json)
+                _print({"updated": str(args.packet), "to": args.to, "semantic_snapshot": snapshot}, args.as_json)
                 return 0
             menu = _load_object(args.path)
             if args.candidate_command == "select":
@@ -847,13 +844,40 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "verify":
-            command_argv = list(args.argv)
-            if command_argv and command_argv[0] == "--":
-                command_argv = command_argv[1:]
-            receipt = run_verification(args.root, args.head, command_argv)
-            _write_json(args.output, receipt, args.force)
-            _print({"captured": str(args.output), **receipt}, args.as_json)
-            return 0 if receipt["exit_code"] == 0 and receipt.get("status") == "valid" else 1
+            packet = _load_object(args.packet)
+            verification = packet.get("verification")
+            plan = verification.get("plan") if isinstance(verification, dict) else None
+            checks = plan.get("checks", []) if isinstance(plan, dict) else []
+            if not isinstance(plan, dict) or verification.get("plan_digest") != verification_plan_digest(plan):
+                raise ValueError("Packet verification plan digest is missing or stale")
+            check = next((item for item in checks if isinstance(item, dict) and item.get("id") == args.check_id), None)
+            if not isinstance(check, dict):
+                raise ValueError(f"Unknown verification check: {args.check_id}")
+            packet_diff = packet.get("diff")
+            if not isinstance(packet_diff, dict):
+                raise ValueError("packet.diff must be an object")
+            actual_diff = capture_pr_diff(args.root, packet_diff.get("base_tip_sha", ""), packet_diff.get("head_sha", ""))
+            mismatched = [field for field in PR_DIFF_FIELDS if packet_diff.get(field) != actual_diff.get(field)]
+            if mismatched:
+                raise ValueError(f"Packet Diff is not current for verification: {mismatched}")
+            receipt = run_verification(
+                args.root,
+                actual_diff["head_sha"],
+                list(check.get("argv", [])),
+                check_id=args.check_id,
+                plan_digest=verification.get("plan_digest", ""),
+                subject_digest=actual_diff["subject_digest"],
+                cwd=check.get("cwd", "."),
+            )
+            receipts = verification.get("receipts")
+            if not isinstance(receipts, list):
+                raise ValueError("packet.verification.receipts must be a list")
+            verification["receipts"] = [item for item in receipts if not isinstance(item, dict) or item.get("check_id") != args.check_id]
+            verification["receipts"].append(receipt)
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            _replace_json(args.packet, packet)
+            _print({"recorded": str(args.packet), **receipt}, args.as_json)
+            return 0 if receipt["command_outcome"] == "passed" and receipt["integrity_status"] == "stable" else 1
 
         if args.command == "issue":
             packet = _load_object(args.packet)

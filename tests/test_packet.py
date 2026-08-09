@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from reviewworthy.packet import issue_basis_blockers, material_snapshot, policy_violations, readiness_blockers, skeleton_packet, validate_packet
+from reviewworthy.packet import issue_basis_blockers, semantic_snapshot, policy_violations, readiness_blockers, skeleton_packet, validate_packet
 
 from helpers import valid_packet
 
@@ -125,6 +125,68 @@ class PacketValidationTests(unittest.TestCase):
         result = validate_packet(valid_packet())
         self.assertTrue(result["valid"], result["errors"])
 
+    def test_standard_profile_requires_ownership_but_not_orientation_or_assessment(self) -> None:
+        packet = valid_packet()
+        packet["understanding"]["orientation"]["status"] = "not_run"
+        packet["understanding"]["assessment"]["status"] = "not_run"
+
+        self.assertNotIn("orientation_not_passed", {item["code"] for item in readiness_blockers(packet)})
+        packet["ownership"]["status"] = "not_run"
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        self.assertIn("ownership_not_passed", {item["code"] for item in readiness_blockers(packet)})
+
+    def test_learning_profile_requires_full_orientation_and_assessment(self) -> None:
+        packet = valid_packet()
+        packet["review"]["profile"] = "learning"
+        packet["understanding"]["orientation"]["status"] = "not_run"
+        packet["understanding"]["assessment"]["status"] = "not_run"
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+
+        codes = {item["code"] for item in readiness_blockers(packet)}
+        self.assertIn("orientation_not_passed", codes)
+        self.assertIn("assessment_not_passed", codes)
+
+    def test_semantic_snapshot_ignores_audit_timestamps_and_output_hashes(self) -> None:
+        packet = valid_packet()
+        before = semantic_snapshot(packet)
+        packet["diff"]["captured_at"] = "2099-01-01T00:00:00Z"
+        packet["verification"]["receipts"][0]["started_at"] = "2099-01-01T00:00:00Z"
+        packet["verification"]["receipts"][0]["stdout_sha256"] = "different-audit-hash"
+
+        self.assertEqual(semantic_snapshot(packet), before)
+        packet["basis"]["verification"]["verified_at"] = "2099-01-02T00:00:00Z"
+        self.assertEqual(semantic_snapshot(packet), before)
+        packet["verification"]["receipts"][0]["command_outcome"] = "failed"
+        self.assertNotEqual(semantic_snapshot(packet), before)
+
+    def test_old_verification_fields_are_rejected_not_migrated(self) -> None:
+        packet = valid_packet()
+        packet["verification"]["commands"] = ["python -m unittest"]
+        packet["verification"]["receipts"][0]["status"] = "valid"
+
+        codes = {item["code"] for item in validate_packet(packet)["errors"]}
+        self.assertIn("unknown_verification_field", codes)
+        self.assertIn("unknown_verification_receipt_field", codes)
+
+    def test_ownership_shape_is_required_even_before_it_passes(self) -> None:
+        packet = valid_packet()
+        packet["ownership"] = {"status": "not_run", "legacy_note": "old shape"}
+
+        codes = {item["code"] for item in validate_packet(packet)["errors"]}
+        self.assertIn("unknown_ownership_field", codes)
+        self.assertIn("invalid_ownership_field", codes)
+        self.assertIn("invalid_ownership_risks", codes)
+
+    def test_packet_and_readiness_evaluators_are_total_for_malformed_values(self) -> None:
+        malformed = [None, True, 7, "packet", [], {}, {"packet_version": "0.3", "review": []}, {"results": [None], "understanding": "bad"}]
+        for value in malformed:
+            with self.subTest(value=value):
+                validation = validate_packet(value)
+                blockers = readiness_blockers(value)
+                self.assertFalse(validation["valid"])
+                self.assertIsInstance(validation["errors"], list)
+                self.assertIsInstance(blockers, list)
+
     def test_absolute_verification_cwd_is_rejected(self) -> None:
         packet = valid_packet()
         packet["verification"]["receipts"][0]["cwd"] = "/workspace/reviewworthy"
@@ -146,13 +208,13 @@ class PacketValidationTests(unittest.TestCase):
         packet = valid_packet()
         packet["verification"]["receipts"][0].pop("worktree_clean_before")
         packet["verification"]["receipts"][0].pop("worktree_clean_after")
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         codes = {blocker["code"] for blocker in readiness_blockers(packet)}
 
-        self.assertIn("verification_worktree_unverified", codes)
+        self.assertIn("missing_executed_verification", codes)
 
     def test_issue_state_reason_normalization_and_duplicate_label_are_independent(self) -> None:
         for state_reason in ("not_planned", "not-planned", "not planned"):
@@ -188,18 +250,19 @@ class PacketValidationTests(unittest.TestCase):
             "duplicate_disposition": "potential_duplicate",
             "confirmed": True,
         }
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         self.assertIn("duplicate_work_unresolved", {blocker["code"] for blocker in readiness_blockers(packet)})
 
     def test_material_change_invalidates_assessment(self) -> None:
         packet = valid_packet()
+        packet["review"]["profile"] = "heightened"
         packet["diff"]["additions"] = 99
         result = validate_packet(packet)
         codes = {error["code"] for error in result["errors"]}
-        self.assertIn("material_snapshot_mismatch", codes)
+        self.assertIn("semantic_snapshot_mismatch", codes)
         self.assertIn("stale_assessment", codes)
 
     def test_missing_node_result_is_invalid(self) -> None:
@@ -224,19 +287,19 @@ class PacketValidationTests(unittest.TestCase):
 
         self.assertIn("ai_usage_record_conflict", {error["code"] for error in result["errors"]})
 
-    def test_skeleton_records_all_nodes_and_material_snapshot(self) -> None:
+    def test_skeleton_records_all_nodes_and_semantic_snapshot(self) -> None:
         packet = skeleton_packet("draft-001", "discovery")
         self.assertEqual(len(packet["results"]), 7)
         self.assertEqual(packet["entry"]["mode"], "discovery")
-        self.assertTrue(packet["materials"]["material_snapshot"])
+        self.assertTrue(packet["snapshots"]["semantic"])
 
     def test_discovery_evidence_policy_can_block_remote_readiness(self) -> None:
         packet = valid_packet()
         packet["entry"]["mode"] = "discovery"
         packet["basis"] = {"kind": "discovery-evidence", "evidence": ["reproduced failure"]}
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = False
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         blockers = readiness_blockers(packet)
 
@@ -247,9 +310,9 @@ class PacketValidationTests(unittest.TestCase):
         packet["entry"]["mode"] = "discovery"
         packet["basis"] = {"kind": "discovery-evidence", "evidence": ["reproduced failure"]}
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         blockers = readiness_blockers(packet)
         codes = {blocker["code"] for blocker in blockers}
@@ -272,9 +335,9 @@ class PacketValidationTests(unittest.TestCase):
             },
         }
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         codes = {blocker["code"] for blocker in readiness_blockers(packet)}
 
@@ -296,9 +359,9 @@ class PacketValidationTests(unittest.TestCase):
                 "published": True,
             },
         }
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         blockers = readiness_blockers(packet)
 
@@ -310,9 +373,9 @@ class PacketValidationTests(unittest.TestCase):
             "reference": packet["basis"]["signal"]["reference"],
             "verified_at": "2026-08-06T00:00:00Z",
         }
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         self.assertNotIn("signal_verification_required", {blocker["code"] for blocker in readiness_blockers(packet)})
 
@@ -332,9 +395,9 @@ class PacketValidationTests(unittest.TestCase):
             },
         }
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         self.assertIn("signal_unavailable", {blocker["code"] for blocker in readiness_blockers(packet)})
 
@@ -354,9 +417,9 @@ class PacketValidationTests(unittest.TestCase):
                 "confirmed_at": "2026-08-06T00:00:00Z",
             },
         }
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         self.assertIn("discovery_evidence_policy_unknown", {blocker["code"] for blocker in readiness_blockers(packet)})
 
@@ -377,9 +440,9 @@ class PacketValidationTests(unittest.TestCase):
             },
         }
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         codes = {blocker["code"] for blocker in readiness_blockers(packet)}
 
@@ -390,8 +453,8 @@ class PacketValidationTests(unittest.TestCase):
     def test_remote_readiness_checks_scope_and_diff_budget(self) -> None:
         packet = valid_packet()
         packet["diff"] = {"changed_files": ["src/example.py", "src/unapproved.py"], "additions": 99, "deletions": 0}
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         codes = {blocker["code"] for blocker in readiness_blockers(packet)}
 
@@ -403,8 +466,8 @@ class PacketValidationTests(unittest.TestCase):
         packet["contract"].pop("max_diff_lines")
         packet["diff"].pop("additions")
         packet["diff"].pop("deletions")
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         codes = {blocker["code"] for blocker in readiness_blockers(packet)}
 
@@ -418,41 +481,42 @@ class PacketValidationTests(unittest.TestCase):
 
     def test_orientation_must_pass_before_assessment(self) -> None:
         packet = valid_packet()
+        packet["review"]["profile"] = "heightened"
         packet["understanding"]["orientation"]["status"] = "not_run"
 
         self.assertIn("orientation_not_passed", {blocker["code"] for blocker in readiness_blockers(packet)})
 
-    def test_verification_evidence_is_required_for_remote_readiness(self) -> None:
+    def test_verification_plan_is_required_for_remote_readiness(self) -> None:
         packet = valid_packet()
-        packet["verification"] = {"commands": [], "evidence": []}
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["verification"] = {"plan": {"plan_version": "0.1", "checks": []}, "plan_digest": "stale", "receipts": []}
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
-        self.assertIn("missing_verification_evidence", {blocker["code"] for blocker in readiness_blockers(packet)})
+        self.assertIn("missing_verification_plan", {blocker["code"] for blocker in readiness_blockers(packet)})
 
     def test_risk_signal_cannot_use_standard_depth(self) -> None:
         packet = valid_packet()
         packet["review"]["signals"] = ["public_api"]
 
-        self.assertIn("review_depth_too_low", {error["code"] for error in validate_packet(packet)["errors"]})
+        self.assertIn("review_profile_too_low", {error["code"] for error in validate_packet(packet)["errors"]})
 
     def test_heightened_review_requires_human_expression(self) -> None:
         packet = valid_packet()
-        packet["review"]["depth"] = "heightened"
+        packet["review"]["profile"] = "heightened"
         packet["narrative"]["human_expression"] = ""
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         self.assertIn("missing_human_expression", {error["code"] for error in validate_packet(packet)["errors"]})
 
     def test_packet_and_contract_ids_must_match(self) -> None:
         packet = valid_packet()
         packet["contract"]["contribution_id"] = "other-contribution"
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         self.assertIn("contribution_id_mismatch", {error["code"] for error in validate_packet(packet)["errors"]})
 
@@ -460,8 +524,8 @@ class PacketValidationTests(unittest.TestCase):
         packet = valid_packet()
         packet["policy"].pop("posture")
         packet["ai_assistance"]["disclosure"] = {"text": "", "locations": [], "human_confirmed": False}
-        packet["materials"]["material_snapshot"] = material_snapshot(packet)
-        packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         blockers = readiness_blockers(packet)
 

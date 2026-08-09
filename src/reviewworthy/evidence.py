@@ -40,11 +40,22 @@ def _repository_summary(packet: dict[str, Any]) -> dict[str, Any]:
 def _claim_summary(packet: dict[str, Any]) -> dict[str, Any]:
     verification = packet.get("verification")
     receipts = verification.get("receipts", []) if isinstance(verification, dict) else []
+    plan_digest = verification.get("plan_digest") if isinstance(verification, dict) else None
+    diff = packet.get("diff") if isinstance(packet.get("diff"), dict) else {}
     passed_receipts = [
         receipt
         for receipt in receipts
         if isinstance(receipt, dict)
-        and (receipt.get("command_outcome") == "passed" or receipt.get("exit_code") == 0)
+        and receipt.get("receipt_version") == "0.3"
+        and receipt.get("plan_digest") == plan_digest
+        and receipt.get("subject_digest") == diff.get("subject_digest")
+        and receipt.get("command_outcome") == "passed"
+        and receipt.get("exit_code") == 0
+        and receipt.get("integrity_status") == "stable"
+        and receipt.get("provenance") == "contributor_local"
+        and receipt.get("head_sha_before") == receipt.get("head_sha") == receipt.get("head_sha_after")
+        and receipt.get("worktree_clean_before") is True
+        and receipt.get("worktree_clean_after") is True
     ]
     review = packet.get("review") if isinstance(packet.get("review"), dict) else {}
     ownership = packet.get("ownership") if isinstance(packet.get("ownership"), dict) else {}
@@ -56,7 +67,7 @@ def _claim_summary(packet: dict[str, Any]) -> dict[str, Any]:
             "receipt_count": len(passed_receipts),
         },
         "ownership": {
-            "profile": review.get("profile", review.get("depth", "standard")),
+            "profile": review.get("profile", "standard"),
             "claimed_status": ownership.get("status", "not_recorded"),
         },
         "ai_disclosure": {

@@ -220,7 +220,6 @@ def transition_candidate(
     to: str,
     reason: str,
     human_confirmed: bool,
-    from_recommendation: str | None = None,
 ) -> dict[str, Any]:
     """Record a human-confirmed transition from an advisory recommendation."""
 
@@ -233,16 +232,10 @@ def transition_candidate(
     selection = packet.get("candidate_selection") if isinstance(packet, dict) else None
     if not isinstance(selection, dict) or selection.get("confirmed") is not True:
         raise ValueError("A confirmed candidate selection is required before transition")
-    recommendation = selection.get("recommendation") or from_recommendation
-    if selection.get("recommendation") and from_recommendation and selection.get("recommendation") != from_recommendation:
-        raise ValueError("The transition origin does not match candidate_selection.recommendation")
+    recommendation = selection.get("recommendation")
     if recommendation not in {"issue_only", "seek_maintainer_signal"}:
         raise ValueError("Only issue_only or seek_maintainer_signal recommendations need a transition")
     transitioned = deepcopy(packet)
-    # Older bound packets may omit the optional recommendation field.  An
-    # explicit transition can migrate that record while preserving its other
-    # evidence instead of making the packet unreadable.
-    transitioned["candidate_selection"]["recommendation"] = recommendation
     transitioned["candidate_selection"]["transition"] = {
         "from": recommendation,
         "to": to,

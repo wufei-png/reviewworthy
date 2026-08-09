@@ -9,9 +9,10 @@ from typing import Any
 UNDERSTANDING_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run"}
 ORIENTATION_TOPICS = {"contract", "diff", "verification", "policy"}
 RUBRIC_CATEGORIES = {"behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"}
-RUBRIC_BY_DEPTH = {
+RUBRIC_BY_PROFILE = {
     "standard": {"behavior", "invariant", "test"},
     "heightened": {"behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"},
+    "learning": {"behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"},
 }
 
 
@@ -19,7 +20,7 @@ def _error(errors: list[dict[str, str]], code: str, message: str, path: str) -> 
     errors.append({"code": code, "message": message, "path": path})
 
 
-def _validate_rubric(record: dict[str, Any], depth: str, path: str, status: str, errors: list[dict[str, str]]) -> None:
+def _validate_rubric(record: dict[str, Any], profile: str, path: str, status: str, errors: list[dict[str, str]]) -> None:
     rubric = record.get("rubric")
     if not isinstance(rubric, dict):
         _error(errors, "invalid_understanding_rubric", "Understanding rubric must be an object", path)
@@ -36,7 +37,7 @@ def _validate_rubric(record: dict[str, Any], depth: str, path: str, status: str,
         _error(errors, "invalid_rubric_evidence", "Rubric evidence must map category names to strings", f"{path}.evidence")
         evidence = {}
     if status == "passed":
-        required = RUBRIC_BY_DEPTH.get(depth, RUBRIC_BY_DEPTH["standard"])
+        required = RUBRIC_BY_PROFILE.get(profile, RUBRIC_BY_PROFILE["standard"])
         missing = sorted(required - set(covered))
         if missing:
             _error(errors, "missing_rubric_categories", f"Understanding must cover rubric categories: {missing}", f"{path}.covered")
@@ -45,18 +46,23 @@ def _validate_rubric(record: dict[str, Any], depth: str, path: str, status: str,
             _error(errors, "missing_rubric_evidence", f"Understanding rubric needs evidence for: {empty}", f"{path}.evidence")
 
 
-def validate_understanding(understanding: Any, expected_snapshot: str, *, review_depth: str = "standard") -> dict[str, Any]:
-    """Validate both understanding phases against the current material snapshot."""
+def validate_understanding(understanding: Any, expected_snapshot: str, *, review_profile: str = "standard") -> dict[str, Any]:
+    """Validate both understanding phases against the current semantic snapshot."""
 
     errors: list[dict[str, str]] = []
     if not isinstance(understanding, dict):
         _error(errors, "invalid_understanding", "understanding must be an object", "understanding")
         return {"valid": False, "errors": errors}
+    for key in sorted(set(understanding) - {"orientation", "assessment"}):
+        _error(errors, "unknown_understanding_field", f"understanding.{key} is not part of the current format", f"understanding.{key}")
 
     orientation = understanding.get("orientation")
     if not isinstance(orientation, dict):
         _error(errors, "invalid_orientation", "understanding.orientation must be an object", "understanding.orientation")
     else:
+        allowed_orientation = {"status", "summary", "topics", "evidence", "rubric", "semantic_snapshot"}
+        for key in sorted(set(orientation) - allowed_orientation):
+            _error(errors, "unknown_orientation_field", f"understanding.orientation.{key} is not part of the current format", f"understanding.orientation.{key}")
         status = orientation.get("status")
         if status not in UNDERSTANDING_STATUSES:
             _error(errors, "invalid_orientation", "understanding.orientation.status is required", "understanding.orientation.status")
@@ -69,21 +75,24 @@ def validate_understanding(understanding: Any, expected_snapshot: str, *, review
         evidence = orientation.get("evidence")
         if not isinstance(evidence, list) or not all(isinstance(item, str) for item in evidence):
             _error(errors, "invalid_orientation_evidence", "Orientation evidence must be a list of strings", "understanding.orientation.evidence")
-        if not isinstance(orientation.get("material_snapshot"), str) or not orientation["material_snapshot"].strip():
-            _error(errors, "invalid_orientation_snapshot", "Orientation material_snapshot must be a non-empty string", "understanding.orientation.material_snapshot")
-        _validate_rubric(orientation, review_depth, "understanding.orientation.rubric", status, errors)
+        if not isinstance(orientation.get("semantic_snapshot"), str) or not orientation["semantic_snapshot"].strip():
+            _error(errors, "invalid_orientation_snapshot", "Orientation semantic_snapshot must be a non-empty string", "understanding.orientation.semantic_snapshot")
+        _validate_rubric(orientation, review_profile, "understanding.orientation.rubric", status, errors)
         if status == "passed":
             if not isinstance(orientation.get("summary"), str) or not orientation["summary"].strip():
                 _error(errors, "missing_orientation_summary", "A passed Orientation needs a non-empty summary", "understanding.orientation.summary")
             if isinstance(topics, list) and not ORIENTATION_TOPICS.issubset(set(topics)):
                 _error(errors, "missing_orientation_topics", "Orientation must cover contract, diff, verification, and policy", "understanding.orientation.topics")
-            if orientation.get("material_snapshot") != expected_snapshot:
-                _error(errors, "stale_orientation", "Orientation is not bound to the current material snapshot", "understanding.orientation.material_snapshot")
+            if orientation.get("semantic_snapshot") != expected_snapshot:
+                _error(errors, "stale_orientation", "Orientation is not bound to the current semantic snapshot", "understanding.orientation.semantic_snapshot")
 
     assessment = understanding.get("assessment")
     if not isinstance(assessment, dict):
         _error(errors, "invalid_assessment", "understanding.assessment must be an object", "understanding.assessment")
     else:
+        allowed_assessment = {"status", "questions", "answers", "evidence", "rubric", "semantic_snapshot"}
+        for key in sorted(set(assessment) - allowed_assessment):
+            _error(errors, "unknown_assessment_field", f"understanding.assessment.{key} is not part of the current format", f"understanding.assessment.{key}")
         status = assessment.get("status")
         if status not in UNDERSTANDING_STATUSES:
             _error(errors, "invalid_assessment", "understanding.assessment.status is required", "understanding.assessment.status")
@@ -100,27 +109,27 @@ def validate_understanding(understanding: Any, expected_snapshot: str, *, review
         evidence = assessment.get("evidence")
         if not isinstance(evidence, list) or not all(isinstance(item, str) for item in evidence):
             _error(errors, "invalid_assessment_evidence", "Assessment evidence must be a list of strings", "understanding.assessment.evidence")
-        if not isinstance(assessment.get("material_snapshot"), str) or not assessment["material_snapshot"].strip():
-            _error(errors, "invalid_assessment_snapshot", "Assessment material_snapshot must be a non-empty string", "understanding.assessment.material_snapshot")
-        _validate_rubric(assessment, review_depth, "understanding.assessment.rubric", status, errors)
+        if not isinstance(assessment.get("semantic_snapshot"), str) or not assessment["semantic_snapshot"].strip():
+            _error(errors, "invalid_assessment_snapshot", "Assessment semantic_snapshot must be a non-empty string", "understanding.assessment.semantic_snapshot")
+        _validate_rubric(assessment, review_profile, "understanding.assessment.rubric", status, errors)
         if status == "passed":
             if isinstance(answers, list) and any(not answer.strip() for answer in answers if isinstance(answer, str)):
                 _error(errors, "empty_assessment_answer", "A passed Assessment needs a human answer for every question", "understanding.assessment.answers")
-            if assessment.get("material_snapshot") != expected_snapshot:
-                _error(errors, "stale_assessment", "Assessment is not bound to the current material snapshot", "understanding.assessment.material_snapshot")
+            if assessment.get("semantic_snapshot") != expected_snapshot:
+                _error(errors, "stale_assessment", "Assessment is not bound to the current semantic snapshot", "understanding.assessment.semantic_snapshot")
             if not isinstance(orientation, dict) or orientation.get("status") != "passed":
                 _error(errors, "assessment_requires_orientation", "A passed Assessment requires a passed Orientation", "understanding.orientation.status")
-            elif orientation.get("material_snapshot") != expected_snapshot:
-                _error(errors, "assessment_requires_current_orientation", "A passed Assessment requires a current Orientation", "understanding.orientation.material_snapshot")
+            elif orientation.get("semantic_snapshot") != expected_snapshot:
+                _error(errors, "assessment_requires_current_orientation", "A passed Assessment requires a current Orientation", "understanding.orientation.semantic_snapshot")
 
-    return {"valid": not errors, "errors": errors, "material_snapshot": expected_snapshot}
+    return {"valid": not errors, "errors": errors, "semantic_snapshot": expected_snapshot}
 
 
 def record_understanding(
     packet: dict[str, Any],
     phase: str,
     status: str,
-    material_snapshot: str,
+    semantic_snapshot: str,
     *,
     summary: str = "",
     topics: list[str] | None = None,
@@ -144,9 +153,9 @@ def record_understanding(
         if (
             not isinstance(orientation, dict)
             or orientation.get("status") != "passed"
-            or orientation.get("material_snapshot") != material_snapshot
+            or orientation.get("semantic_snapshot") != semantic_snapshot
         ):
-            raise ValueError("Assessment requires a passed Orientation bound to the current material snapshot")
+            raise ValueError("Assessment requires a passed Orientation bound to the current semantic snapshot")
     if phase == "orientation":
         understanding["orientation"] = {
             "status": status,
@@ -154,7 +163,7 @@ def record_understanding(
             "topics": list(topics or []),
             "evidence": list(evidence or []),
             "rubric": {"covered": sorted(rubric or {}), "evidence": dict(rubric or {})},
-            "material_snapshot": material_snapshot,
+            "semantic_snapshot": semantic_snapshot,
         }
     else:
         understanding["assessment"] = {
@@ -163,6 +172,6 @@ def record_understanding(
             "answers": list(answers or []),
             "evidence": list(evidence or []),
             "rubric": {"covered": sorted(rubric or {}), "evidence": dict(rubric or {})},
-            "material_snapshot": material_snapshot,
+            "semantic_snapshot": semantic_snapshot,
         }
     return updated

@@ -1,4 +1,4 @@
-"""Deterministic review-depth signals and independent hard-stop detection."""
+"""Deterministic review-profile signals and independent hard-stop detection."""
 
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ def assess_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     signals: list[dict[str, str]] = []
     hard_stops: list[dict[str, str]] = []
 
-    requested = manifest.get("requested_review_depth", "standard")
-    if requested not in {"standard", "heightened"}:
-        raise ValueError("requested_review_depth must be standard or heightened")
+    requested = manifest.get("requested_review_profile", "standard")
+    if requested not in {"standard", "heightened", "learning"}:
+        raise ValueError("requested_review_profile must be standard, heightened, or learning")
 
     if manifest.get("security_issue"):
         _add_hard_stop(hard_stops, "security_issue", "Security issues must use the private reporting path.")
@@ -55,12 +55,12 @@ def assess_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             _add_signal(signals, "large_diff", f"Diff has {additions + deletions} changed lines, over the {max_lines}-line review budget.")
 
     user_escalated = bool(manifest.get("user_escalated"))
-    depth = "heightened" if requested == "heightened" or user_escalated or signals else "standard"
+    profile = requested if requested == "learning" else ("heightened" if requested == "heightened" or user_escalated or signals else "standard")
     return {
-        "review_depth": depth,
+        "review_profile": profile,
         "signals": signals,
         "hard_stops": hard_stops,
         "user_escalated": user_escalated,
-        "requested_review_depth": requested,
+        "requested_review_profile": requested,
         "changed_files": changed_files,
     }

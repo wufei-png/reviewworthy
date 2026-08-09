@@ -8,7 +8,7 @@ from reviewworthy.brief import build_project_brief, render_project_brief, valida
 from reviewworthy.candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, transition_candidate, validate_candidate_menu
 from reviewworthy.contract import skeleton_contract, validate_contract
 from reviewworthy.disclosure import disclosure_errors, render_disclosure
-from reviewworthy.packet import material_snapshot
+from reviewworthy.packet import semantic_snapshot
 from reviewworthy.packet import readiness_blockers
 from reviewworthy.understanding import record_understanding, validate_understanding
 
@@ -95,7 +95,7 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(bound["basis"]["references"], ["https://github.com/example/project/issues/3"])
         self.assertEqual(bound["entry"]["mode"], "issue-backed")
         self.assertEqual(bound["candidate_selection"]["candidate_id"], "candidate-003")
-        self.assertNotEqual(bound["materials"]["material_snapshot"], material_snapshot(bound))
+        self.assertNotEqual(bound["snapshots"]["semantic"], semantic_snapshot(bound))
 
     def test_confirming_signal_candidate_requires_a_structured_signal(self) -> None:
         menu = skeleton_menu("example/project")
@@ -287,7 +287,7 @@ class ArtifactTests(unittest.TestCase):
                 "topics": ["contract"],
                 "evidence": [],
                 "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
-                "material_snapshot": "snapshot-1",
+                "semantic_snapshot": "snapshot-1",
             },
             "assessment": {
                 "status": "passed",
@@ -295,7 +295,7 @@ class ArtifactTests(unittest.TestCase):
                 "answers": ["The boundary changed."],
                 "evidence": [],
                 "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
-                "material_snapshot": "snapshot-1",
+                "semantic_snapshot": "snapshot-1",
             },
         }
 
@@ -311,16 +311,16 @@ class ArtifactTests(unittest.TestCase):
             "orientation": {
                 "status": "passed", "summary": "Explained.", "topics": ["contract", "diff", "verification", "policy"], "evidence": [],
                 "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
-                "material_snapshot": "snapshot-1",
+                "semantic_snapshot": "snapshot-1",
             },
             "assessment": {
                 "status": "passed", "questions": ["What fails?"], "answers": ["The invalid input is rejected."], "evidence": [],
                 "rubric": {"covered": ["behavior", "invariant", "test"], "evidence": {"behavior": "b", "invariant": "i", "test": "t"}},
-                "material_snapshot": "snapshot-1",
+                "semantic_snapshot": "snapshot-1",
             },
         }
 
-        result = validate_understanding(understanding, "snapshot-1", review_depth="heightened")
+        result = validate_understanding(understanding, "snapshot-1", review_profile="heightened")
 
         self.assertIn("missing_rubric_categories", {error["code"] for error in result["errors"]})
 
@@ -390,7 +390,7 @@ class ArtifactTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             transition_candidate(packet, to="plan_directly", reason="A signal is public.", human_confirmed=False)
 
-    def test_candidate_transition_can_migrate_an_old_selection_without_recommendation(self) -> None:
+    def test_candidate_transition_rejects_incomplete_current_selection(self) -> None:
         packet = valid_packet()
         packet["candidate_selection"] = {
             "candidate_id": "candidate-old",
@@ -400,16 +400,13 @@ class ArtifactTests(unittest.TestCase):
             "confirmed": True,
         }
 
-        transitioned = transition_candidate(
-            packet,
-            to="plan_directly",
-            reason="The previously advisory Issue path is now explicitly confirmed.",
-            human_confirmed=True,
-            from_recommendation="issue_only",
-        )
-
-        self.assertEqual(transitioned["candidate_selection"]["recommendation"], "issue_only")
-        self.assertEqual(transitioned["candidate_selection"]["transition"]["from"], "issue_only")
+        with self.assertRaises(ValueError):
+            transition_candidate(
+                packet,
+                to="plan_directly",
+                reason="The advisory path is now explicitly confirmed.",
+                human_confirmed=True,
+            )
 
     def test_passed_assessment_requires_passed_orientation(self) -> None:
         understanding = {
@@ -418,14 +415,14 @@ class ArtifactTests(unittest.TestCase):
                 "summary": "",
                 "topics": [],
                 "evidence": [],
-                "material_snapshot": "snapshot-1",
+                "semantic_snapshot": "snapshot-1",
             },
             "assessment": {
                 "status": "passed",
                 "questions": ["What changed?"],
                 "answers": ["The boundary changed."],
                 "evidence": [],
-                "material_snapshot": "snapshot-1",
+                "semantic_snapshot": "snapshot-1",
             },
         }
 
@@ -438,5 +435,5 @@ class ArtifactTests(unittest.TestCase):
         packet = record_understanding(packet, "orientation", "passed", "snapshot-3", summary="Explained.", topics=["contract", "diff", "verification", "policy"])
         packet = record_understanding(packet, "assessment", "passed", "snapshot-3", questions=["What changed?"], answers=["The boundary changed."])
 
-        self.assertEqual(packet["understanding"]["orientation"]["material_snapshot"], "snapshot-3")
+        self.assertEqual(packet["understanding"]["orientation"]["semantic_snapshot"], "snapshot-3")
         self.assertEqual(packet["understanding"]["assessment"]["answers"], ["The boundary changed."])

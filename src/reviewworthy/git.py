@@ -23,6 +23,8 @@ PR_DIFF_FIELDS = (
 )
 
 FINGERPRINT_ALGORITHM = "git-raw-content-v1"
+VERIFICATION_PLAN_VERSION = "0.1"
+VERIFICATION_RECEIPT_VERSION = "0.3"
 
 
 class GitError(RuntimeError):
@@ -161,10 +163,30 @@ def capture_pr_diff(root: Path, base: str, head: str) -> dict[str, Any]:
     }
 
 
-def run_verification(root: Path, head: str, argv: list[str]) -> dict[str, Any]:
+def verification_plan_digest(plan: Any) -> str:
+    """Bind receipts to the exact current verification plan."""
+
+    return sha256(canonical_json(plan).encode("utf-8")).hexdigest()
+
+
+def run_verification(
+    root: Path,
+    head: str,
+    argv: list[str],
+    *,
+    check_id: str,
+    plan_digest: str,
+    subject_digest: str,
+    cwd: str = ".",
+) -> dict[str, Any]:
     root = root.resolve()
     if not argv:
         raise ValueError("verification command must not be empty")
+    if not check_id or not plan_digest or not subject_digest:
+        raise ValueError("check_id, plan_digest, and subject_digest are required")
+    command_root = (root / cwd).resolve()
+    if command_root != root and root not in command_root.parents:
+        raise ValueError("verification cwd must stay inside the repository")
     expected_head = resolve_ref(root, head)
     head_before = current_head(root)
     if head_before != expected_head:
@@ -173,7 +195,7 @@ def run_verification(root: Path, head: str, argv: list[str]) -> dict[str, Any]:
         raise GitError("Verification requires a clean worktree before execution")
     started_at = utc_now()
     try:
-        completed = subprocess.run(argv, cwd=root, capture_output=True, text=False, check=False)
+        completed = subprocess.run(argv, cwd=command_root, capture_output=True, text=False, check=False)
     except OSError as exc:
         raise GitError(f"Could not execute verification command: {exc}") from exc
     finished_at = utc_now()
@@ -188,9 +210,15 @@ def run_verification(root: Path, head: str, argv: list[str]) -> dict[str, Any]:
     if not worktree_clean_after:
         failure_reasons.append("worktree_dirty_after_execution")
     return {
+        "receipt_version": VERIFICATION_RECEIPT_VERSION,
+        "check_id": check_id,
+        "plan_digest": plan_digest,
+        "subject_digest": subject_digest,
         "argv": list(argv),
-        "cwd": relative_path(root, root),
+        "cwd": relative_path(root, command_root),
         "exit_code": completed.returncode,
+        "command_outcome": "passed" if completed.returncode == 0 else "failed",
+        "integrity_status": "stable" if valid else "invalid",
         "started_at": started_at,
         "finished_at": finished_at,
         "head_sha": expected_head,
@@ -198,9 +226,8 @@ def run_verification(root: Path, head: str, argv: list[str]) -> dict[str, Any]:
         "head_sha_after": head_after,
         "worktree_clean_before": True,
         "worktree_clean_after": worktree_clean_after,
-        "status": "valid" if valid else "invalid",
         **({"failure_reason": ",".join(failure_reasons)} if failure_reasons else {}),
         "stdout_sha256": sha256(stdout).hexdigest(),
         "stderr_sha256": sha256(stderr).hexdigest(),
-        "provenance": "cli_executed",
+        "provenance": "contributor_local",
     }

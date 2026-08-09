@@ -13,9 +13,9 @@ from unittest.mock import patch
 
 from reviewworthy.cli import _issue_revalidation_errors, main
 from reviewworthy.evidence import append_evidence_summary, build_evidence_summary
-from reviewworthy.git import capture_pr_diff
+from reviewworthy.git import capture_pr_diff, verification_plan_digest
 from reviewworthy.github import GhError
-from reviewworthy.packet import material_snapshot, readiness_blockers, skeleton_packet, validate_packet
+from reviewworthy.packet import semantic_snapshot, readiness_blockers, skeleton_packet, validate_packet
 
 from helpers import valid_packet
 
@@ -316,9 +316,9 @@ class CliBoundaryTests(unittest.TestCase):
                 "duplicate_disposition": "not_duplicate",
                 "confirmed": True,
             }
-            packet["materials"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+            packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
             output = io.StringIO()
 
@@ -333,7 +333,7 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(updated["candidate_selection"]["transition"]["to"], "plan_directly")
             self.assertTrue(updated["candidate_selection"]["transition"]["human_confirmed"])
 
-    def test_candidate_transition_command_migrates_old_packet_without_recommendation(self) -> None:
+    def test_candidate_transition_command_rejects_incomplete_current_packet(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             packet_path = Path(directory) / "packet.json"
             packet = valid_packet()
@@ -344,30 +344,21 @@ class CliBoundaryTests(unittest.TestCase):
                 "duplicate_disposition": "not_duplicate",
                 "confirmed": True,
             }
-            packet["materials"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+            packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
 
             with redirect_stdout(io.StringIO()):
                 code = main([
                     "candidate", "transition", "--packet", str(packet_path),
-                    "--from", "issue_only", "--to", "plan_directly",
+                    "--to", "plan_directly",
                     "--reason", "The verified Issue now bounds the change.", "--confirm", "--json",
                 ])
 
-            updated = json.loads(packet_path.read_text(encoding="utf-8"))
-            self.assertEqual(code, 0)
-            self.assertEqual(updated["candidate_selection"]["recommendation"], "issue_only")
-            validation = validate_packet(updated)
-            self.assertFalse(validation["valid"])
-            self.assertIn("stale_assessment", {item["code"] for item in validation["errors"]})
-            readiness_codes = {item["code"] for item in readiness_blockers(updated)}
-            self.assertNotIn("candidate_transition_required", readiness_codes)
-            self.assertIn("stale_assessment", readiness_codes)
-            self.assertEqual(updated["materials"]["material_snapshot"], material_snapshot(updated))
-            self.assertNotEqual(updated["understanding"]["orientation"]["material_snapshot"], material_snapshot(updated))
-            self.assertNotEqual(updated["understanding"]["assessment"]["material_snapshot"], material_snapshot(updated))
+            unchanged = json.loads(packet_path.read_text(encoding="utf-8"))
+            self.assertEqual(code, 2)
+            self.assertNotIn("transition", unchanged["candidate_selection"])
 
     def test_action_cli_recomputes_pr_diff_from_public_summary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -420,9 +411,9 @@ class CliBoundaryTests(unittest.TestCase):
     def test_verify_cli_persists_invalid_receipt_and_returns_failure_when_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            repository_root, _ = self._pr_repository(root)
+            repository_root, actual_diff = self._pr_repository(root)
             expected_head = self._git(repository_root, "rev-parse", "HEAD")
-            receipt_path = root / "verification.json"
+            packet_path = root / "packet.json"
             command = (
                 "from pathlib import Path; import subprocess; "
                 "Path('src/example.py').write_text('one\\ntwo\\nthree\\n'); "
@@ -430,22 +421,27 @@ class CliBoundaryTests(unittest.TestCase):
                 "subprocess.run(['git', 'commit', '-qm', 'verification mutation'], check=True)"
             )
             output = io.StringIO()
+            packet = valid_packet()
+            packet["diff"] = actual_diff
+            packet["verification"]["plan"]["checks"][0]["argv"] = [sys.executable, "-c", command]
+            packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
+            packet["verification"]["receipts"] = []
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
 
             with redirect_stdout(output):
                 code = main([
-                    "verify", "run", "--root", str(repository_root), "--head", expected_head,
-                    "--output", str(receipt_path), "--force", "--json", "--",
-                    sys.executable, "-c", command,
+                    "verify", "run", "--root", str(repository_root), "--packet", str(packet_path),
+                    "--check-id", "unit", "--json",
                 ])
 
             result = json.loads(output.getvalue())
-            persisted = json.loads(receipt_path.read_text(encoding="utf-8"))
-            output_receipt = dict(result)
-            output_receipt.pop("captured")
+            persisted = json.loads(packet_path.read_text(encoding="utf-8"))["verification"]["receipts"][0]
             self.assertEqual(code, 1)
-            self.assertEqual(result["status"], "invalid")
+            self.assertEqual(result["integrity_status"], "invalid")
             self.assertEqual(result["failure_reason"], "head_changed_after_execution")
-            self.assertEqual(persisted, output_receipt)
+            self.assertEqual(persisted["check_id"], "unit")
+            self.assertEqual(persisted["integrity_status"], "invalid")
 
     def test_remote_plan_uses_the_approved_packet_narrative(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -514,15 +510,16 @@ class CliBoundaryTests(unittest.TestCase):
             packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = dict(actual_diff)
             packet["verification"]["receipts"][0].update({
+                "subject_digest": actual_diff["subject_digest"],
                 "head_sha": actual_diff["head_sha"],
                 "head_sha_before": actual_diff["head_sha"],
                 "head_sha_after": actual_diff["head_sha"],
                 "cwd": ".",
             })
             packet["diff"]["additions"] = actual_diff["additions"] + 1
-            packet["materials"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+            packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
             packet_path = root / "packet.json"
             body_path = root / "body.md"
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
@@ -565,14 +562,15 @@ class CliBoundaryTests(unittest.TestCase):
                 packet["diff"] = dict(actual_diff)
                 packet["diff"][field] = actual_diff[field] + 1 if field in {"additions", "deletions"} else value
                 packet["verification"]["receipts"][0].update({
+                    "subject_digest": actual_diff["subject_digest"],
                     "head_sha": actual_diff["head_sha"],
                     "head_sha_before": actual_diff["head_sha"],
                     "head_sha_after": actual_diff["head_sha"],
                     "cwd": ".",
                 })
-                packet["materials"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+                packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+                packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
                 packet_path = root / "packet.json"
                 body_path = root / "body.md"
                 packet_path.write_text(json.dumps(packet), encoding="utf-8")
@@ -615,14 +613,15 @@ class CliBoundaryTests(unittest.TestCase):
                 packet["diff"] = dict(actual_diff)
                 packet["diff"][field] = actual_diff[field] + 1 if field in {"additions", "deletions"} else value
                 packet["verification"]["receipts"][0].update({
+                    "subject_digest": actual_diff["subject_digest"],
                     "head_sha": actual_diff["head_sha"],
                     "head_sha_before": actual_diff["head_sha"],
                     "head_sha_after": actual_diff["head_sha"],
                     "cwd": ".",
                 })
-                packet["materials"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+                packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+                packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
                 packet_path = root / "packet.json"
                 body_path = root / "body.md"
                 packet_path.write_text(json.dumps(packet), encoding="utf-8")
@@ -737,14 +736,15 @@ class CliBoundaryTests(unittest.TestCase):
             packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = actual_diff
             packet["verification"]["receipts"][0].update({
+                "subject_digest": actual_diff["subject_digest"],
                 "head_sha": actual_diff["head_sha"],
                 "head_sha_before": actual_diff["head_sha"],
                 "head_sha_after": actual_diff["head_sha"],
                 "cwd": ".",
             })
-            packet["materials"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+            packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
             packet_path = root / "packet.json"
             body_path = root / "body.md"
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
@@ -817,14 +817,15 @@ class CliBoundaryTests(unittest.TestCase):
                 packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
                 packet["diff"] = actual_diff
                 packet["verification"]["receipts"][0].update({
+                    "subject_digest": actual_diff["subject_digest"],
                     "head_sha": actual_diff["head_sha"],
                     "head_sha_before": actual_diff["head_sha"],
                     "head_sha_after": actual_diff["head_sha"],
                     "cwd": ".",
                 })
-                packet["materials"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-                packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+                packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+                packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+                packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
                 packet_path = root / "packet.json"
                 body_path = root / "body.md"
                 packet_path.write_text(json.dumps(packet), encoding="utf-8")
@@ -898,6 +899,7 @@ class CliBoundaryTests(unittest.TestCase):
             packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = actual_diff
             packet["verification"]["receipts"][0].update({
+                "subject_digest": actual_diff["subject_digest"],
                 "head_sha": actual_diff["head_sha"],
                 "head_sha_before": actual_diff["head_sha"],
                 "head_sha_after": actual_diff["head_sha"],
@@ -905,9 +907,9 @@ class CliBoundaryTests(unittest.TestCase):
             })
             packet["policy"]["authoritative_claims"]["good_first_issue_ai_allowed"] = False
             packet["basis"]["verification"]["labels"] = []
-            packet["materials"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+            packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
             packet_path = root / "packet.json"
             body_path = root / "body.md"
             packet_path.write_text(json.dumps(packet), encoding="utf-8")
@@ -953,14 +955,15 @@ class CliBoundaryTests(unittest.TestCase):
             packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = actual_diff
             packet["verification"]["receipts"][0].update({
+                "subject_digest": actual_diff["subject_digest"],
                 "head_sha": actual_diff["head_sha"],
                 "head_sha_before": actual_diff["head_sha"],
                 "head_sha_after": actual_diff["head_sha"],
                 "cwd": ".",
             })
-            packet["materials"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+            packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+            packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
             packet_path = root / "packet.json"
             body_path = root / "body.md"
             packet_path.write_text(json.dumps(packet), encoding="utf-8")

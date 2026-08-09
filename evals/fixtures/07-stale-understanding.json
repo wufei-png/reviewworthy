@@ -1,8 +1,9 @@
 {
   "id": "stale-understanding",
   "kind": "packet",
-  "refresh_materials": false,
+  "refresh_semantics": false,
   "mutations": [
+    {"path": "review.profile", "value": "learning"},
     {"path": "diff.additions", "value": 99}
   ],
   "assert": {
@@ -10,7 +11,7 @@
     "blocker_codes": [
       "assessment_requires_current_orientation",
       "diff_budget_exceeded",
-      "material_snapshot_mismatch",
+      "semantic_snapshot_mismatch",
       "stale_assessment",
       "stale_orientation"
     ]

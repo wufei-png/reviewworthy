@@ -9,7 +9,7 @@ from typing import Any
 from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS, RECOMMENDATIONS
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
-from .git import FINGERPRINT_ALGORITHM, PR_DIFF_FIELDS
+from .git import FINGERPRINT_ALGORITHM, PR_DIFF_FIELDS, VERIFICATION_PLAN_VERSION, VERIFICATION_RECEIPT_VERSION, verification_plan_digest
 from .repository import parse_public_record, parse_repository_slug, repository_slugs_match, validate_repository_identity
 from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .understanding import validate_understanding
@@ -22,7 +22,7 @@ REQUIRED_NODES = (
     "contribution_contract",
     "implementation",
     "verification",
-    "understanding",
+    "ownership",
     "narrative",
 )
 ALLOWED_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run"}
@@ -60,18 +60,53 @@ def require_contribution_id(value: Any) -> str:
     return value
 
 
-def material_snapshot(packet: dict[str, Any]) -> str:
-    """Hash the selected basis and other materials Orientation and Assessment are about."""
+def semantic_snapshot(packet: dict[str, Any]) -> str:
+    """Hash semantic readiness inputs while excluding timestamps and audit output."""
+
+    def without_audit_timestamps(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: without_audit_timestamps(item)
+                for key, item in value.items()
+                if key not in {"verified_at", "captured_at", "started_at", "finished_at"}
+            }
+        if isinstance(value, list):
+            return [without_audit_timestamps(item) for item in value]
+        return value
+
+    verification = packet.get("verification") if isinstance(packet.get("verification"), dict) else {}
+    receipts = verification.get("receipts", []) if isinstance(verification.get("receipts", []), list) else []
+    semantic_receipts = sorted([
+        {
+            key: receipt.get(key)
+            for key in ("receipt_version", "check_id", "plan_digest", "subject_digest", "command_outcome", "integrity_status")
+        }
+        for receipt in receipts
+        if isinstance(receipt, dict)
+    ], key=lambda item: str(item.get("check_id", "")))
+    diff = packet.get("diff") if isinstance(packet.get("diff"), dict) else {}
+    policy = packet.get("policy") if isinstance(packet.get("policy"), dict) else {}
 
     return sha256_json(
         {
             "entry": packet.get("entry", {}),
-            "basis": packet.get("basis", {}),
+            "basis": without_audit_timestamps(packet.get("basis", {})),
             "candidate_selection": packet.get("candidate_selection", {}),
             "contract": packet.get("contract", {}),
-            "diff": packet.get("diff", {}),
-            "verification": packet.get("verification", {}),
-            "policy": packet.get("policy", {}),
+            "diff": {key: diff.get(key) for key in PR_DIFF_FIELDS},
+            "verification": {
+                "plan": verification.get("plan", {}),
+                "plan_digest": verification.get("plan_digest"),
+                "receipts": semantic_receipts,
+            },
+            "policy": {
+                "authoritative_claims": policy.get("authoritative_claims", {}),
+                "conflicts": policy.get("conflicts", []),
+                "ambiguities": policy.get("ambiguities", []),
+                "posture": policy.get("posture"),
+            },
+            "review": packet.get("review", {}),
+            "ownership": packet.get("ownership", {}),
         }
     )
 
@@ -81,7 +116,7 @@ def result_record(
     status: str,
     evidence: list[str] | None = None,
     details: dict[str, Any] | None = None,
-    material_snapshot_value: str | None = None,
+    semantic_snapshot_value: str | None = None,
 ) -> dict[str, Any]:
     if status not in ALLOWED_STATUSES:
         raise ValueError(f"Unsupported result status: {status}")
@@ -91,8 +126,8 @@ def result_record(
         "evidence": evidence or [],
         "details": details or {},
     }
-    if material_snapshot_value:
-        record["material_snapshot"] = material_snapshot_value
+    if semantic_snapshot_value:
+        record["semantic_snapshot"] = semantic_snapshot_value
     return record
 
 
@@ -136,7 +171,7 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
             "approval": {"status": "not_run", "human_confirmed": False},
         },
         "policy": {"authoritative_claims": {}, "conflicts": [], "posture": "conservative"},
-        "review": {"depth": "standard", "signals": [], "hard_stops": []},
+        "review": {"profile": "standard", "signals": [], "hard_stops": []},
         "ai_assistance": {
             "used": True,
             "stages": [],
@@ -153,12 +188,17 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
             "additions": 0,
             "deletions": 0,
         },
-        "verification": {"commands": [], "evidence": [], "receipts": []},
-        "materials": {},
+        "verification": {
+            "plan": {"plan_version": VERIFICATION_PLAN_VERSION, "checks": []},
+            "plan_digest": "",
+            "receipts": [],
+        },
+        "ownership": {"status": "not_run", "problem": "", "scope": "", "verification": "", "risks": []},
+        "snapshots": {},
         "results": [result_record(node, "not_run") for node in REQUIRED_NODES],
         "understanding": {
-            "orientation": {"status": "not_run", "summary": "", "topics": [], "evidence": [], "rubric": {"covered": [], "evidence": {}}, "material_snapshot": ""},
-            "assessment": {"status": "not_run", "questions": [], "answers": [], "evidence": [], "rubric": {"covered": [], "evidence": {}}, "material_snapshot": ""},
+            "orientation": {"status": "not_run", "summary": "", "topics": [], "evidence": [], "rubric": {"covered": [], "evidence": {}}, "semantic_snapshot": ""},
+            "assessment": {"status": "not_run", "questions": [], "answers": [], "evidence": [], "rubric": {"covered": [], "evidence": {}}, "semantic_snapshot": ""},
         },
         "narrative": {
             "title": "",
@@ -170,9 +210,10 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
     }
     if mode == "discovery":
         packet["basis"]["signal"] = skeleton_signal("reproducible-evidence")
-    packet["materials"]["material_snapshot"] = material_snapshot(packet)
-    packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-    packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+    packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
+    packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+    packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+    packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
     return packet
 
 
@@ -180,7 +221,7 @@ def _error(errors: list[dict[str, str]], code: str, message: str, path: str) -> 
     errors.append({"code": code, "message": message, "path": path})
 
 
-def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
+def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
     errors: list[dict[str, str]] = []
     required_top = (
         "packet_version",
@@ -194,11 +235,15 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "ai_assistance",
         "diff",
         "verification",
-        "materials",
+        "ownership",
+        "snapshots",
         "results",
         "understanding",
         "narrative",
     )
+    allowed_top = {*required_top, "candidate_selection"}
+    for key in sorted(set(packet) - allowed_top):
+        _error(errors, "unknown_packet_field", f"{key} is not part of Packet {PACKET_VERSION}", key)
     for key in required_top:
         if key not in packet:
             _error(errors, "missing_field", f"Required field is missing: {key}", key)
@@ -268,15 +313,17 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
                 _error(errors, "empty_scope", "At least one file or module must be bounded", "contract.scope")
 
     review = packet.get("review", {})
-    if not isinstance(review, dict) or review.get("depth") not in {"standard", "heightened"}:
-        _error(errors, "invalid_review_depth", "review.depth must be standard or heightened", "review.depth")
+    if not isinstance(review, dict) or review.get("profile") not in {"standard", "heightened", "learning"}:
+        _error(errors, "invalid_review_profile", "review.profile must be standard, heightened, or learning", "review.profile")
     if isinstance(review, dict) and not isinstance(review.get("hard_stops", []), list):
         _error(errors, "invalid_hard_stops", "review.hard_stops must be a list", "review.hard_stops")
     if isinstance(review, dict):
+        for key in sorted(set(review) - {"profile", "signals", "hard_stops"}):
+            _error(errors, "unknown_review_field", f"review.{key} is not part of Packet {PACKET_VERSION}", f"review.{key}")
         if not isinstance(review.get("signals", []), list):
             _error(errors, "invalid_review_signals", "review.signals must be a list", "review.signals")
-        elif review.get("signals") and review.get("depth") == "standard":
-            _error(errors, "review_depth_too_low", "Risk signals require heightened review depth", "review.depth")
+        elif review.get("signals") and review.get("profile") == "standard":
+            _error(errors, "review_profile_too_low", "Risk signals require a full review profile", "review.profile")
 
     ai_assistance = packet.get("ai_assistance", {})
     if not isinstance(ai_assistance, dict):
@@ -350,39 +397,126 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(verification, dict):
         _error(errors, "invalid_verification", "verification must be an object", "verification")
     else:
+        for key in sorted(set(verification) - {"plan", "plan_digest", "receipts"}):
+            _error(errors, "unknown_verification_field", f"verification.{key} is not part of Packet {PACKET_VERSION}", f"verification.{key}")
+        plan = verification.get("plan")
+        checks_by_id: dict[str, dict[str, Any]] = {}
+        if not isinstance(plan, dict) or plan.get("plan_version") != VERIFICATION_PLAN_VERSION or not isinstance(plan.get("checks"), list):
+            _error(errors, "invalid_verification_plan", f"verification.plan must be version {VERIFICATION_PLAN_VERSION} with checks", "verification.plan")
+        else:
+            for index, check in enumerate(plan["checks"]):
+                path = f"verification.plan.checks[{index}]"
+                if not isinstance(check, dict):
+                    _error(errors, "invalid_verification_check", "Each verification check must be an object", path)
+                    continue
+                check_id = check.get("id")
+                if not isinstance(check_id, str) or not check_id.strip():
+                    _error(errors, "invalid_verification_check_id", "Verification check id is required", f"{path}.id")
+                elif check_id in checks_by_id:
+                    _error(errors, "duplicate_verification_check_id", "Verification check ids must be unique", f"{path}.id")
+                else:
+                    checks_by_id[check_id] = check
+                if not isinstance(check.get("argv"), list) or not check.get("argv") or not all(isinstance(item, str) and item for item in check.get("argv", [])):
+                    _error(errors, "invalid_verification_command", "A verification check needs a non-empty argv list", f"{path}.argv")
+                cwd = check.get("cwd")
+                if not isinstance(cwd, str) or not cwd.strip() or not _is_repository_relative_path(cwd):
+                    _error(errors, "invalid_verification_cwd", "A verification check cwd must be repository-relative", f"{path}.cwd")
+                if not isinstance(check.get("required"), bool):
+                    _error(errors, "invalid_verification_required", "A verification check required flag must be boolean", f"{path}.required")
+        expected_plan_digest = verification_plan_digest(plan) if isinstance(plan, dict) else ""
+        if verification.get("plan_digest") != expected_plan_digest:
+            _error(errors, "verification_plan_digest_mismatch", "verification.plan_digest does not match the current plan", "verification.plan_digest")
         receipts = verification.get("receipts", [])
         if not isinstance(receipts, list):
             _error(errors, "invalid_verification_receipts", "verification.receipts must be a list", "verification.receipts")
         else:
+            receipt_check_ids: set[str] = set()
             for index, receipt in enumerate(receipts):
                 path = f"verification.receipts[{index}]"
                 if not isinstance(receipt, dict):
                     _error(errors, "invalid_verification_receipt", "Each verification receipt must be an object", path)
                     continue
+                allowed_receipt = {
+                    "receipt_version", "check_id", "plan_digest", "subject_digest", "argv", "cwd", "exit_code",
+                    "command_outcome", "integrity_status", "started_at", "finished_at", "head_sha", "head_sha_before",
+                    "head_sha_after", "worktree_clean_before", "worktree_clean_after", "failure_reason", "stdout_sha256",
+                    "stderr_sha256", "provenance",
+                }
+                for key in sorted(set(receipt) - allowed_receipt):
+                    _error(errors, "unknown_verification_receipt_field", f"{path}.{key} is not part of receipt {VERIFICATION_RECEIPT_VERSION}", f"{path}.{key}")
+                if receipt.get("receipt_version") != VERIFICATION_RECEIPT_VERSION:
+                    _error(errors, "invalid_verification_receipt_version", f"receipt_version must be {VERIFICATION_RECEIPT_VERSION}", f"{path}.receipt_version")
+                check = checks_by_id.get(receipt.get("check_id"))
+                if isinstance(receipt.get("check_id"), str) and receipt["check_id"] in receipt_check_ids:
+                    _error(errors, "duplicate_verification_receipt", "Only one current receipt is allowed per check", f"{path}.check_id")
+                elif isinstance(receipt.get("check_id"), str):
+                    receipt_check_ids.add(receipt["check_id"])
+                if check is None:
+                    _error(errors, "unknown_verification_check", "Receipt check_id is not in the current plan", f"{path}.check_id")
+                if receipt.get("plan_digest") != expected_plan_digest:
+                    _error(errors, "stale_verification_plan", "Receipt is not bound to the current verification plan", f"{path}.plan_digest")
+                if receipt.get("subject_digest") != (diff.get("subject_digest") if isinstance(diff, dict) else None):
+                    _error(errors, "stale_verification_subject", "Receipt is not bound to the current contribution subject", f"{path}.subject_digest")
                 if not isinstance(receipt.get("argv"), list) or not receipt.get("argv") or not all(isinstance(item, str) and item for item in receipt["argv"]):
                     _error(errors, "invalid_verification_command", "A verification receipt needs a non-empty argv list", f"{path}.argv")
                 if not isinstance(receipt.get("cwd"), str) or not receipt.get("cwd", "").strip():
                     _error(errors, "invalid_verification_cwd", "A verification receipt needs cwd", f"{path}.cwd")
                 elif not _is_repository_relative_path(receipt["cwd"]):
                     _error(errors, "absolute_verification_cwd", "A verification receipt cwd must be repository-relative", f"{path}.cwd")
+                if isinstance(check, dict) and (receipt.get("argv") != check.get("argv") or receipt.get("cwd") != check.get("cwd")):
+                    _error(errors, "verification_check_mismatch", "Receipt command and cwd must match its planned check", path)
                 if not isinstance(receipt.get("head_sha"), str) or not receipt.get("head_sha", "").strip():
                     _error(errors, "invalid_verification_head", "A verification receipt needs head_sha", f"{path}.head_sha")
                 if not isinstance(receipt.get("exit_code"), int) or isinstance(receipt.get("exit_code"), bool):
                     _error(errors, "invalid_verification_exit_code", "A verification receipt needs an integer exit_code", f"{path}.exit_code")
-                if receipt.get("provenance") not in {"cli_executed", "self_reported"}:
-                    _error(errors, "invalid_verification_provenance", "verification receipt provenance must be cli_executed or self_reported", f"{path}.provenance")
+                elif receipt.get("command_outcome") != ("passed" if receipt["exit_code"] == 0 else "failed"):
+                    _error(errors, "verification_outcome_mismatch", "command_outcome must match exit_code", f"{path}.command_outcome")
+                if receipt.get("command_outcome") not in {"passed", "failed"}:
+                    _error(errors, "invalid_verification_outcome", "command_outcome must be passed or failed", f"{path}.command_outcome")
+                if receipt.get("integrity_status") not in {"stable", "invalid"}:
+                    _error(errors, "invalid_verification_integrity", "integrity_status must be stable or invalid", f"{path}.integrity_status")
+                stable_proof = (
+                    receipt.get("head_sha_before") == receipt.get("head_sha") == receipt.get("head_sha_after")
+                    and receipt.get("worktree_clean_before") is True
+                    and receipt.get("worktree_clean_after") is True
+                )
+                if receipt.get("integrity_status") == "stable" and not stable_proof:
+                    _error(errors, "verification_integrity_mismatch", "stable integrity requires matching HEAD and clean worktree proof", f"{path}.integrity_status")
+                if receipt.get("provenance") != "contributor_local":
+                    _error(errors, "invalid_verification_provenance", "verification receipt provenance must be contributor_local", f"{path}.provenance")
 
-    materials = packet.get("materials", {})
-    if not isinstance(materials, dict):
-        _error(errors, "invalid_materials", "materials must be an object", "materials")
+    ownership = packet.get("ownership")
+    if not isinstance(ownership, dict):
+        _error(errors, "invalid_ownership", "ownership must be an object", "ownership")
     else:
-        expected = material_snapshot(packet)
-        if materials.get("material_snapshot") != expected:
+        allowed_ownership = {"status", "problem", "scope", "verification", "risks"}
+        for key in sorted(set(ownership) - allowed_ownership):
+            _error(errors, "unknown_ownership_field", f"ownership.{key} is not part of Packet {PACKET_VERSION}", f"ownership.{key}")
+        if ownership.get("status") not in ALLOWED_STATUSES:
+            _error(errors, "invalid_ownership_status", "ownership.status must be a result status", "ownership.status")
+        for field in ("problem", "scope", "verification"):
+            if not isinstance(ownership.get(field), str):
+                _error(errors, "invalid_ownership_field", f"ownership.{field} must be a string", f"ownership.{field}")
+        if not isinstance(ownership.get("risks"), list) or not all(isinstance(item, str) for item in ownership.get("risks", [])):
+            _error(errors, "invalid_ownership_risks", "ownership.risks must be a list of strings", "ownership.risks")
+        if ownership.get("status") == "passed":
+            for field in ("problem", "scope", "verification"):
+                if not isinstance(ownership.get(field), str) or not ownership.get(field, "").strip():
+                    _error(errors, "incomplete_ownership_check", f"A passed ownership check needs {field}", f"ownership.{field}")
+            if not isinstance(ownership.get("risks"), list) or not all(isinstance(item, str) and item.strip() for item in ownership.get("risks", [])):
+                _error(errors, "incomplete_ownership_check", "ownership.risks must be a list of non-empty strings", "ownership.risks")
+
+    snapshots = packet.get("snapshots", {})
+    if not isinstance(snapshots, dict):
+        _error(errors, "invalid_snapshots", "snapshots must be an object", "snapshots")
+    else:
+        expected = semantic_snapshot(packet)
+        if snapshots.get("semantic") != expected:
             _error(
                 errors,
-                "material_snapshot_mismatch",
-                "materials.material_snapshot does not match the current entry, basis, contract, Diff, verification, and policy",
-                "materials.material_snapshot",
+                "semantic_snapshot_mismatch",
+                "snapshots.semantic does not match the current semantic contribution state",
+                "snapshots.semantic",
             )
 
     results = packet.get("results", [])
@@ -408,9 +542,9 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
             if node not in result_by_node:
                 _error(errors, "missing_result_record", f"Every flow node needs a result record: {node}", "results")
 
+    review_profile = review.get("profile") if isinstance(review, dict) else "standard"
     understanding = packet.get("understanding", {})
-    review_depth = review.get("depth") if isinstance(review, dict) else "standard"
-    for error in validate_understanding(understanding, material_snapshot(packet), review_depth=review_depth)["errors"]:
+    for error in validate_understanding(understanding, semantic_snapshot(packet), review_profile=review_profile)["errors"]:
         _error(errors, error["code"], error["message"], error["path"])
 
     narrative = packet.get("narrative", {})
@@ -423,7 +557,7 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
             _error(errors, "missing_pr_body", "Final PR Body is required", "narrative.body")
         if narrative.get("final_preview_confirmed") is not True:
             _error(errors, "narrative_not_confirmed", "Final PR title and Body must be previewed and confirmed", "narrative.final_preview_confirmed")
-        if (narrative.get("human_expression_required") or (isinstance(review, dict) and review.get("depth") == "heightened")) and not str(narrative.get("human_expression", "")).strip():
+        if (narrative.get("human_expression_required") or (isinstance(review, dict) and review.get("profile") == "heightened")) and not str(narrative.get("human_expression", "")).strip():
             _error(errors, "missing_human_expression", "This contribution requires human-authored motivation/trade-offs/risk", "narrative.human_expression")
 
     candidate_selection = packet.get("candidate_selection")
@@ -454,6 +588,25 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
                         _error(errors, "candidate_transition_not_confirmed", "candidate_selection.transition needs human_confirmed=true", "candidate_selection.transition.human_confirmed")
 
     return {"valid": not errors, "errors": errors, "result_nodes": sorted(result_by_node)}
+
+
+def validate_packet(packet: Any) -> dict[str, Any]:
+    """Validate any JSON-like value and always return structured errors."""
+
+    if not isinstance(packet, dict):
+        return {
+            "valid": False,
+            "errors": [{"code": "invalid_packet", "message": "Contribution Packet must be a JSON object", "path": "packet"}],
+            "result_nodes": [],
+        }
+    try:
+        return _validate_packet_object(packet)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        return {
+            "valid": False,
+            "errors": [{"code": "invalid_packet_structure", "message": str(exc), "path": "packet"}],
+            "result_nodes": [],
+        }
 
 
 def deterministic_evidence_checks(
@@ -718,7 +871,7 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
     return violations
 
 
-def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
+def _readiness_blockers_object(packet: dict[str, Any]) -> list[dict[str, str]]:
     validation = validate_packet(packet)
     blockers = list(validation["errors"])
 
@@ -728,8 +881,8 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     entry = packet.get("entry", {})
     basis = packet.get("basis", {})
     review = packet.get("review", {})
-    if isinstance(review, dict) and review.get("signals") and review.get("depth") != "heightened":
-        blockers.append({"code": "review_depth_too_low", "message": "Risk signals require heightened review depth.", "path": "review.depth"})
+    if isinstance(review, dict) and review.get("signals") and review.get("profile") == "standard":
+        blockers.append({"code": "review_profile_too_low", "message": "Risk signals require a full review profile.", "path": "review.profile"})
     for stop in review.get("hard_stops", []) if isinstance(review, dict) and isinstance(review.get("hard_stops", []), list) else []:
         if isinstance(stop, dict):
             blockers.append({"code": "hard_stop", "message": str(stop.get("reason", stop)), "path": "review.hard_stops"})
@@ -780,22 +933,31 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     if not isinstance(approval, dict) or approval.get("status") != "approved" or approval.get("human_confirmed") is not True:
         blockers.append({"code": "contract_not_approved", "message": "The contribution contract needs explicit human approval before remote readiness.", "path": "contract.approval"})
 
+    ownership = packet.get("ownership", {})
+    if not isinstance(ownership, dict) or ownership.get("status") != "passed":
+        blockers.append({"code": "ownership_not_passed", "message": "The contributor Ownership Check must pass before remote readiness.", "path": "ownership.status"})
+
     verification = packet.get("verification", {})
-    if (
-        not isinstance(verification, dict)
-        or not isinstance(verification.get("commands"), list)
-        or not verification.get("commands")
-        or not isinstance(verification.get("evidence"), list)
-        or not verification.get("evidence")
-    ):
-        blockers.append({"code": "missing_verification_evidence", "message": "Remote readiness requires verification commands and evidence.", "path": "verification"})
+    plan = verification.get("plan", {}) if isinstance(verification, dict) else {}
+    checks = plan.get("checks", []) if isinstance(plan, dict) else []
+    required_checks = {
+        check.get("id"): check
+        for check in checks
+        if isinstance(check, dict) and check.get("required") is True and isinstance(check.get("id"), str)
+    } if isinstance(checks, list) else {}
+    if not required_checks:
+        blockers.append({"code": "missing_verification_plan", "message": "Remote readiness requires at least one required verification check.", "path": "verification.plan.checks"})
     receipts = verification.get("receipts", []) if isinstance(verification, dict) else []
     usable_receipts = [
         receipt for receipt in receipts
         if isinstance(receipt, dict)
-        and receipt.get("provenance") == "cli_executed"
+        and receipt.get("receipt_version") == VERIFICATION_RECEIPT_VERSION
+        and receipt.get("provenance") == "contributor_local"
+        and receipt.get("command_outcome") == "passed"
         and receipt.get("exit_code") == 0
-        and receipt.get("status") == "valid"
+        and receipt.get("integrity_status") == "stable"
+        and receipt.get("plan_digest") == (verification.get("plan_digest") if isinstance(verification, dict) else None)
+        and receipt.get("subject_digest") == (packet.get("diff", {}).get("subject_digest") if isinstance(packet.get("diff"), dict) else None)
         and isinstance(receipt.get("argv"), list)
         and receipt.get("argv")
         and isinstance(receipt.get("cwd"), str)
@@ -807,16 +969,11 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
         and receipt.get("worktree_clean_after") is True
     ] if isinstance(receipts, list) else []
     if not usable_receipts:
-        executed_receipts = [
-            receipt for receipt in receipts
-            if isinstance(receipt, dict)
-            and receipt.get("provenance") == "cli_executed"
-            and receipt.get("exit_code") == 0
-        ] if isinstance(receipts, list) else []
-        if executed_receipts:
-            blockers.append({"code": "verification_worktree_unverified", "message": "Remote readiness needs a valid CLI verification receipt with clean worktree and stable HEAD proof.", "path": "verification.receipts"})
-        else:
-            blockers.append({"code": "missing_executed_verification", "message": "Remote readiness needs a CLI-executed verification receipt with exit_code 0.", "path": "verification.receipts"})
+        blockers.append({"code": "missing_executed_verification", "message": "Remote readiness needs a current contributor-local passing receipt.", "path": "verification.receipts"})
+    passed_check_ids = {receipt.get("check_id") for receipt in usable_receipts}
+    missing_check_ids = sorted(set(required_checks) - passed_check_ids)
+    if missing_check_ids:
+        blockers.append({"code": "required_verification_missing", "message": f"Required verification checks have no current passing receipt: {missing_check_ids}", "path": "verification.receipts"})
 
     diff = packet.get("diff", {})
     if (
@@ -849,15 +1006,31 @@ def readiness_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
                         }
                     )
 
-    understanding = packet.get("understanding", {}) if isinstance(packet.get("understanding", {}), dict) else {}
-    orientation = understanding.get("orientation", {})
-    if not isinstance(orientation, dict) or orientation.get("status") != "passed":
-        blockers.append({"code": "orientation_not_passed", "message": "Understanding Orientation must pass before Assessment and remote readiness.", "path": "understanding.orientation.status"})
-    elif orientation.get("material_snapshot") != material_snapshot(packet):
-        blockers.append({"code": "stale_orientation", "message": "Understanding Orientation is stale.", "path": "understanding.orientation.material_snapshot"})
-    assessment = understanding.get("assessment", {})
-    if assessment.get("status") != "passed":
-        blockers.append({"code": "assessment_not_passed", "message": "Understanding Assessment has not passed.", "path": "understanding.assessment.status"})
-    elif assessment.get("material_snapshot") != material_snapshot(packet):
-        blockers.append({"code": "stale_assessment", "message": "Understanding Assessment is stale.", "path": "understanding.assessment.material_snapshot"})
+    if isinstance(review, dict) and review.get("profile") in {"heightened", "learning"}:
+        understanding = packet.get("understanding", {}) if isinstance(packet.get("understanding", {}), dict) else {}
+        orientation = understanding.get("orientation", {})
+        if not isinstance(orientation, dict) or orientation.get("status") != "passed":
+            blockers.append({"code": "orientation_not_passed", "message": "The selected review profile requires a passed Orientation.", "path": "understanding.orientation.status"})
+        elif orientation.get("semantic_snapshot") != semantic_snapshot(packet):
+            blockers.append({"code": "stale_orientation", "message": "Understanding Orientation is stale.", "path": "understanding.orientation.semantic_snapshot"})
+        assessment = understanding.get("assessment", {}) if isinstance(understanding, dict) else {}
+        if not isinstance(assessment, dict) or assessment.get("status") != "passed":
+            blockers.append({"code": "assessment_not_passed", "message": "The selected review profile requires a passed Assessment.", "path": "understanding.assessment.status"})
+        elif assessment.get("semantic_snapshot") != semantic_snapshot(packet):
+            blockers.append({"code": "stale_assessment", "message": "Understanding Assessment is stale.", "path": "understanding.assessment.semantic_snapshot"})
     return blockers
+
+
+def readiness_blockers(packet: Any) -> list[dict[str, str]]:
+    """Evaluate readiness for any JSON-like value without throwing."""
+
+    validation = validate_packet(packet)
+    if not isinstance(packet, dict):
+        return list(validation["errors"])
+    try:
+        return _readiness_blockers_object(packet)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        return [
+            *validation["errors"],
+            {"code": "invalid_readiness_structure", "message": str(exc), "path": "packet"},
+        ]

@@ -39,6 +39,12 @@ class ActionEvidenceTests(unittest.TestCase):
     def _body(self, diff: dict) -> str:
         packet = valid_packet()
         packet["diff"] = dict(diff)
+        packet["verification"]["receipts"][0].update({
+            "subject_digest": diff["subject_digest"],
+            "head_sha": diff["head_sha"],
+            "head_sha_before": diff["head_sha"],
+            "head_sha_after": diff["head_sha"],
+        })
         return append_evidence_summary("## Change\nA bounded change.", build_evidence_summary(packet, diff))
 
     def test_composite_action_reads_pr_body_and_never_reads_a_packet(self) -> None:
@@ -163,6 +169,14 @@ class ActionEvidenceTests(unittest.TestCase):
             summary["claims"].pop("ownership")
             with self.assertRaises(ValueError):
                 render_evidence_summary(summary)
+
+    def test_old_receipt_is_not_recognized_as_a_public_verification_claim(self) -> None:
+        packet = valid_packet()
+        packet["verification"]["receipts"] = [{"exit_code": 0, "status": "valid", "provenance": "cli_executed"}]
+
+        summary = build_evidence_summary(packet, packet["diff"])
+
+        self.assertEqual(summary["claims"]["verification"], {"claimed_outcome": "not_recorded", "receipt_count": 0})
 
     def test_repository_identity_mismatch_is_a_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

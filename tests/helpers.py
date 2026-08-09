@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from reviewworthy.contract import contract_snapshot
-from reviewworthy.packet import REQUIRED_NODES, material_snapshot
+from reviewworthy.git import verification_plan_digest
+from reviewworthy.packet import REQUIRED_NODES, semantic_snapshot
 
 
 def valid_packet() -> dict:
@@ -55,7 +56,7 @@ def valid_packet() -> dict:
             "conflicts": [],
             "posture": "explicit",
         },
-        "review": {"depth": "standard", "signals": [], "hard_stops": []},
+        "review": {"profile": "standard", "signals": [], "hard_stops": []},
         "ai_assistance": {
             "used": True,
             "stages": [
@@ -76,24 +77,40 @@ def valid_packet() -> dict:
             "deletions": 1,
         },
         "verification": {
-            "commands": ["python -m unittest"],
-            "evidence": ["exit 0"],
+            "plan": {
+                "plan_version": "0.1",
+                "checks": [{"id": "unit", "argv": ["python", "-m", "unittest"], "cwd": ".", "required": True}],
+            },
             "receipts": [{
+                "receipt_version": "0.3",
+                "check_id": "unit",
+                "plan_digest": "",
+                "subject_digest": "subject-digest",
                 "argv": ["python", "-m", "unittest"],
                 "cwd": ".",
                 "exit_code": 0,
+                "command_outcome": "passed",
+                "integrity_status": "stable",
+                "started_at": "2026-08-09T00:00:00Z",
+                "finished_at": "2026-08-09T00:00:01Z",
                 "head_sha": "head-sha",
                 "head_sha_before": "head-sha",
                 "head_sha_after": "head-sha",
                 "worktree_clean_before": True,
                 "worktree_clean_after": True,
-                "status": "valid",
                 "stdout_sha256": "stdout-sha256",
                 "stderr_sha256": "stderr-sha256",
-                "provenance": "cli_executed",
+                "provenance": "contributor_local",
             }],
         },
-        "materials": {},
+        "ownership": {
+            "status": "passed",
+            "problem": "The contributor can explain the reported failure.",
+            "scope": "Only src/example.py changes.",
+            "verification": "The unit check covers the changed boundary.",
+            "risks": ["Existing callers may depend on the old exception path."],
+        },
+        "snapshots": {},
         "results": [
             {"node": node, "status": "passed", "evidence": [f"{node} recorded"]}
             for node in REQUIRED_NODES
@@ -137,7 +154,9 @@ def valid_packet() -> dict:
         },
     }
     packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
-    packet["materials"]["material_snapshot"] = material_snapshot(packet)
-    packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-    packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
+    packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
+    packet["verification"]["receipts"][0]["plan_digest"] = packet["verification"]["plan_digest"]
+    packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+    packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
+    packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
     return packet

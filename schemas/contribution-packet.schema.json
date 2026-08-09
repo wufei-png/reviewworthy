@@ -15,7 +15,8 @@
     "ai_assistance",
     "diff",
     "verification",
-    "materials",
+    "ownership",
+    "snapshots",
     "results",
     "understanding",
     "narrative"
@@ -35,7 +36,7 @@
         "default_branch": { "type": "string", "minLength": 1 },
         "base_sha": { "type": "string" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "entry": {
       "type": "object",
@@ -74,9 +75,13 @@
     "policy": { "type": "object" },
     "review": {
       "type": "object",
-      "required": ["depth"],
-      "properties": { "depth": { "enum": ["standard", "heightened"] } },
-      "additionalProperties": true
+      "required": ["profile"],
+      "properties": {
+        "profile": { "enum": ["standard", "heightened", "learning"] },
+        "signals": { "type": "array" },
+        "hard_stops": { "type": "array" }
+      },
+      "additionalProperties": false
     },
     "diff": {
       "type": "object",
@@ -96,15 +101,41 @@
     },
     "verification": {
       "type": "object",
+      "required": ["plan", "plan_digest", "receipts"],
       "properties": {
-        "commands": { "type": "array", "items": { "type": "string" } },
-        "evidence": { "type": "array", "items": { "type": "string" } },
+        "plan": {
+          "type": "object",
+          "required": ["plan_version", "checks"],
+          "properties": {
+            "plan_version": { "const": "0.1" },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "argv", "cwd", "required"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                  "cwd": { "type": "string", "minLength": 1 },
+                  "required": { "type": "boolean" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "plan_digest": { "type": "string", "minLength": 1 },
         "receipts": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["argv", "cwd", "exit_code", "head_sha", "provenance"],
+            "required": ["receipt_version", "check_id", "plan_digest", "subject_digest", "argv", "cwd", "exit_code", "command_outcome", "integrity_status", "head_sha", "head_sha_before", "head_sha_after", "worktree_clean_before", "worktree_clean_after", "provenance"],
             "properties": {
+              "receipt_version": { "const": "0.3" },
+              "check_id": { "type": "string", "minLength": 1 },
+              "plan_digest": { "type": "string", "minLength": 1 },
+              "subject_digest": { "type": "string", "minLength": 1 },
               "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
               "cwd": { "type": "string", "minLength": 1 },
               "exit_code": { "type": "integer" },
@@ -113,19 +144,39 @@
               "head_sha_after": { "type": "string", "minLength": 1 },
               "worktree_clean_before": { "type": "boolean" },
               "worktree_clean_after": { "type": "boolean" },
-              "status": { "enum": ["valid", "invalid"] },
+              "command_outcome": { "enum": ["passed", "failed"] },
+              "integrity_status": { "enum": ["stable", "invalid"] },
+              "started_at": { "type": "string", "minLength": 1 },
+              "finished_at": { "type": "string", "minLength": 1 },
               "failure_reason": { "type": "string", "minLength": 1 },
               "stdout_sha256": { "type": "string", "minLength": 1 },
               "stderr_sha256": { "type": "string", "minLength": 1 },
-              "provenance": { "enum": ["cli_executed", "self_reported"] }
+              "provenance": { "const": "contributor_local" }
             },
-            "additionalProperties": true
+            "additionalProperties": false
           }
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
-    "materials": { "type": "object" },
+    "ownership": {
+      "type": "object",
+      "required": ["status", "problem", "scope", "verification", "risks"],
+      "properties": {
+        "status": { "enum": ["passed", "failed", "blocked", "unknown", "not_run"] },
+        "problem": { "type": "string" },
+        "scope": { "type": "string" },
+        "verification": { "type": "string" },
+        "risks": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "snapshots": {
+      "type": "object",
+      "required": ["semantic"],
+      "properties": { "semantic": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
     "results": { "type": "array", "minItems": 7 },
     "understanding": { "$ref": "understanding.schema.json" },
     "candidate_selection": {
@@ -188,5 +239,5 @@
       "then": { "properties": { "basis": { "required": ["signal"] } } }
     }
   ],
-  "additionalProperties": true
+  "additionalProperties": false
 }

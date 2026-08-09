@@ -6,6 +6,8 @@
 - Keep the full Packet in ignored local state and publish a minimal versioned PR Body Evidence Summary.
 - Replace patch-text identity with a canonical Git content `subject_digest`; the Action recomputes runner-owned facts and labels local verification and ownership as contributor claims.
 - Replace Action `enforce` with the narrower `evidence-enforce` mode, which never reads a Packet from the checkout.
+- Add Standard, Heightened, and Learning review profiles: Standard requires a light Ownership Check, while Heightened and Learning require full Orientation and Assessment.
+- Bind contributor-local verification receipts to a versioned plan digest and canonical subject digest, and separate semantic freshness from timestamp and output-hash audit data.
 
 ## 0.2.0a1 - Unreleased
 
