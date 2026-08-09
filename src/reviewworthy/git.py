@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from .util import relative_path, utc_now
+from .util import canonical_json, relative_path, utc_now
 
 
 PR_DIFF_FIELDS = (
@@ -15,11 +15,14 @@ PR_DIFF_FIELDS = (
     "base_tip_sha",
     "merge_base_sha",
     "head_sha",
-    "patch_sha256",
+    "subject_digest",
+    "fingerprint_algorithm",
     "changed_files",
     "additions",
     "deletions",
 )
+
+FINGERPRINT_ALGORITHM = "git-raw-content-v1"
 
 
 class GitError(RuntimeError):
@@ -43,6 +46,18 @@ def resolve_ref(root: Path, ref: str) -> str:
 
 def current_head(root: Path) -> str:
     return resolve_ref(root, "HEAD")
+
+
+def local_state_path(root: Path, relative: str) -> Path:
+    """Resolve private Reviewworthy state inside Git metadata, never the worktree."""
+
+    root = root.resolve()
+    completed = _run_git(root, ["rev-parse", "--git-path", relative])
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "not a Git worktree").strip()
+        raise GitError(f"Could not resolve Git-private state: {detail}")
+    value = Path(str(completed.stdout).strip())
+    return value if value.is_absolute() else (root / value).resolve()
 
 
 def _worktree_status(root: Path) -> list[str]:
@@ -80,7 +95,40 @@ def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str
         raise GitError((numstat.stderr or numstat.stdout or "git diff --numstat failed").strip())
     additions, deletions = _parse_numstat(str(numstat.stdout))
     patch_bytes = bytes(patch.stdout)
+    raw = _run_git(
+        root,
+        ["diff", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-renames", start_sha, head_sha],
+        text=False,
+    )
+    if raw.returncode != 0:
+        detail = (raw.stderr or raw.stdout or b"git diff --raw failed").decode("utf-8", errors="replace").strip()
+        raise GitError(detail)
+    parts = bytes(raw.stdout).split(b"\0")
+    entries: list[dict[str, str]] = []
+    index = 0
+    while index < len(parts) and parts[index]:
+        metadata = parts[index]
+        if index + 1 >= len(parts) or not parts[index + 1]:
+            raise GitError("git diff --raw returned an incomplete path record")
+        fields = metadata.split()
+        if len(fields) != 5 or not fields[0].startswith(b":"):
+            raise GitError("git diff --raw returned an unsupported record")
+        entries.append(
+            {
+                "old_mode": fields[0][1:].decode("ascii"),
+                "new_mode": fields[1].decode("ascii"),
+                "old_blob": fields[2].decode("ascii"),
+                "new_blob": fields[3].decode("ascii"),
+                "status": fields[4].decode("ascii"),
+                "path_hex": parts[index + 1].hex(),
+            }
+        )
+        index += 2
+    entries.sort(key=lambda item: (item["path_hex"], item["status"]))
+    subject_digest = sha256(canonical_json(entries).encode("utf-8")).hexdigest()
     return {
+        "subject_digest": subject_digest,
+        "fingerprint_algorithm": FINGERPRINT_ALGORITHM,
         "patch_sha256": sha256(patch_bytes).hexdigest(),
         "changed_files": sorted(line for line in str(names.stdout).splitlines() if line),
         "additions": additions,

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0a1 - Unreleased
+
+- Break all artifact and operation compatibility with earlier Reviewworthy formats.
+- Keep the full Packet in ignored local state and publish a minimal versioned PR Body Evidence Summary.
+- Replace patch-text identity with a canonical Git content `subject_digest`; the Action recomputes runner-owned facts and labels local verification and ownership as contributor claims.
+- Replace Action `enforce` with the narrower `evidence-enforce` mode, which never reads a Packet from the checkout.
+
 ## 0.2.0a1 - Unreleased
 
 - Introduce the breaking Packet `0.2` contract and bind remote Pull Request planning and Action enforcement to a recomputed merge-base Diff, current base tip, and current-head verification receipt; Packet `0.1` is rejected instead of reinterpreted.

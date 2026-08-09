@@ -93,21 +93,33 @@ class PacketValidationTests(unittest.TestCase):
         self.assertIn("policy_ambiguity", codes)
         self.assertNotIn("policy_conflict", codes)
 
-    def test_packet_01_is_rejected_without_implicit_migration(self) -> None:
+    def test_non_current_packet_is_rejected_as_invalid_without_compatibility(self) -> None:
         packet = valid_packet()
         packet["packet_version"] = "0.1"
 
         errors = validate_packet(packet)["errors"]
 
-        self.assertIn("unsupported_packet_version", {error["code"] for error in errors})
+        self.assertIn("invalid_packet_version", {error["code"] for error in errors})
 
-    def test_packet_02_requires_complete_merge_base_diff_identity(self) -> None:
+    def test_packet_03_requires_complete_merge_base_diff_identity(self) -> None:
         packet = valid_packet()
         packet["diff"].pop("merge_base_sha")
 
         errors = validate_packet(packet)["errors"]
 
         self.assertIn("missing_diff_field", {error["code"] for error in errors})
+
+    def test_packet_03_rejects_unknown_fingerprint_algorithm(self) -> None:
+        packet = valid_packet()
+        packet["diff"]["fingerprint_algorithm"] = "legacy-patch-v1"
+
+        self.assertIn("invalid_fingerprint_algorithm", {error["code"] for error in validate_packet(packet)["errors"]})
+
+    def test_contribution_id_must_be_safe_for_private_git_state_path(self) -> None:
+        packet = valid_packet()
+        packet["contribution_id"] = "../../escaped"
+
+        self.assertIn("invalid_contribution_id", {error["code"] for error in validate_packet(packet)["errors"]})
 
     def test_valid_packet_contains_every_result_and_current_assessment(self) -> None:
         result = validate_packet(valid_packet())

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -23,7 +22,6 @@ from reviewworthy.github import (
 )
 
 from helpers import valid_packet
-from reviewworthy.util import canonical_json
 
 
 class GitHubOperationTests(unittest.TestCase):
@@ -44,31 +42,13 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual(lower.marker, mixed.marker)
         self.assertEqual(mixed.repo, "owner/repo")
 
-    def test_packet_02_preserves_legacy_contribution_issue_identity(self) -> None:
+    def test_packet_03_issue_operation_uses_only_current_identity(self) -> None:
         packet = valid_packet()
         operation = build_operation(packet, "example/project", "issue", "Fix input", "Body")
-        legacy_payload = {
-            "purpose": "contribution",
-            "subject_id": packet["contribution_id"],
-            "contribution_id": packet["contribution_id"],
-            "repo": "example/project",
-            "kind": "issue",
-            "title": "Fix input",
-            "body": "Body",
-            "base": None,
-            "head": None,
-            "base_sha": None,
-            "head_sha": None,
-            "draft": False,
-            "issue_url": operation.issue_url,
-            "link_note_template": None,
-            "repository_id": packet["repository"]["repository_id"],
-        }
-        expected = f"rw-{hashlib.sha256(canonical_json(legacy_payload).encode('utf-8')).hexdigest()[:20]}"
-
-        self.assertEqual(operation.operation_id, expected)
-        self.assertIn("base_sha", operation.as_dict())
+        self.assertIn("reviewworthy:v0.3:operation-id", operation.marker)
+        self.assertNotIn("base_sha", operation.as_dict())
         self.assertNotIn("merge_base_sha", operation.as_dict())
+        self.assertIn("subject_digest", operation.as_dict())
 
     def test_pull_request_diff_identity_changes_confirmation_id(self) -> None:
         packet = valid_packet()
@@ -78,7 +58,7 @@ class GitHubOperationTests(unittest.TestCase):
             ("base_tip_sha", "other-base"),
             ("merge_base_sha", "other-merge-base"),
             ("head_sha", "other-head"),
-            ("patch_sha256", "other-patch"),
+            ("subject_digest", "other-subject"),
         ):
             changed = dict(packet["diff"])
             changed[field] = value
@@ -107,11 +87,11 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual(first.permissions, ("issues:write",))
         self.assertEqual(first.purpose, "signal_publication")
 
-    def test_legacy_signal_receipt_shape_remains_loadable(self) -> None:
+    def test_current_signal_receipt_shape_round_trips(self) -> None:
         operation = build_signal_operation({"kind": "maintainer-request", "reference": ""}, "example/project", "Request", "Body")
-        legacy_operation = operation.as_dict()
-        self.assertIn("base_sha", legacy_operation)
-        self.assertNotIn("merge_base_sha", legacy_operation)
+        current_operation = operation.as_dict()
+        self.assertNotIn("base_sha", current_operation)
+        self.assertIn("subject_digest", current_operation)
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "receipt.json"
@@ -120,7 +100,7 @@ class GitHubOperationTests(unittest.TestCase):
                 "marker": operation.marker,
                 "repo": operation.repo,
                 "kind": operation.kind,
-                "operation": legacy_operation,
+                "operation": current_operation,
                 "status": "succeeded",
                 "remote": "https://github.com/example/project/issues/7",
                 "recorded_at": "2026-08-06T00:00:00Z",

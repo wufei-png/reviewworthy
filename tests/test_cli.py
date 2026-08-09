@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.cli import _issue_revalidation_errors, main
+from reviewworthy.evidence import append_evidence_summary, build_evidence_summary
 from reviewworthy.git import capture_pr_diff
 from reviewworthy.github import GhError
 from reviewworthy.packet import material_snapshot, readiness_blockers, skeleton_packet, validate_packet
@@ -294,6 +295,15 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(validate_code, 0)
             self.assertEqual(bound["candidate_selection"]["candidate_id"], "candidate-001")
 
+    def test_packet_init_rejects_path_traversal_contribution_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with redirect_stdout(io.StringIO()):
+                code = main(["packet", "init", "--contribution-id", "../../escaped", "--root", str(root), "--mode", "issue-backed", "--json"])
+
+            self.assertEqual(code, 2)
+            self.assertFalse((root / "escaped" / "packet.json").exists())
+
     def test_candidate_transition_command_records_human_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             packet_path = Path(directory) / "packet.json"
@@ -359,77 +369,20 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertNotEqual(updated["understanding"]["orientation"]["material_snapshot"], material_snapshot(updated))
             self.assertNotEqual(updated["understanding"]["assessment"]["material_snapshot"], material_snapshot(updated))
 
-    def test_action_can_mark_changed_file_evidence_unavailable(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            packet_path = Path(directory) / "packet.json"
-            packet_path.write_text(json.dumps(valid_packet()), encoding="utf-8")
-            output = io.StringIO()
-
-            with redirect_stdout(output):
-                code = main(["action", "check", str(packet_path), "--changed-files-unavailable", "--json"])
-
-            result = json.loads(output.getvalue())
-            self.assertEqual(code, 0)
-            self.assertTrue(any("Changed-file evidence was not provided" in unknown for unknown in result["unknowns"]))
-
-    def test_action_cli_exposes_explicit_enforce_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            packet_path = Path(directory) / "packet.json"
-            packet_path.write_text(json.dumps(valid_packet()), encoding="utf-8")
-            output = io.StringIO()
-
-            with redirect_stdout(output):
-                code = main([
-                    "action", "check", str(packet_path), "--mode", "enforce",
-                    "--changed-file", "src/example.py", "--changed-files-provided", "--json",
-                ])
-
-            result = json.loads(output.getvalue())
-            self.assertEqual(code, 1)
-            self.assertEqual(result["mode"], "enforce")
-            self.assertEqual(result["requirements"], {
-                "require_packet": True,
-                "fail_on_unknown": True,
-                "require_current_diff": True,
-            })
-            self.assertIn("unknown_policy", {violation["code"] for violation in result["violations"]})
-
-    def test_action_cli_recomputes_pr_diff_and_ignores_manual_files_in_enforce(self) -> None:
+    def test_action_cli_recomputes_pr_diff_from_public_summary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
             packet = valid_packet()
-            packet["repository"]["base_sha"] = actual_diff["base_tip_sha"]
             packet["diff"] = dict(actual_diff)
-            packet["verification"]["receipts"][0].update({
-                "head_sha": actual_diff["head_sha"],
-                "head_sha_before": actual_diff["head_sha"],
-                "head_sha_after": actual_diff["head_sha"],
-                "cwd": ".",
-            })
-            packet["policy"]["authoritative_claims"] = {
-                "ai_assistance": "allowed",
-                "issue_required": False,
-                "disclosure_required": False,
-                "disclosure_locations": [],
-                "disclosure_stages": [],
-                "human_pr_narrative_required": False,
-                "security_private_reporting": False,
-                "draft_pr_required": False,
-                "discovery_evidence_allowed": True,
-                "good_first_issue_ai_allowed": True,
-            }
-            packet["materials"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["orientation"]["material_snapshot"] = material_snapshot(packet)
-            packet["understanding"]["assessment"]["material_snapshot"] = material_snapshot(packet)
-            packet_path = root / "packet.json"
-            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body = append_evidence_summary("Body", build_evidence_summary(packet, actual_diff))
             event_path = root / "event.json"
             event_path.write_text(json.dumps({
                 "repository": {"full_name": "example/project", "id": 101},
                 "pull_request": {
                     "base": {"sha": actual_diff["base_tip_sha"]},
                     "head": {"sha": actual_diff["head_sha"]},
+                    "body": body,
                 }
             }), encoding="utf-8")
             output = io.StringIO()
@@ -439,14 +392,30 @@ class CliBoundaryTests(unittest.TestCase):
                 "GITHUB_EVENT_PATH": str(event_path),
             }, clear=False), redirect_stdout(output):
                 code = main([
-                    "action", "check", str(packet_path), "--root", str(repository_root),
-                    "--mode", "enforce", "--changed-file", "src/forged.py",
-                    "--changed-files-provided", "--json",
+                    "action", "check", "--root", str(repository_root),
+                    "--mode", "evidence-enforce", "--json",
                 ])
 
             result = json.loads(output.getvalue())
             self.assertEqual(code, 0)
             self.assertEqual(result["violations"], [])
+
+    def test_packet_init_defaults_to_ignored_local_contribution_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = main([
+                    "packet", "init", "--root", str(root),
+                    "--contribution-id", "local-001", "--json",
+                ])
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 0)
+            created = Path(result["created"])
+            self.assertTrue(created.is_file())
+            self.assertIn(".git/reviewworthy/v0.3/contributions/local-001/packet.json", str(created))
+            self.assertEqual(self._git(root, "status", "--porcelain=v1", "--untracked-files=all"), "")
 
     def test_verify_cli_persists_invalid_receipt_and_returns_failure_when_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -578,7 +547,8 @@ class CliBoundaryTests(unittest.TestCase):
             "base_tip_sha": "0" * 40,
             "merge_base_sha": "2" * 40,
             "head_sha": "1" * 40,
-            "patch_sha256": "0" * 64,
+            "subject_digest": "0" * 64,
+            "fingerprint_algorithm": "other-algorithm",
             "changed_files": ["src/other.py"],
             "additions": 1,
             "deletions": 1,
@@ -627,7 +597,8 @@ class CliBoundaryTests(unittest.TestCase):
             "base_tip_sha": "0" * 40,
             "merge_base_sha": "2" * 40,
             "head_sha": "1" * 40,
-            "patch_sha256": "0" * 64,
+            "subject_digest": "0" * 64,
+            "fingerprint_algorithm": "other-algorithm",
             "changed_files": ["src/other.py"],
             "additions": 1,
             "deletions": 1,

@@ -1,29 +1,10 @@
-name: Reviewworthy deterministic contribution checks
-description: Run Reviewworthy's read-only Action checks against a Contribution Packet
+name: Reviewworthy public evidence checks
+description: Recompute pull-request facts and compare them with the PR Body Evidence Summary
 inputs:
-  packet:
-    description: Repository-relative Contribution Packet path
-    required: false
-    default: .reviewworthy/contribution.json
-  changed-files:
-    description: Newline-separated changed files for report mode; enforce mode ignores this input and derives a complete Diff from the pull_request SHAs
-    required: false
   mode:
-    description: report (default, non-blocking unknowns) or enforce (require a real pull_request, complete Diff, and current-head verification receipt)
+    description: report (default) or evidence-enforce (require one current PR Body Evidence Summary)
     required: false
     default: report
-  require-packet:
-    description: Fail when the Contribution Packet is missing
-    required: false
-    default: 'false'
-  fail-on-unknown:
-    description: Turn unknown policy or evidence into a failure
-    required: false
-    default: 'false'
-  require-current-diff:
-    description: Require current changed-file evidence in report mode; enforce mode always requires the complete pull-request Diff
-    required: false
-    default: 'false'
 runs:
   using: composite
   steps:
@@ -31,49 +12,15 @@ runs:
       shell: bash
       env:
         PYTHONPATH: ${{ github.action_path }}/src
-        REVIEWWORTHY_PACKET: ${{ inputs.packet }}
-        REVIEWWORTHY_CHANGED_FILES: ${{ inputs.changed-files }}
         REVIEWWORTHY_MODE: ${{ inputs.mode }}
-        REVIEWWORTHY_REQUIRE_PACKET: ${{ inputs.require-packet }}
-        REVIEWWORTHY_FAIL_ON_UNKNOWN: ${{ inputs.fail-on-unknown }}
-        REVIEWWORTHY_REQUIRE_CURRENT_DIFF: ${{ inputs.require-current-diff }}
       run: |
         set -euo pipefail
-        changed_files="${REVIEWWORTHY_CHANGED_FILES:-}"
-        changed_files_available=false
-        if [[ -n "$changed_files" ]]; then
-          changed_files_available=true
-        fi
-        if [[ "${REVIEWWORTHY_MODE:-report}" == enforce ]]; then
-          changed_files=""
-          changed_files_available=false
-        fi
-        args=()
-        while IFS= read -r path; do
-          [[ -n "$path" ]] && args+=(--changed-file "$path")
-        done <<< "$changed_files"
-        if [[ "$changed_files_available" == true ]]; then
-          args+=(--changed-files-provided)
-        else
-          args+=(--changed-files-unavailable)
-        fi
         case "${REVIEWWORTHY_MODE:-report}" in
-          report|enforce)
-            args+=(--mode "${REVIEWWORTHY_MODE:-report}")
+          report|evidence-enforce)
             ;;
           *)
-            echo "Reviewworthy: mode must be report or enforce." >&2
+            echo "Reviewworthy: mode must be report or evidence-enforce." >&2
             exit 2
             ;;
         esac
-        args+=(--root . --json)
-        if [[ "${REVIEWWORTHY_REQUIRE_PACKET:-false}" == true ]]; then
-          args+=(--require-packet)
-        fi
-        if [[ "${REVIEWWORTHY_FAIL_ON_UNKNOWN:-false}" == true ]]; then
-          args+=(--fail-on-unknown)
-        fi
-        if [[ "${REVIEWWORTHY_REQUIRE_CURRENT_DIFF:-false}" == true ]]; then
-          args+=(--require-current-diff)
-        fi
-        python -m reviewworthy action check "$REVIEWWORTHY_PACKET" "${args[@]}"
+        python -m reviewworthy action check --mode "${REVIEWWORTHY_MODE:-report}" --root . --json

@@ -21,8 +21,8 @@
     "narrative"
   ],
   "properties": {
-    "packet_version": { "const": "0.2" },
-    "contribution_id": { "type": "string", "minLength": 1 },
+    "packet_version": { "const": "0.3" },
+    "contribution_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
     "repository": {
       "type": "object",
       "required": ["provider", "host", "owner", "name", "default_branch"],
@@ -80,13 +80,14 @@
     },
     "diff": {
       "type": "object",
-      "required": ["comparison", "base_tip_sha", "merge_base_sha", "head_sha", "patch_sha256", "changed_files", "additions", "deletions"],
+      "required": ["comparison", "base_tip_sha", "merge_base_sha", "head_sha", "subject_digest", "fingerprint_algorithm", "changed_files", "additions", "deletions"],
       "properties": {
         "comparison": { "const": "merge_base" },
         "base_tip_sha": { "type": "string", "minLength": 1 },
         "merge_base_sha": { "type": "string", "minLength": 1 },
         "head_sha": { "type": "string", "minLength": 1 },
-        "patch_sha256": { "type": "string", "minLength": 1 },
+        "subject_digest": { "type": "string", "minLength": 1 },
+        "fingerprint_algorithm": { "const": "git-raw-content-v1" },
         "changed_files": { "type": "array", "items": { "type": "string" } },
         "additions": { "type": "integer", "minimum": 0 },
         "deletions": { "type": "integer", "minimum": 0 }

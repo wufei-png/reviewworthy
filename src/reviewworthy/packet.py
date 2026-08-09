@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
+import re
 from typing import Any
 
 from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS, RECOMMENDATIONS
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
-from .git import PR_DIFF_FIELDS
+from .git import FINGERPRINT_ALGORITHM, PR_DIFF_FIELDS
 from .repository import parse_public_record, parse_repository_slug, repository_slugs_match, validate_repository_identity
 from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .understanding import validate_understanding
@@ -25,8 +26,15 @@ REQUIRED_NODES = (
     "narrative",
 )
 ALLOWED_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run"}
-PACKET_VERSION = "0.2"
-PR_DIFF_STRING_FIELDS = ("base_tip_sha", "merge_base_sha", "head_sha", "patch_sha256")
+PACKET_VERSION = "0.3"
+CONTRIBUTION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PR_DIFF_STRING_FIELDS = (
+    "base_tip_sha",
+    "merge_base_sha",
+    "head_sha",
+    "subject_digest",
+    "fingerprint_algorithm",
+)
 
 
 def _is_repository_relative_path(value: str) -> bool:
@@ -42,6 +50,14 @@ def _is_repository_relative_path(value: str) -> bool:
         or ".." in posix_path.parts
         or ".." in windows_path.parts
     )
+
+
+def require_contribution_id(value: Any) -> str:
+    """Return a path-safe contribution identifier or reject it."""
+
+    if not isinstance(value, str) or CONTRIBUTION_ID_PATTERN.fullmatch(value) is None:
+        raise ValueError("contribution_id must be 1-128 ASCII letters, digits, dots, underscores, or hyphens and start with a letter or digit")
+    return value
 
 
 def material_snapshot(packet: dict[str, Any]) -> str:
@@ -83,6 +99,7 @@ def result_record(
 def skeleton_packet(contribution_id: str, mode: str, repository: str | None = None) -> dict[str, Any]:
     """Create an explicit, incomplete packet for a new contribution."""
 
+    require_contribution_id(contribution_id)
     if mode not in {"issue-backed", "discovery"}:
         raise ValueError("mode must be issue-backed or discovery")
     repository_value: dict[str, Any] = {
@@ -130,7 +147,8 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
             "base_tip_sha": "",
             "merge_base_sha": "",
             "head_sha": "",
-            "patch_sha256": "",
+            "subject_digest": "",
+            "fingerprint_algorithm": "git-raw-content-v1",
             "changed_files": [],
             "additions": 0,
             "deletions": 0,
@@ -186,9 +204,11 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
             _error(errors, "missing_field", f"Required field is missing: {key}", key)
 
     if packet.get("packet_version") != PACKET_VERSION:
-        _error(errors, "unsupported_packet_version", f"packet_version must be {PACKET_VERSION}", "packet_version")
-    if not isinstance(packet.get("contribution_id"), str) or not packet.get("contribution_id"):
-        _error(errors, "invalid_contribution_id", "contribution_id must be a non-empty string", "contribution_id")
+        _error(errors, "invalid_packet_version", f"packet_version must be {PACKET_VERSION}", "packet_version")
+    try:
+        require_contribution_id(packet.get("contribution_id"))
+    except ValueError as exc:
+        _error(errors, "invalid_contribution_id", str(exc), "contribution_id")
 
     errors.extend(validate_repository_identity(packet.get("repository")))
 
@@ -318,6 +338,13 @@ def validate_packet(packet: dict[str, Any]) -> dict[str, Any]:
         for sha_key in PR_DIFF_STRING_FIELDS:
             if sha_key in diff and (not isinstance(diff[sha_key], str) or not diff[sha_key].strip()):
                 _error(errors, "invalid_diff_receipt", f"diff.{sha_key} must be a non-empty string when present", f"diff.{sha_key}")
+        if diff.get("fingerprint_algorithm") != FINGERPRINT_ALGORITHM:
+            _error(
+                errors,
+                "invalid_fingerprint_algorithm",
+                f"diff.fingerprint_algorithm must be {FINGERPRINT_ALGORITHM}",
+                "diff.fingerprint_algorithm",
+            )
 
     verification = packet.get("verification", {})
     if not isinstance(verification, dict):

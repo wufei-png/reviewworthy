@@ -1,10 +1,11 @@
 {
   "id": "scope-expansion",
-  "kind": "action",
-  "changed_files": ["src/example.py", "src/unapproved.py"],
+  "kind": "packet",
+  "mutations": [
+    {"path": "diff.changed_files", "value": ["src/example.py", "src/unapproved.py"]}
+  ],
   "assert": {
-    "conclusion": "failure",
-    "result": "failed",
-    "violation_codes": ["out_of_scope_files"]
+    "result": "blocked",
+    "blocker_codes": ["out_of_scope_files"]
   }
 }

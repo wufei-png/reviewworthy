@@ -6,7 +6,7 @@ from reviewworthy.packet import REQUIRED_NODES, material_snapshot
 
 def valid_packet() -> dict:
     packet = {
-        "packet_version": "0.2",
+        "packet_version": "0.3",
         "contribution_id": "contrib-test-001",
         "repository": {
             "provider": "github",
@@ -69,7 +69,8 @@ def valid_packet() -> dict:
             "base_tip_sha": "base-sha",
             "merge_base_sha": "merge-base-sha",
             "head_sha": "head-sha",
-            "patch_sha256": "patch-sha256",
+            "subject_digest": "subject-digest",
+            "fingerprint_algorithm": "git-raw-content-v1",
             "changed_files": ["src/example.py"],
             "additions": 3,
             "deletions": 1,

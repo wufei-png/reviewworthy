@@ -7,7 +7,6 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from .action import check_packet
 from .candidate import validate_candidate_menu
 from .contract import contract_snapshot
 from .packet import REQUIRED_NODES, material_snapshot, readiness_blockers, skeleton_packet
@@ -109,7 +108,8 @@ def _base_packet() -> dict[str, Any]:
         "base_tip_sha": "base-sha",
         "merge_base_sha": "merge-base-sha",
         "head_sha": "head-sha",
-        "patch_sha256": "patch-sha256",
+        "subject_digest": "subject-digest",
+        "fingerprint_algorithm": "git-raw-content-v1",
         "changed_files": ["src/example.py"],
         "additions": 3,
         "deletions": 1,
@@ -225,23 +225,6 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
             checks = [
                 ("result", actual["result"], expected["result"]),
                 ("blocker_codes", actual["blocker_codes"], sorted(expected["blocker_codes"])),
-            ]
-        elif kind == "action":
-            packet = _base_packet()
-            for mutation in fixture.get("mutations", []):
-                _set_path(packet, mutation["path"], mutation["value"])
-            with tempfile.TemporaryDirectory() as directory:
-                packet_path = Path(directory) / "packet.json"
-                packet_path.write_text(json.dumps(packet), encoding="utf-8")
-                actual = check_packet(packet_path, fixture.get("changed_files"))
-            if not isinstance(expected.get("violation_codes"), list) or not isinstance(expected.get("result"), str):
-                raise ValueError("action evals must assert exact violation_codes and result")
-            actual_codes = sorted({item["code"] for item in actual["violations"]})
-            actual_result = "failed" if actual["conclusion"] == "failure" else "passed"
-            checks = [
-                ("conclusion", actual["conclusion"], expected.get("conclusion")),
-                ("result", actual_result, expected["result"]),
-                ("violation_codes", actual_codes, sorted(expected["violation_codes"])),
             ]
         elif kind == "risk":
             actual = assess_manifest(fixture["manifest"])

@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator, RefResolver
 
 from reviewworthy.brief import build_project_brief
 from reviewworthy.candidate import skeleton_menu
+from reviewworthy.evidence import build_evidence_summary
 from reviewworthy.signal import skeleton_signal
 
 from helpers import valid_packet
@@ -61,6 +62,7 @@ class SchemaTests(unittest.TestCase):
         self._assert_valid("candidate-menu.schema.json", skeleton_menu("example/project"))
         self._assert_valid("contribution-contract.schema.json", packet["contract"])
         self._assert_valid("contribution-packet.schema.json", packet)
+        self._assert_valid("evidence-summary.schema.json", build_evidence_summary(packet, packet["diff"]))
         self._assert_valid("contribution-signal.schema.json", signal)
         self._assert_valid("project-brief.schema.json", brief)
         self._assert_valid("understanding.schema.json", packet["understanding"])

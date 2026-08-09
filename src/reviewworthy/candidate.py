@@ -168,8 +168,8 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
     candidate = _candidate_by_id(menu, selected_id)
     if candidate.get("recommendation") == "do_not_contribute":
         raise ValueError("A do_not_contribute candidate cannot be bound to an implementation packet")
-    if not isinstance(packet, dict) or packet.get("packet_version") != "0.2":
-        raise ValueError("A contribution packet with packet_version 0.2 is required")
+    if not isinstance(packet, dict) or packet.get("packet_version") != "0.3":
+        raise ValueError("A contribution packet with packet_version 0.3 is required")
     basis = candidate.get("basis")
     if not isinstance(basis, dict):
         raise ValueError("Selected candidate has no valid contribution basis")

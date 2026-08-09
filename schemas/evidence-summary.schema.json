@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/evidence-summary.schema.json",
+  "title": "Reviewworthy Pull Request Evidence Summary",
+  "type": "object",
+  "required": ["summary_version", "contribution_id", "repository", "diff", "claims"],
+  "properties": {
+    "summary_version": { "const": "0.1" },
+    "contribution_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "repository": {
+      "type": "object",
+      "required": ["slug", "repository_id"],
+      "properties": {
+        "slug": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+        "repository_id": { "type": "integer", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "diff": {
+      "type": "object",
+      "required": ["comparison", "base_tip_sha", "merge_base_sha", "head_sha", "subject_digest", "fingerprint_algorithm", "changed_files", "additions", "deletions"],
+      "properties": {
+        "comparison": { "const": "merge_base" },
+        "base_tip_sha": { "type": "string", "minLength": 1 },
+        "merge_base_sha": { "type": "string", "minLength": 1 },
+        "head_sha": { "type": "string", "minLength": 1 },
+        "subject_digest": { "type": "string", "minLength": 1 },
+        "fingerprint_algorithm": { "const": "git-raw-content-v1" },
+        "changed_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "additions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "claims": {
+      "type": "object",
+      "required": ["verification", "ownership", "ai_disclosure"],
+      "properties": {
+        "verification": { "type": "object" },
+        "ownership": { "type": "object" },
+        "ai_disclosure": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -73,6 +73,29 @@ class GitEvidenceTests(unittest.TestCase):
             self.assertEqual(diff["additions"], 1)
             self.assertEqual(diff["deletions"], 0)
             self.assertEqual(len(diff["patch_sha256"]), 64)
+            self.assertEqual(len(diff["subject_digest"]), 64)
+            self.assertEqual(diff["fingerprint_algorithm"], "git-raw-content-v1")
+
+    def test_subject_digest_is_stable_when_only_commit_identity_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            self._git(root, "branch", "-M", "main")
+            (root / "example.txt").write_text("base\n", encoding="utf-8")
+            self._git(root, "add", "example.txt")
+            self._git(root, "commit", "-qm", "base")
+            self._git(root, "checkout", "-qb", "feature")
+            (root / "example.txt").write_text("base\nchange\n", encoding="utf-8")
+            self._git(root, "commit", "-qam", "first identity")
+            before = capture_pr_diff(root, "main", "feature")
+
+            self._git(root, "commit", "--amend", "-qm", "second identity")
+            after = capture_pr_diff(root, "main", "feature")
+
+            self.assertNotEqual(before["head_sha"], after["head_sha"])
+            self.assertEqual(before["subject_digest"], after["subject_digest"])
 
     def test_verification_refuses_when_worktree_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -12,6 +12,7 @@ from subprocess import CompletedProcess, run
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from .evidence import append_evidence_summary, build_evidence_summary
 from .git import PR_DIFF_FIELDS
 from .repository import canonical_repository_slug, parse_public_record, repository_slugs_match
 from .util import canonical_json, has_normalized_label, normalize_label, utc_now
@@ -36,7 +37,8 @@ class RemoteOperation:
     base_tip_sha: str | None = None
     merge_base_sha: str | None = None
     head_sha: str | None = None
-    patch_sha256: str | None = None
+    subject_digest: str | None = None
+    fingerprint_algorithm: str | None = None
     draft: bool = False
     purpose: str = "contribution"
     subject_id: str = ""
@@ -68,12 +70,11 @@ class RemoteOperation:
                 "base_tip_sha": self.base_tip_sha,
                 "merge_base_sha": self.merge_base_sha,
                 "head_sha": self.head_sha,
-                "patch_sha256": self.patch_sha256,
+                "subject_digest": self.subject_digest,
+                "fingerprint_algorithm": self.fingerprint_algorithm,
             })
         else:
-            # Packet 0.2 changes only pull-request Diff identity. Retain the
-            # pre-0.2 Issue receipt shape so existing idempotency state loads.
-            payload.update({"base_sha": None, "head_sha": None})
+            payload.update({"subject_digest": None})
         return payload
 
 
@@ -111,6 +112,9 @@ def build_operation(
             if parsed and parsed.get("record_type") == "issue":
                 issue_url = parsed["url"]
     link_note_template = "{pr_url}" if kind == "pull_request" and issue_url else None
+    operation_body = body
+    if kind == "pull_request":
+        operation_body = append_evidence_summary(body, build_evidence_summary(packet, diff))
     payload: dict[str, Any] = {
         "purpose": "contribution",
         "subject_id": str(packet.get("contribution_id", "")),
@@ -118,7 +122,7 @@ def build_operation(
         "repo": canonical_repo,
         "kind": kind,
         "title": title,
-        "body": body,
+        "body": operation_body,
         "base": base,
         "head": head,
         "draft": kind == "pull_request" and bool(
@@ -136,15 +140,15 @@ def build_operation(
             "base_tip_sha": diff.get("base_tip_sha"),
             "merge_base_sha": diff.get("merge_base_sha"),
             "head_sha": diff.get("head_sha"),
-            "patch_sha256": diff.get("patch_sha256"),
+            "subject_digest": diff.get("subject_digest"),
+            "fingerprint_algorithm": diff.get("fingerprint_algorithm"),
         })
     else:
-        # Preserve the historical contribution-Issue operation identity.
-        payload.update({"base_sha": None, "head_sha": None})
+        payload.update({"subject_digest": None})
     digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
     operation_id = f"rw-{digest}"
-    marker = f"<!-- reviewworthy:operation-id={operation_id} -->"
-    marked_body = body.rstrip() + f"\n\n{marker}"
+    marker = f"<!-- reviewworthy:v0.3:operation-id={operation_id} -->"
+    marked_body = operation_body.rstrip() + f"\n\n{marker}"
     if kind == "issue":
         permissions = ("issues:write",)
     elif issue_url:
@@ -165,7 +169,8 @@ def build_operation(
         base_tip_sha=payload.get("base_tip_sha"),
         merge_base_sha=payload.get("merge_base_sha"),
         head_sha=payload.get("head_sha"),
-        patch_sha256=payload.get("patch_sha256"),
+        subject_digest=payload.get("subject_digest"),
+        fingerprint_algorithm=payload.get("fingerprint_algorithm"),
         draft=payload["draft"],
         purpose=payload["purpose"],
         subject_id=payload["subject_id"],
@@ -206,7 +211,7 @@ def build_signal_operation(
     }
     digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
     operation_id = f"rw-{digest}"
-    marker = f"<!-- reviewworthy:operation-id={operation_id} -->"
+    marker = f"<!-- reviewworthy:v0.3:operation-id={operation_id} -->"
     marked_body = body.rstrip() + f"\n\n{marker}"
     return RemoteOperation(
         operation_id=operation_id,

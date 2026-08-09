@@ -9,13 +9,13 @@ import sys
 from typing import Any
 
 from . import __version__
-from .action import check_packet, github_event_context
+from .action import check_evidence, github_event_context
 from .brief import build_project_brief, render_project_brief, validate_project_brief
 from .candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, transition_candidate, validate_candidate_menu
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
-from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff, run_verification
+from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff, local_state_path, run_verification
 from .github import (
     GhClient,
     GhError,
@@ -31,7 +31,7 @@ from .github import (
     save_operation_pr_created,
     save_operation_receipt,
 )
-from .packet import good_first_issue_policy_errors, issue_link_blockers, issue_reference, material_snapshot, readiness_blockers, skeleton_packet, validate_packet
+from .packet import good_first_issue_policy_errors, issue_link_blockers, issue_reference, material_snapshot, readiness_blockers, require_contribution_id, skeleton_packet, validate_packet
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .risk import assess_manifest
@@ -171,7 +171,8 @@ def _build_parser() -> argparse.ArgumentParser:
     packet = commands.add_parser("packet", help="Validate a Contribution Packet")
     packet_commands = packet.add_subparsers(dest="packet_command", required=True)
     packet_init = packet_commands.add_parser("init", help="Create an incomplete Contribution Packet skeleton")
-    packet_init.add_argument("--output", type=Path, default=Path(".reviewworthy/contribution.json"))
+    packet_init.add_argument("--output", type=Path)
+    packet_init.add_argument("--root", type=Path, default=Path("."))
     packet_init.add_argument("--contribution-id", default="contribution-001")
     packet_init.add_argument("--mode", choices=("issue-backed", "discovery"), default="issue-backed")
     packet_init.add_argument("--repository", help="github.com owner/name")
@@ -181,17 +182,11 @@ def _build_parser() -> argparse.ArgumentParser:
     packet_validate.add_argument("path", type=Path)
     _common_json(packet_validate)
 
-    action = commands.add_parser("action", help="Run read-only deterministic Action checks")
+    action = commands.add_parser("action", help="Check the public pull-request Evidence Summary")
     action_commands = action.add_subparsers(dest="action_command", required=True)
     action_check = action_commands.add_parser("check")
-    action_check.add_argument("path", type=Path, nargs="?", default=Path(".reviewworthy/contribution.json"))
-    action_check.add_argument("--mode", choices=("report", "enforce"), default="report", help="Report unknown evidence, or explicitly enforce packet/diff/unknown requirements")
-    action_check.add_argument("--require-packet", action="store_true", help="Fail when the Contribution Packet is missing")
-    action_check.add_argument("--fail-on-unknown", action="store_true", help="Turn unknown policy/evidence into violations")
-    action_check.add_argument("--require-current-diff", action="store_true", help="Require changed files supplied from the current event/worktree")
-    action_check.add_argument("--changed-file", action="append", default=[])
-    action_check.add_argument("--changed-files-provided", action="store_true", help="Treat the supplied changed-file list as authoritative, even when empty")
-    action_check.add_argument("--changed-files-unavailable", action="store_true", help="Do not fall back to packet-declared changed files")
+    action_check.add_argument("--body-file", type=Path, help="PR Body input for local checks; defaults to the pull_request event Body")
+    action_check.add_argument("--mode", choices=("report", "evidence-enforce"), default="report")
     action_check.add_argument("--root", type=Path, default=Path("."), help="Git checkout used to recompute the current pull-request Diff")
     _common_json(action_check)
 
@@ -708,12 +703,17 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "packet":
             if args.packet_command == "init":
-                if args.output.exists() and not args.force:
-                    raise ValueError(f"Refusing to overwrite existing file: {args.output}; use --force to replace it")
+                require_contribution_id(args.contribution_id)
+                output = args.output or local_state_path(
+                    args.root,
+                    f"reviewworthy/v0.3/contributions/{args.contribution_id}/packet.json",
+                )
+                if output.exists() and not args.force:
+                    raise ValueError(f"Refusing to overwrite existing file: {output}; use --force to replace it")
                 packet = skeleton_packet(args.contribution_id, args.mode, args.repository)
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-                result = {"created": str(args.output), "contribution_id": args.contribution_id, "mode": args.mode}
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(json.dumps(packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
                 _print(result, args.as_json)
                 return 0
             result = validate_packet(_load_object(args.path))
@@ -721,30 +721,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["valid"] else 1
 
         if args.command == "action":
-            if args.changed_files_unavailable:
-                changed_files = []
-                current_diff_available = False
-            elif args.changed_files_provided:
-                changed_files = args.changed_file
-                current_diff_available = True
-            else:
-                changed_files = args.changed_file or None
-                current_diff_available = None
-            event_name, event_repository, event_repository_id, event_base_sha, event_head_sha = github_event_context()
-            result = check_packet(
-                args.path,
-                changed_files,
+            event_name, event_repository, event_repository_id, event_base_sha, event_head_sha, event_body = github_event_context()
+            body = args.body_file.read_text(encoding="utf-8") if args.body_file else event_body
+            result = check_evidence(
+                body,
                 root=args.root,
-                current_diff_available=current_diff_available,
                 event_name=event_name,
                 event_repository=event_repository,
                 event_repository_id=event_repository_id,
                 event_base_sha=event_base_sha,
                 event_head_sha=event_head_sha,
                 mode=args.mode,
-                require_packet=args.require_packet,
-                fail_on_unknown=args.fail_on_unknown,
-                require_current_diff=args.require_current_diff,
             )
             _print(result, args.as_json)
             return 1 if result["conclusion"] == "failure" else 0
