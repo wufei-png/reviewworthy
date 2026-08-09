@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from reviewworthy.packet import issue_basis_blockers, semantic_snapshot, policy_violations, readiness_blockers, skeleton_packet, validate_packet
+from reviewworthy.signal import skeleton_signal
 
 from helpers import valid_packet
 
@@ -56,7 +57,8 @@ class PacketValidationTests(unittest.TestCase):
         packet["basis"] = {
             "kind": "signal",
             "signal": {
-                "kind": "issue",
+                "record_type": "issue",
+                "claim_type": "bug_report",
                 "reference": "https://github.com/example/project/issues/1",
                 "verification": {
                     "status": "verified",
@@ -78,7 +80,8 @@ class PacketValidationTests(unittest.TestCase):
         self.assertEqual(next(item["path"] for item in signal_violations if item["code"] == "good_first_issue_ai_disallowed"), "basis.signal.verification.labels")
 
         packet["basis"]["signal"] = {
-            "kind": "accepted-proposal",
+            "record_type": "pull_request",
+            "claim_type": "accepted_proposal",
             "verification": {"status": "verified", "record_type": "pull_request", "labels": ["good-first-issue"]},
         }
 
@@ -325,15 +328,9 @@ class PacketValidationTests(unittest.TestCase):
         packet["basis"] = {
             "kind": "discovery-evidence",
             "evidence": ["reproduced failure"],
-            "signal": {
-                "signal_version": "0.1",
-                "kind": "reproducible-evidence",
-                "reference": "repro://input-regression",
-                "status": "pending",
-                "evidence": ["exit 1"],
-                "published": False,
-            },
+            "signal": skeleton_signal("local_evidence", "reproducible_evidence", "local:input-regression"),
         }
+        packet["basis"]["signal"]["evidence"] = ["exit 1"]
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
@@ -350,14 +347,7 @@ class PacketValidationTests(unittest.TestCase):
             "kind": "signal",
             "references": ["https://github.com/example/project/issues/2"],
             "evidence": [],
-            "signal": {
-                "signal_version": "0.1",
-                "kind": "issue",
-                "reference": "https://github.com/example/project/issues/2",
-                "status": "pending",
-                "evidence": [],
-                "published": True,
-            },
+            "signal": skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/2"),
         }
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
@@ -370,6 +360,7 @@ class PacketValidationTests(unittest.TestCase):
         packet["basis"]["signal"]["verification"] = {
             "status": "verified",
             "provider": "github",
+            "record_type": "issue",
             "reference": packet["basis"]["signal"]["reference"],
             "verified_at": "2026-08-06T00:00:00Z",
         }
@@ -385,15 +376,9 @@ class PacketValidationTests(unittest.TestCase):
         packet["basis"] = {
             "kind": "discovery-evidence",
             "evidence": ["reproduced failure"],
-            "signal": {
-                "signal_version": "0.1",
-                "kind": "reproducible-evidence",
-                "reference": "repro://input-regression",
-                "status": "rejected",
-                "evidence": ["exit 1"],
-                "published": False,
-            },
+            "signal": skeleton_signal("local_evidence", "reproducible_evidence", "local:input-regression"),
         }
+        packet["basis"]["signal"].update({"lifecycle": "rejected", "evidence": ["exit 1"]})
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
@@ -407,16 +392,9 @@ class PacketValidationTests(unittest.TestCase):
         packet["basis"] = {
             "kind": "discovery-evidence",
             "evidence": ["reproduced failure"],
-            "signal": {
-                "signal_version": "0.1",
-                "kind": "reproducible-evidence",
-                "reference": "repro://input-regression",
-                "status": "confirmed",
-                "evidence": ["exit 1"],
-                "published": False,
-                "confirmed_at": "2026-08-06T00:00:00Z",
-            },
+            "signal": skeleton_signal("local_evidence", "reproducible_evidence", "local:input-regression"),
         }
+        packet["basis"]["signal"].update({"lifecycle": "confirmed", "evidence": ["exit 1"]})
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
         packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
@@ -429,16 +407,9 @@ class PacketValidationTests(unittest.TestCase):
         packet["basis"] = {
             "kind": "discovery-evidence",
             "evidence": ["reproduced failure"],
-            "signal": {
-                "signal_version": "0.1",
-                "kind": "reproducible-evidence",
-                "reference": "repro://input-regression",
-                "status": "confirmed",
-                "evidence": ["exit 1"],
-                "published": False,
-                "confirmed_at": "2026-08-06T00:00:00Z",
-            },
+            "signal": skeleton_signal("local_evidence", "reproducible_evidence", "local:input-regression"),
         }
+        packet["basis"]["signal"].update({"lifecycle": "confirmed", "evidence": ["exit 1"]})
         packet["policy"]["authoritative_claims"]["discovery_evidence_allowed"] = True
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)

@@ -9,7 +9,10 @@ from urllib.parse import urlparse
 
 GITHUB_HOST = "github.com"
 _SLUG_RE = re.compile(r"^(?P<owner>[^/\s]+)/(?P<name>[^/\s]+)$")
-_RECORD_RE = re.compile(r"^https://github\.com/(?P<owner>[^/\s]+)/(?P<name>[^/\s]+)/(?:issues|pull)/(?P<number>[1-9][0-9]*)$")
+_RECORD_RE = re.compile(
+    r"^https://github\.com/(?P<owner>[^/\s]+)/(?P<name>[^/\s]+)/"
+    r"(?P<record_type>issues|pull|discussions)/(?P<number>[1-9][0-9]*)$"
+)
 
 
 def parse_repository_slug(value: str) -> tuple[str, str]:
@@ -103,14 +106,17 @@ def parse_public_record(reference: str) -> dict[str, Any] | None:
     match = _RECORD_RE.fullmatch(reference.strip())
     if not match:
         return None
-    path_parts = [part for part in parsed.path.split("/") if part]
-    record_type = path_parts[2]
+    record_type = match.group("record_type")
     return {
         "provider": "github",
         "host": GITHUB_HOST,
         "owner": match.group("owner"),
         "name": match.group("name"),
-        "record_type": "pull_request" if record_type == "pull" else "issue",
+        "record_type": {
+            "pull": "pull_request",
+            "issues": "issue",
+            "discussions": "discussion",
+        }[record_type],
         "number": int(match.group("number")),
         "url": reference.strip(),
     }

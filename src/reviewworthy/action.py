@@ -9,6 +9,7 @@ from typing import Any
 
 from .evidence import EvidenceSummaryError, extract_evidence_summary, summary_matches_repository
 from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff
+from .policy import PolicyTreeError, inspect_policy_at_commit
 
 
 ACTION_MODES = {"report", "evidence-enforce"}
@@ -44,6 +45,49 @@ def github_event_context() -> tuple[str | None, str | None, int | None, str | No
 
 def _finding(code: str, message: str, path: str) -> dict[str, str]:
     return {"code": code, "message": message, "path": path}
+
+
+def _base_policy_projection(policy: dict[str, Any]) -> dict[str, Any]:
+    document_claims: list[dict[str, Any]] = []
+    for source in policy.get("sources", []):
+        if not isinstance(source, dict) or source.get("kind") != "repository_document":
+            continue
+        claims = source.get("claims")
+        if isinstance(claims, dict) and claims:
+            document_claims.append({"source": source.get("path"), "claims": claims})
+    structured = policy.get("structured_claims")
+    return {
+        "base_sha": policy.get("base_sha"),
+        "machine_authority": structured if isinstance(structured, dict) else {},
+        "document_advisory": document_claims,
+        "conflicts": policy.get("conflicts", []),
+        "ambiguities": policy.get("ambiguities", []),
+    }
+
+
+def _base_policy_blockers(policy: dict[str, Any], summary: dict[str, Any]) -> list[dict[str, str]]:
+    blockers: list[dict[str, str]] = []
+    if policy.get("conflicts"):
+        blockers.append(_finding("base_policy_conflict", "Base-tree policy sources conflict.", "base_policy.conflicts"))
+    if policy.get("ambiguities"):
+        blockers.append(_finding("base_policy_ambiguity", "A base-tree policy document makes opposed explicit claims.", "base_policy.ambiguities"))
+
+    document_prohibits_ai = any(
+        isinstance(source, dict)
+        and source.get("kind") == "repository_document"
+        and isinstance(source.get("claims"), dict)
+        and source["claims"].get("ai_assistance") == "prohibited"
+        for source in policy.get("sources", [])
+    )
+    structured = policy.get("structured_claims") if isinstance(policy.get("structured_claims"), dict) else {}
+    if document_prohibits_ai or structured.get("ai_assistance") == "prohibited":
+        blockers.append(_finding("base_policy_ai_prohibited", "The base-tree policy explicitly prohibits AI-assisted contributions.", "base_policy.ai_assistance"))
+
+    claims = summary.get("claims") if isinstance(summary.get("claims"), dict) else {}
+    disclosure = claims.get("ai_disclosure") if isinstance(claims.get("ai_disclosure"), dict) else {}
+    if structured.get("disclosure_required") is True and disclosure.get("claimed_present") is not True:
+        blockers.append(_finding("base_policy_disclosure_required", "Structured base-tree policy requires an AI disclosure.", "claims.ai_disclosure.claimed_present"))
+    return blockers
 
 
 def check_evidence(
@@ -82,6 +126,30 @@ def check_evidence(
             "verified_facts": verified_facts,
             "contributor_claims": {},
         }
+
+    base_policy: dict[str, Any] = {
+        "base_sha": event_base_sha,
+        "machine_authority": {},
+        "document_advisory": [],
+        "conflicts": [],
+        "ambiguities": [],
+    }
+    if event_base_sha:
+        try:
+            inspected_policy = inspect_policy_at_commit(root, event_base_sha)
+            base_policy = _base_policy_projection(inspected_policy)
+            policy_blockers = _base_policy_blockers(inspected_policy, summary)
+            if enforce:
+                violations.extend(policy_blockers)
+            elif policy_blockers:
+                unknowns.extend(item["message"] for item in policy_blockers)
+        except PolicyTreeError as exc:
+            if enforce:
+                violations.append(_finding("base_policy_unavailable", str(exc), "event.pull_request.base.sha"))
+            else:
+                unknowns.append(f"Base-tree policy unavailable: {exc}")
+    elif enforce:
+        violations.append(_finding("base_policy_unavailable", "Runner event does not provide a base SHA.", "event.pull_request.base.sha"))
 
     if event_name != "pull_request":
         violations.append(_finding("pull_request_context_required", "Evidence checks require a pull_request event.", "event_name"))
@@ -126,5 +194,6 @@ def check_evidence(
         "unknowns": unknowns,
         "verified_facts": verified_facts,
         "contributor_claims": summary.get("claims", {}),
+        "base_policy": base_policy,
         "summary": summary,
     }

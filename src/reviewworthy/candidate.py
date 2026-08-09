@@ -95,10 +95,13 @@ def validate_candidate_menu(menu: dict[str, Any]) -> dict[str, Any]:
             signal_result = validate_signal(basis["signal"])
             for error in signal_result["errors"]:
                 _error(errors, error["code"], error["message"], f"{path}.basis.{error['path'].removeprefix('signal.')}")
-            if basis["signal"].get("status") in {"rejected", "expired"}:
-                _error(errors, "signal_unavailable", "A rejected or expired Contribution Signal cannot be selected", f"{path}.basis.signal.status")
-            if basis.get("kind") == "discovery-evidence" and basis["signal"].get("kind") != "reproducible-evidence":
-                _error(errors, "discovery_signal_kind_mismatch", "discovery-evidence basis must use a reproducible-evidence signal", f"{path}.basis.signal.kind")
+            if basis["signal"].get("lifecycle") in {"rejected", "expired"}:
+                _error(errors, "signal_unavailable", "A rejected or expired Contribution Signal cannot be selected", f"{path}.basis.signal.lifecycle")
+            if basis.get("kind") == "discovery-evidence" and not (
+                basis["signal"].get("record_type") == "local_evidence"
+                and basis["signal"].get("claim_type") == "reproducible_evidence"
+            ):
+                _error(errors, "discovery_signal_shape_mismatch", "discovery-evidence basis requires local reproducible evidence", f"{path}.basis.signal")
         duplicate_search = candidate.get("duplicate_search")
         if not isinstance(duplicate_search, dict) or duplicate_search.get("checked") is not True:
             _error(errors, "duplicate_search_missing", "Duplicate-work evidence must be explicitly checked", f"{path}.duplicate_search")
@@ -175,7 +178,7 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
         raise ValueError("Selected candidate has no valid contribution basis")
     if basis.get("kind") in {"signal", "discovery-evidence"} and not isinstance(basis.get("signal"), dict):
         raise ValueError("Selected signal-backed candidate has no structured signal record")
-    if isinstance(basis.get("signal"), dict) and basis["signal"].get("status") in {"rejected", "expired"}:
+    if isinstance(basis.get("signal"), dict) and basis["signal"].get("lifecycle") in {"rejected", "expired"}:
         raise ValueError("A rejected or expired Contribution Signal cannot be bound")
     bound = deepcopy(packet)
     menu_repository = menu.get("repository")

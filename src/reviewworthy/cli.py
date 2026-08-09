@@ -35,7 +35,14 @@ from .packet import good_first_issue_policy_errors, issue_link_blockers, issue_r
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .risk import assess_manifest
-from .signal import SIGNAL_KINDS, SIGNAL_STATUSES, skeleton_signal, validate_signal
+from .signal import (
+    SIGNAL_AUTHORITY_KINDS,
+    SIGNAL_CLAIM_TYPES,
+    SIGNAL_LIFECYCLES,
+    SIGNAL_RECORD_TYPES,
+    skeleton_signal,
+    validate_signal,
+)
 from .understanding import record_understanding, validate_understanding
 from .util import has_normalized_label, normalize_label, read_json, utc_now
 
@@ -136,13 +143,14 @@ def _build_parser() -> argparse.ArgumentParser:
     signal = commands.add_parser("signal", help="Record and validate a Contribution Signal")
     signal_commands = signal.add_subparsers(dest="signal_command", required=True)
     signal_init = signal_commands.add_parser("init", help="Create a pending Contribution Signal artifact")
-    signal_init.add_argument("--kind", choices=sorted(SIGNAL_KINDS), default="issue")
+    signal_init.add_argument("--record-type", choices=sorted(SIGNAL_RECORD_TYPES), default="issue")
+    signal_init.add_argument("--claim-type", choices=sorted(SIGNAL_CLAIM_TYPES), default="bug_report")
     signal_init.add_argument("--reference", default="")
     signal_init.add_argument("--evidence", action="append", default=[])
-    signal_init.add_argument("--published", action="store_true", help="Mark an external Issue/Discussion reference as publicly created")
-    signal_init.add_argument("--status", choices=sorted(SIGNAL_STATUSES), default="pending")
-    signal_init.add_argument("--confirmed-by", default="")
-    signal_init.add_argument("--confirmed-at", default="")
+    signal_init.add_argument("--lifecycle", choices=sorted(SIGNAL_LIFECYCLES), default="pending")
+    signal_init.add_argument("--authority-kind", choices=sorted(SIGNAL_AUTHORITY_KINDS), default="contributor")
+    signal_init.add_argument("--authority-actor", default="")
+    signal_init.add_argument("--asserted-at", default="")
     signal_init.add_argument("--output", type=Path, default=Path(".reviewworthy/contribution-signal.json"))
     signal_init.add_argument("--force", action="store_true")
     _common_json(signal_init)
@@ -394,7 +402,7 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
                 verification[key] = remote[key]
         if basis.get("kind") == "issue":
             basis["verification"] = verification
-        elif isinstance(basis.get("signal"), dict) and basis["signal"].get("kind") == "issue":
+        elif isinstance(basis.get("signal"), dict) and basis["signal"].get("record_type") == "issue":
             basis["signal"]["verification"] = verification
         else:
             raise ValueError("Packet basis does not contain an Issue verification target")
@@ -552,18 +560,28 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "signal":
             if args.signal_command == "init":
-                signal_value = skeleton_signal(args.kind, args.reference)
+                signal_value = skeleton_signal(args.record_type, args.claim_type, args.reference)
                 signal_value.update(
                     {
                         "evidence": args.evidence,
-                        "status": args.status,
-                        "published": args.published,
-                        "confirmed_by": args.confirmed_by,
-                        "confirmed_at": args.confirmed_at,
+                        "lifecycle": args.lifecycle,
+                        "authority": {
+                            "kind": args.authority_kind,
+                            "actor": args.authority_actor,
+                            "asserted_at": args.asserted_at,
+                        },
                     }
                 )
                 _write_json(args.output, signal_value, args.force)
-                _print({"created": str(args.output), "kind": args.kind, "status": args.status}, args.as_json)
+                _print(
+                    {
+                        "created": str(args.output),
+                        "record_type": args.record_type,
+                        "claim_type": args.claim_type,
+                        "lifecycle": args.lifecycle,
+                    },
+                    args.as_json,
+                )
                 return 0
             if args.signal_command == "validate":
                 signal_value = _load_object(args.path)
@@ -573,22 +591,21 @@ def main(argv: list[str] | None = None) -> int:
             if args.signal_command == "verify":
                 signal_value = _load_object(args.path)
                 local = validate_signal(signal_value)
-                structural_errors = [error for error in local["errors"] if error["code"] != "signal_not_published"]
+                structural_errors = list(local["errors"])
                 if structural_errors:
                     result = {"valid": False, "verification": "not_run", "errors": structural_errors}
-                elif signal_value.get("kind") == "reproducible-evidence":
-                    unavailable = signal_value.get("status") in {"rejected", "expired"}
+                elif signal_value.get("record_type") == "local_evidence":
+                    unavailable = signal_value.get("lifecycle") in {"rejected", "expired"}
                     result = {
                         "valid": not unavailable,
                         "verification": "local_only",
-                        "published": False,
-                        "errors": ([{"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.status"}] if unavailable else []),
+                        "errors": ([{"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.lifecycle"}] if unavailable else []),
                     }
                 else:
                     remote = GhClient().verify_public_reference(signal_value["reference"])
                     errors = list(local["errors"])
-                    if signal_value.get("status") in {"rejected", "expired"}:
-                        errors.append({"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.status"})
+                    if signal_value.get("lifecycle") in {"rejected", "expired"}:
+                        errors.append({"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.lifecycle"})
                     result = {
                         "valid": bool(remote.get("verified")) and not errors,
                         "verification": "github_public_reference",
@@ -597,11 +614,12 @@ def main(argv: list[str] | None = None) -> int:
                     }
                 if args.record and result["valid"]:
                     updated_signal = dict(signal_value)
-                    if signal_value.get("kind") == "reproducible-evidence":
+                    if signal_value.get("record_type") == "local_evidence":
                         verification = {
                             "status": "local_only",
                             "provider": "local",
                             "reference": signal_value.get("reference", ""),
+                            "record_type": "local_evidence",
                             "verified_at": utc_now(),
                         }
                     else:
@@ -626,9 +644,9 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("Signal publication requires a non-empty title and body")
             target = args.output or args.path
             publication = signal_value.get("publication")
-            if signal_value.get("published") is True:
+            if publication is not None:
                 if not isinstance(publication, dict):
-                    raise ValueError("Published signal has no recorded publication identity; reconcile before publishing again")
+                    raise ValueError("Signal publication identity is malformed; reconcile before publishing again")
                 if not isinstance(signal_value.get("publication_subject_id"), str) or not signal_value["publication_subject_id"].strip():
                     raise ValueError("Published signal has no stable publication subject; reconcile before publishing again")
                 if (
@@ -639,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("Published signal publication inputs differ from the recorded operation")
             operation = build_signal_operation(signal_value, args.repo, args.title, body)
             payload = operation.as_dict()
-            if signal_value.get("published") is True and publication.get("operation_id") != operation.operation_id:
+            if isinstance(publication, dict) and publication.get("operation_id") != operation.operation_id:
                 raise ValueError("Published signal operation identity differs from the rendered operation; reconcile before publishing again")
             if args.signal_publish_command == "plan":
                 _print(payload, args.as_json)
@@ -649,18 +667,17 @@ def main(argv: list[str] | None = None) -> int:
             publish_errors = [
                 error
                 for error in validate_signal(signal_value)["errors"]
-                if error["code"] not in {"missing_signal_reference", "signal_not_published"}
+                if error["code"] != "missing_signal_reference"
             ]
             if publish_errors:
                 raise ValueError(f"Signal is not publishable: {publish_errors}")
-            if signal_value.get("status") != "pending":
+            if signal_value.get("lifecycle") != "pending":
                 raise ValueError("Only pending signals can be published")
             if target != args.path and target.exists() and not args.force:
                 existing_target = _load_object(target)
                 existing_publication = existing_target.get("publication")
                 if not (
-                    existing_target.get("published") is True
-                    and existing_target.get("publication_subject_id") == operation.subject_id
+                    existing_target.get("publication_subject_id") == operation.subject_id
                     and isinstance(existing_publication, dict)
                     and existing_publication.get("operation_id") == operation.operation_id
                     and repository_slugs_match(existing_publication.get("repo"), args.repo)
@@ -690,7 +707,6 @@ def main(argv: list[str] | None = None) -> int:
                         payload.update({"outcome": "created", "remote": remote})
             updated_signal = dict(signal_value)
             updated_signal["reference"] = remote
-            updated_signal["published"] = True
             updated_signal["publication_subject_id"] = operation.subject_id
             updated_signal["publication"] = {"operation_id": operation.operation_id, "repo": operation.repo, "title": args.title, "body": body}
             _replace_json(target, updated_signal)

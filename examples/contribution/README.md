@@ -19,7 +19,7 @@ Representative commands:
 ```bash
 PYTHONPATH=src python -m reviewworthy brief create --root . --focus src/reviewworthy/action.py
 PYTHONPATH=src python -m reviewworthy diff capture --root . --base BASE_SHA --head HEAD_SHA
-PYTHONPATH=src python -m reviewworthy verify run --root . --head HEAD_SHA --json -- python -m unittest
+PYTHONPATH=src python -m reviewworthy verify run --root . --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --check-id unit --json
 PYTHONPATH=src python -m reviewworthy understanding record .reviewworthy/contribution.json \
   --phase orientation --status passed --rubric behavior="..." \
   --rubric invariant="..." --rubric test="..."

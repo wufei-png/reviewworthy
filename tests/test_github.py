@@ -76,7 +76,7 @@ class GitHubOperationTests(unittest.TestCase):
             build_operation(valid_packet(), "example/project", "pull_request", "Fix", "Body")
 
     def test_signal_publication_operation_is_issue_write_and_stable_after_publication(self) -> None:
-        signal = {"kind": "maintainer-request", "reference": ""}
+        signal = {"record_type": "issue", "claim_type": "maintainer_request", "reference": ""}
         first = build_signal_operation(signal, "example/project", "Request", "Body")
         signal["reference"] = "https://github.com/example/project/issues/7"
         signal["publication_subject_id"] = first.subject_id
@@ -88,7 +88,10 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual(first.purpose, "signal_publication")
 
     def test_current_signal_receipt_shape_round_trips(self) -> None:
-        operation = build_signal_operation({"kind": "maintainer-request", "reference": ""}, "example/project", "Request", "Body")
+        operation = build_signal_operation(
+            {"record_type": "issue", "claim_type": "maintainer_request", "reference": ""},
+            "example/project", "Request", "Body",
+        )
         current_operation = operation.as_dict()
         self.assertNotIn("base_sha", current_operation)
         self.assertIn("subject_digest", current_operation)
@@ -110,7 +113,10 @@ class GitHubOperationTests(unittest.TestCase):
 
     def test_discussion_signal_cannot_be_silently_published_as_an_issue(self) -> None:
         with self.assertRaises(ValueError):
-            build_signal_operation({"kind": "discussion", "reference": ""}, "example/project", "Request", "Body")
+            build_signal_operation(
+                {"record_type": "discussion", "claim_type": "accepted_proposal", "reference": ""},
+                "example/project", "Request", "Body",
+            )
 
     def test_policy_required_draft_is_part_of_operation_and_gh_command(self) -> None:
         packet = valid_packet()
@@ -156,6 +162,34 @@ class GitHubOperationTests(unittest.TestCase):
             ["gh", "api", "repos/example/project", "--method", "GET"],
             ["gh", "api", "repos/example/project/issues/2", "--method", "GET"],
         ])
+
+    def test_verify_discussion_uses_graphql_and_normalizes_current_record(self) -> None:
+        calls = []
+
+        def fake_runner(argv, **kwargs):
+            calls.append(argv)
+            if argv[2] == "repos/example/project":
+                return CompletedProcess(argv, 0, json.dumps({"visibility": "public", "id": 101}), "")
+            return CompletedProcess(argv, 0, json.dumps({
+                "data": {"repository": {"discussion": {
+                    "number": 4,
+                    "url": "https://github.com/example/project/discussions/4",
+                    "title": "Proposal",
+                    "closed": False,
+                    "authorAssociation": "MEMBER",
+                }}},
+            }), "")
+
+        result = GhClient(fake_runner).verify_public_reference(
+            "https://github.com/example/project/discussions/4"
+        )
+
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["record_type"], "discussion")
+        self.assertEqual(result["state"], "open")
+        self.assertEqual(result["author_association"], "MEMBER")
+        self.assertEqual(calls[1][1:3], ["api", "graphql"])
+        self.assertIn("number=4", calls[1])
 
     def test_verify_public_reference_rejects_private_repository_and_noncanonical_record(self) -> None:
         def private_runner(argv, **kwargs):

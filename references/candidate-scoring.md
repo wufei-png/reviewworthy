@@ -32,4 +32,4 @@ reviewworthy candidate bind \
   --packet .reviewworthy/contribution.json
 ```
 
-Binding copies the selected basis and records the menu snapshot, candidate ID, repository, recommendation, and duplicate disposition in the Packet. It does not approve the Contribution Contract. Only a `do_not_contribute` recommendation prevents binding; `issue_only` and `seek_maintainer_signal` remain valid planning choices until their explicit transition and later Issue/Signal gates are satisfied. Older bound packets may omit `recommendation`; the transition command accepts an explicit `--from` value to migrate that record without discarding its evidence.
+Binding copies the selected basis and records the menu snapshot, candidate ID, repository, recommendation, and duplicate disposition in the Packet. It does not approve the Contribution Contract. Only a `do_not_contribute` recommendation prevents binding; `issue_only` and `seek_maintainer_signal` remain valid planning choices until their explicit transition and later Issue/Signal gates are satisfied. Packet `0.3` does not accept or migrate older bound-candidate records.

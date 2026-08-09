@@ -16,6 +16,7 @@ from reviewworthy.evidence import append_evidence_summary, build_evidence_summar
 from reviewworthy.git import capture_pr_diff, verification_plan_digest
 from reviewworthy.github import GhError
 from reviewworthy.packet import semantic_snapshot, readiness_blockers, skeleton_packet, validate_packet
+from reviewworthy.signal import skeleton_signal, validate_signal
 
 from helpers import valid_packet
 
@@ -54,11 +55,12 @@ class CliBoundaryTests(unittest.TestCase):
                     [
                         "signal",
                         "init",
-                        "--kind",
-                        "maintainer-request",
+                        "--record-type",
+                        "issue",
+                        "--claim-type",
+                        "maintainer_request",
                         "--reference",
                         "https://github.com/example/project/issues/2",
-                        "--published",
                         "--output",
                         str(signal_path),
                         "--json",
@@ -78,14 +80,13 @@ class CliBoundaryTests(unittest.TestCase):
             root = Path(directory)
             signal_path = root / "signal.json"
             signal_path.write_text(json.dumps({
-                "signal_version": "0.1",
-                "kind": "maintainer-request",
+                "signal_version": "0.3",
+                "record_type": "issue",
+                "claim_type": "maintainer_request",
                 "reference": "",
-                "status": "pending",
+                "lifecycle": "pending",
                 "evidence": [],
-                "published": False,
-                "confirmed_by": "",
-                "confirmed_at": "",
+                "authority": {"kind": "contributor", "actor": "", "asserted_at": ""},
             }), encoding="utf-8")
             body_path = root / "body.md"
             body_path.write_text("Please review this candidate.\n", encoding="utf-8")
@@ -124,7 +125,8 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(first_code, 0)
             self.assertEqual(second_code, 0)
             self.assertEqual(third_code, 0)
-            self.assertTrue(published["published"])
+            self.assertIn("publication", published)
+            self.assertNotIn("published", published)
             self.assertEqual(published["reference"], "https://github.com/example/project/issues/9")
             self.assertEqual(fake_client.create.call_count, 1)
 
@@ -132,14 +134,13 @@ class CliBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             signal_path = Path(directory) / "signal.json"
             signal = {
-                "signal_version": "0.1",
-                "kind": "issue",
+                "signal_version": "0.3",
+                "record_type": "issue",
+                "claim_type": "bug_report",
                 "reference": "https://github.com/example/project/issues/2",
-                "status": "pending",
+                "lifecycle": "pending",
                 "evidence": [],
-                "published": True,
-                "confirmed_by": "",
-                "confirmed_at": "",
+                "authority": {"kind": "contributor", "actor": "", "asserted_at": ""},
             }
             signal_path.write_text(json.dumps(signal), encoding="utf-8")
             fake_client = unittest.mock.MagicMock()
@@ -204,14 +205,13 @@ class CliBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             signal_path = Path(directory) / "signal.json"
             signal = {
-                "signal_version": "0.1",
-                "kind": "issue",
+                "signal_version": "0.3",
+                "record_type": "issue",
+                "claim_type": "bug_report",
                 "reference": "https://github.com/example/project/issues/2",
-                "status": "pending",
+                "lifecycle": "pending",
                 "evidence": [],
-                "published": True,
-                "confirmed_by": "",
-                "confirmed_at": "",
+                "authority": {"kind": "contributor", "actor": "", "asserted_at": ""},
             }
             signal_path.write_text(json.dumps(signal), encoding="utf-8")
             fake_client = unittest.mock.MagicMock()
@@ -242,6 +242,70 @@ class CliBoundaryTests(unittest.TestCase):
             packet["policy"]["authoritative_claims"]["good_first_issue_ai_allowed"] = False
             packet["basis"] = {"kind": "signal", "signal": recorded}
             self.assertIn("good_first_issue_ai_disallowed", {item["code"] for item in readiness_blockers(packet)})
+
+    def test_discussion_signal_verify_reaches_graphql_adapter_and_records_current_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            signal_path = Path(directory) / "signal.json"
+            reference = "https://github.com/example/project/discussions/4"
+            signal = skeleton_signal("discussion", "accepted_proposal", reference)
+            signal_path.write_text(json.dumps(signal), encoding="utf-8")
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "provider": "github",
+                "host": "github.com",
+                "repository": "example/project",
+                "repository_id": 101,
+                "record_type": "discussion",
+                "number": 4,
+                "url": reference,
+                "visibility": "public",
+                "state": "open",
+            }
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(io.StringIO()):
+                code = main(["signal", "verify", str(signal_path), "--record", "--json"])
+
+            recorded = json.loads(signal_path.read_text())
+            self.assertEqual(code, 0)
+            fake_client.verify_public_reference.assert_called_once_with(reference)
+            self.assertEqual(recorded["verification"]["record_type"], "discussion")
+            self.assertTrue(validate_signal(recorded)["valid"])
+
+    def test_issue_verify_records_into_current_signal_backed_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet_path = Path(directory) / "packet.json"
+            packet = valid_packet()
+            reference = "https://github.com/example/project/issues/2"
+            packet["basis"] = {
+                "kind": "signal",
+                "references": [reference],
+                "evidence": [],
+                "signal": skeleton_signal("issue", "bug_report", reference),
+            }
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "provider": "github",
+                "host": "github.com",
+                "reference": reference,
+                "repository": "example/project",
+                "repository_id": 101,
+                "record_type": "issue",
+                "number": 2,
+                "url": reference,
+                "visibility": "public",
+                "state": "open",
+                "labels": [],
+            }
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(io.StringIO()):
+                code = main(["issue", "verify", "--packet", str(packet_path), "--record", "--json"])
+
+            recorded = json.loads(packet_path.read_text())
+            self.assertEqual(code, 0)
+            self.assertEqual(recorded["basis"]["signal"]["verification"]["record_type"], "issue")
 
     def test_candidate_select_bind_and_understanding_record_commands(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

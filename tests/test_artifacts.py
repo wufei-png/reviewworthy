@@ -10,6 +10,7 @@ from reviewworthy.contract import skeleton_contract, validate_contract
 from reviewworthy.disclosure import disclosure_errors, render_disclosure
 from reviewworthy.packet import semantic_snapshot
 from reviewworthy.packet import readiness_blockers
+from reviewworthy.signal import skeleton_signal
 from reviewworthy.understanding import record_understanding, validate_understanding
 
 from helpers import valid_packet
@@ -125,12 +126,8 @@ class ArtifactTests(unittest.TestCase):
                 "references": ["https://github.com/example/project/issues/5"],
                 "evidence": [],
                 "signal": {
-                    "signal_version": "0.1",
-                    "kind": "issue",
-                    "reference": "https://github.com/example/project/issues/5",
-                    "status": "rejected",
-                    "evidence": [],
-                    "published": True,
+                    **skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/5"),
+                    "lifecycle": "rejected",
                 },
             },
             "duplicate_search": {"checked": True, "matches": [], "disposition": "not_duplicate"},

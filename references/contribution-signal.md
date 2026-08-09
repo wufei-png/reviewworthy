@@ -1,46 +1,43 @@
-# Contribution Signal
+# Contribution Signal 0.3
 
-A Candidate Menu describes possible work. A selected Contribution Packet must record the signal that makes the work actionable.
+A Candidate Menu describes possible work. A selected Contribution Packet records the signal that makes the work actionable. Signal `0.3` is a clean break: older Signal fields and versions are rejected rather than read, migrated, or coordinated.
 
-## Signal kinds
+## Independent axes
 
-- `issue`: an existing project issue or explicitly requested fix;
-- `maintainer-request`: a request recorded by a maintainer or project actor;
-- `accepted-proposal`: an accepted design or project proposal;
-- `discussion`: a project discussion whose outcome supports the contribution;
-- `reproducible-evidence`: a reproducible failure or gap that the repository policy explicitly permits as sufficient Discovery evidence.
+- `record_type`: `issue`, `pull_request`, `discussion`, or `local_evidence`;
+- `claim_type`: `bug_report`, `maintainer_request`, `accepted_proposal`, or `reproducible_evidence`;
+- `lifecycle`: `pending`, `confirmed`, `rejected`, or `expired`;
+- `verification`: provider evidence tied to the exact reference and record type;
+- `authority`: `contributor`, `maintainer`, or `repository`, with actor and assertion time where required.
 
-Each signal records a reference, status, publication state, and evidence. An external `issue`, `maintainer-request`, `accepted-proposal`, or `discussion` signal must point to a publicly created record (`published: true`). A local Issue/Discussion draft is not yet a Signal; its pre-publication JSON may have an empty reference and is intentionally outside the published Signal JSON Schema until `signal publish create` succeeds. A `reproducible-evidence` signal may remain unpublished and does not require a maintainer reply, but it needs evidence and explicit policy authorization before remote readiness. `confirmed_by` and `confirmed_at` record an optional explicit project response; confirmation is not required to implement or submit.
+These axes are deliberately not collapsed. A Discussion can carry an accepted-proposal claim without making every Discussion an accepted proposal. A public Issue can remain pending after provider verification. Confirmed maintainer-request and accepted-proposal claims require maintainer or repository authority; an open, closed, or verified record alone is not approval.
 
-## Lifecycle gate
+External records require a canonical matching GitHub URL. Issue and Pull Request verification use the REST API; Discussion verification uses GitHub GraphQL. `local_evidence` must carry a `reproducible_evidence` claim and non-empty evidence. Discovery use also needs explicit repository policy authorization.
 
-Discovery candidates may be displayed, compared, and turned into a local Issue or Discussion draft before implementation. After the external record is publicly created, its Signal may remain `pending` while the maintainer has not responded; pending does not block implementation or remote readiness. Rejected or expired signals do block progression.
-
-Issue-backed entries may use their existing Issue reference directly. If they rely on a separate maintainer request or proposal, the packet records the corresponding signal object instead of treating a free-form label as proof.
-
-Create and validate a signal artifact with:
+Create and validate a current Signal:
 
 ```bash
-reviewworthy signal init --kind maintainer-request \
+reviewworthy signal init \
+  --record-type issue \
+  --claim-type maintainer_request \
   --reference https://github.com/OWNER/REPO/issues/123 \
-  --published \
   --output .reviewworthy/contribution-signal.json
 reviewworthy signal validate .reviewworthy/contribution-signal.json
 ```
 
-For an external signal, verify the public record without changing the artifact:
+Verify an external record without changing the artifact:
 
 ```bash
 reviewworthy signal verify .reviewworthy/contribution-signal.json
 ```
 
-Use `--record` only after a successful verification to persist the exact reference/provider result required by remote readiness:
+Use `--record` only after success to persist verification required by remote readiness:
 
 ```bash
 reviewworthy signal verify .reviewworthy/contribution-signal.json --record
 ```
 
-Reviewworthy does not interpret an open Issue, a comment, or a closed record as maintainer approval. To publish a local Issue draft, first preview the explicit operation and then confirm that exact operation ID:
+Issue publication remains a separate explicit operation. A pre-publication Issue Signal may have an empty reference and is invalid for ordinary readiness until creation succeeds:
 
 ```bash
 reviewworthy signal publish plan .reviewworthy/contribution-signal.json \
@@ -50,4 +47,4 @@ reviewworthy signal publish create .reviewworthy/contribution-signal.json \
   --confirm-operation-id rw-...
 ```
 
-Publication uses the same marker search, pending record, receipt, and reconciliation rules as other Issue writes. It updates the local Signal only after the remote result is recorded; a repeated create reuses the receipt instead of creating a duplicate.
+Publication identity is recorded by `publication_subject_id` and `publication`; there is no `published` compatibility flag. Publication uses current `0.3` markers and operation receipts only. Discussion publication and maintainer-response interpretation are not implemented.

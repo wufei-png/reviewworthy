@@ -4,7 +4,7 @@ Reviewworthy applies its maintainer-first contribution workflow to external cont
 
 AI assistance is allowed. AI assistance must be disclosed in the PR body, and the PR description must be written in the contributor's own words before it is submitted. Draft pull requests are required until the exact narrative and verification evidence are ready. Good-first-issue work with AI assistance is permitted when the Issue and repository policy allow it.
 
-Before implementation, contributors should inspect policy, create a Project Brief, record duplicate-work evidence with an explicit disposition, bind the selected basis to a Contribution Packet, and approve a Contribution Contract. Capture the real Git diff and verification receipt with the CLI. Standard Understanding must cover behavior, invariant, and test; heightened work also covers flow, trade-offs, failures, and regressions.
+Before implementation, contributors should inspect policy, create a Project Brief, record duplicate-work evidence with an explicit disposition, bind the selected basis to a Contribution Packet, and approve a Contribution Contract. Capture the real Git diff and verification receipt with the CLI. Standard requires the light Ownership Check; Heightened and Learning additionally require full Orientation and Assessment across behavior, invariants, tests, flow, trade-offs, failures, and regressions.
 
 For a local checkout, the regression commands are:
 

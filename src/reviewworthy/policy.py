@@ -11,7 +11,10 @@ from dataclasses import dataclass
 from dataclasses import field
 import hashlib
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
+import subprocess
+import tempfile
 import tomllib
 from typing import Any, Iterable
 
@@ -30,6 +33,10 @@ CLAIM_KEYS = (
     "discovery_evidence_allowed",
     "good_first_issue_ai_allowed",
 )
+
+
+class PolicyTreeError(RuntimeError):
+    """A runner-owned base commit cannot be inspected deterministically."""
 
 
 @dataclass(frozen=True)
@@ -411,6 +418,58 @@ def _candidate_document_paths(root: Path) -> list[Path]:
             seen.add(resolved)
             unique.append(path)
     return sorted(unique)
+
+
+def _is_policy_tree_path(path: str) -> bool:
+    value = PurePosixPath(path)
+    if value.is_absolute() or ".." in value.parts:
+        return False
+    if path == ".reviewworthy/policy.toml":
+        return True
+    if len(value.parts) == 1 and value.name in {
+        "README.md", "README", "CONTRIBUTING.md", "CONTRIBUTING", "AGENTS.md", "SECURITY.md",
+    }:
+        return True
+    if value.parts and value.parts[0] == ".github":
+        return "workflows" not in value.parts and value.suffix.lower() in {".md", ".markdown", ".txt", ".yml", ".yaml"}
+    if value.parts and value.parts[0] == "docs":
+        return not (len(value.parts) > 1 and value.parts[1] == "adr") and value.suffix.lower() in {".md", ".markdown"}
+    return False
+
+
+def inspect_policy_at_commit(root: Path, commit_sha: str) -> dict[str, Any]:
+    """Inspect policy sources from one immutable Git tree, never the PR head."""
+
+    if not isinstance(commit_sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?", commit_sha) is None:
+        raise PolicyTreeError("base commit must be a full 40- or 64-character hexadecimal object ID")
+    root = root.resolve()
+
+    def git(*args: str) -> bytes:
+        completed = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.decode("utf-8", errors="replace").strip() or "git command failed"
+            raise PolicyTreeError(detail)
+        return completed.stdout
+
+    resolved = git("rev-parse", "--verify", f"{commit_sha}^{{commit}}").decode("ascii", errors="strict").strip()
+    if resolved.lower() != commit_sha.lower():
+        raise PolicyTreeError("base commit identity did not resolve exactly")
+    names = git("ls-tree", "-r", "--name-only", commit_sha).decode("utf-8", errors="surrogateescape").splitlines()
+    selected = [name for name in names if _is_policy_tree_path(name)]
+    with tempfile.TemporaryDirectory(prefix="reviewworthy-policy-") as directory:
+        snapshot = Path(directory)
+        for name in selected:
+            destination = snapshot.joinpath(*PurePosixPath(name).parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(git("show", f"{commit_sha}:{name}"))
+        result = inspect_policy(snapshot)
+    result["repository"] = str(root)
+    result["base_sha"] = commit_sha.lower()
+    return result
 
 
 def _nested(data: dict[str, Any], *paths: tuple[str, ...]) -> Any:

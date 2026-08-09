@@ -209,7 +209,7 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
         },
     }
     if mode == "discovery":
-        packet["basis"]["signal"] = skeleton_signal("reproducible-evidence")
+        packet["basis"]["signal"] = skeleton_signal("local_evidence", "reproducible_evidence", "local:unpublished")
     packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
     packet["snapshots"]["semantic"] = semantic_snapshot(packet)
     packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
@@ -689,7 +689,7 @@ def issue_reference(packet: dict[str, Any]) -> str | None:
     if basis.get("kind") == "issue":
         candidates.extend(basis.get("references", []) if isinstance(basis.get("references", []), list) else [])
     signal = basis.get("signal")
-    if isinstance(signal, dict) and signal.get("kind") == "issue":
+    if isinstance(signal, dict) and signal.get("record_type") == "issue":
         candidates.append(signal.get("reference"))
     for candidate in candidates:
         parsed = parse_public_record(candidate)
@@ -813,7 +813,7 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
         isinstance(basis, dict)
         and basis.get("kind") == "signal"
         and isinstance(basis.get("signal"), dict)
-        and basis["signal"].get("kind") == "issue"
+        and basis["signal"].get("record_type") == "issue"
     ):
         verification = basis["signal"].get("verification")
         labels_path = "basis.signal.verification.labels"

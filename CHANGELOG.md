@@ -8,6 +8,8 @@
 - Replace Action `enforce` with the narrower `evidence-enforce` mode, which never reads a Packet from the checkout.
 - Add Standard, Heightened, and Learning review profiles: Standard requires a light Ownership Check, while Heightened and Learning require full Orientation and Assessment.
 - Bind contributor-local verification receipts to a versioned plan digest and canonical subject digest, and separate semantic freshness from timestamp and output-hash audit data.
+- Replace Signal kind/status/publication flags with independent `record_type`, `claim_type`, `lifecycle`, `verification`, and `authority` axes; verify GitHub Discussions through GraphQL without adding Discussion publication.
+- Make Action policy evaluation base-tree-only: structured TOML is the sole source of positive machine authority, document positives remain advisory, and explicit prohibitions, conflicts, or ambiguities can block `evidence-enforce`.
 
 ## 0.2.0a1 - Unreleased
 

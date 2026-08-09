@@ -1,37 +1,49 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://reviewworthy.dev/schemas/contribution-signal.schema.json",
-  "title": "Reviewworthy Contribution Signal",
+  "title": "Reviewworthy Contribution Signal 0.3",
   "type": "object",
-  "required": ["signal_version", "kind", "reference", "status", "evidence", "published"],
+  "required": ["signal_version", "record_type", "claim_type", "lifecycle", "reference", "evidence", "authority"],
   "properties": {
-    "signal_version": { "const": "0.1" },
-    "kind": { "enum": ["issue", "maintainer-request", "accepted-proposal", "discussion", "reproducible-evidence"] },
-    "reference": { "type": "string", "minLength": 1 },
-    "status": { "enum": ["pending", "confirmed", "rejected", "expired"] },
+    "signal_version": { "const": "0.3" },
+    "record_type": { "enum": ["issue", "pull_request", "discussion", "local_evidence"] },
+    "claim_type": { "enum": ["bug_report", "maintainer_request", "accepted_proposal", "reproducible_evidence"] },
+    "lifecycle": { "enum": ["pending", "confirmed", "rejected", "expired"] },
+    "reference": { "type": "string" },
     "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-    "published": { "type": "boolean" },
-    "confirmed_by": { "type": "string" },
-    "confirmed_at": { "type": "string" },
+    "authority": {
+      "type": "object",
+      "required": ["kind", "actor", "asserted_at"],
+      "properties": {
+        "kind": { "enum": ["contributor", "maintainer", "repository"] },
+        "actor": { "type": "string" },
+        "asserted_at": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "verification": {
       "type": "object",
-      "required": ["status", "provider", "reference", "verified_at"],
+      "required": ["status", "provider", "reference", "record_type", "verified_at"],
       "properties": {
         "status": { "enum": ["verified", "local_only"] },
-        "provider": { "type": "string", "minLength": 1 },
+        "provider": { "enum": ["github", "local"] },
         "reference": { "type": "string" },
+        "record_type": { "enum": ["issue", "pull_request", "discussion", "local_evidence"] },
         "verified_at": { "type": "string", "minLength": 1 },
         "host": { "const": "github.com" },
         "repository": { "type": "string" },
         "repository_id": { "type": "integer", "exclusiveMinimum": 0 },
-        "record_type": { "type": "string" },
         "number": { "type": "integer", "minimum": 1 },
         "url": { "type": "string" },
-        "visibility": { "type": "string" }
+        "visibility": { "type": "string" },
+        "state": { "type": ["string", "null"] },
+        "state_reason": { "type": ["string", "null"] },
+        "locked": { "type": ["boolean", "null"] },
+        "labels": { "type": "array", "items": { "type": "string" } }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
-    "publication_subject_id": { "type": "string" },
+    "publication_subject_id": { "type": "string", "minLength": 1 },
     "publication": {
       "type": "object",
       "required": ["operation_id", "repo", "title", "body"],
@@ -41,49 +53,31 @@
         "title": { "type": "string", "minLength": 1 },
         "body": { "type": "string", "minLength": 1 }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     }
   },
   "allOf": [
     {
-      "if": { "properties": { "kind": { "const": "reproducible-evidence" } } },
+      "if": { "properties": { "claim_type": { "const": "reproducible_evidence" } } },
       "then": { "properties": { "evidence": { "minItems": 1 } } }
     },
     {
-      "if": { "properties": { "status": { "const": "confirmed" } } },
-      "then": { "required": ["confirmed_at"] }
-    },
-    {
-      "if": { "properties": { "kind": { "enum": ["issue", "maintainer-request", "accepted-proposal", "discussion"] } } },
-      "then": { "properties": { "published": { "const": true } } }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": { "const": "reproducible-evidence" },
-          "verification": { "type": "object" }
-        }
-      },
+      "if": { "properties": { "record_type": { "const": "local_evidence" } } },
       "then": {
         "properties": {
+          "claim_type": { "const": "reproducible_evidence" },
           "verification": {
             "properties": {
               "status": { "const": "local_only" },
-              "provider": { "const": "local" }
+              "provider": { "const": "local" },
+              "record_type": { "const": "local_evidence" }
             }
           }
         }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": { "enum": ["issue", "maintainer-request", "accepted-proposal", "discussion"] },
-          "verification": { "type": "object" }
-        }
       },
-      "then": {
+      "else": {
         "properties": {
+          "reference": { "minLength": 1 },
           "verification": {
             "properties": {
               "status": { "const": "verified" },
@@ -92,7 +86,43 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycle": { "const": "confirmed" },
+          "claim_type": { "enum": ["maintainer_request", "accepted_proposal"] }
+        },
+        "required": ["lifecycle", "claim_type"]
+      },
+      "then": {
+        "properties": {
+          "authority": {
+            "properties": {
+              "kind": { "enum": ["maintainer", "repository"] },
+              "actor": { "minLength": 1 },
+              "asserted_at": { "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "record_type": { "const": "issue" } }, "required": ["record_type"] },
+      "then": { "properties": { "verification": { "properties": { "record_type": { "const": "issue" } } } } }
+    },
+    {
+      "if": { "properties": { "record_type": { "const": "pull_request" } }, "required": ["record_type"] },
+      "then": { "properties": { "verification": { "properties": { "record_type": { "const": "pull_request" } } } } }
+    },
+    {
+      "if": { "properties": { "record_type": { "const": "discussion" } }, "required": ["record_type"] },
+      "then": { "properties": { "verification": { "properties": { "record_type": { "const": "discussion" } } } } }
     }
   ],
-  "additionalProperties": true
+  "dependentRequired": {
+    "publication": ["publication_subject_id"],
+    "publication_subject_id": ["publication"]
+  },
+  "additionalProperties": false
 }

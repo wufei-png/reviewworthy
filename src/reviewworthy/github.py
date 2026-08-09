@@ -107,7 +107,7 @@ def build_operation(
             if isinstance(references, list):
                 issue_url = next((str(item) for item in references if parse_public_record(item or "") and parse_public_record(item or "").get("record_type") == "issue"), None)
         signal = basis.get("signal")
-        if issue_url is None and isinstance(signal, dict) and signal.get("kind") == "issue":
+        if issue_url is None and isinstance(signal, dict) and signal.get("record_type") == "issue":
             parsed = parse_public_record(str(signal.get("reference", "")))
             if parsed and parsed.get("record_type") == "issue":
                 issue_url = parsed["url"]
@@ -188,18 +188,20 @@ def build_signal_operation(
 ) -> RemoteOperation:
     """Build an explicit Issue publication operation for a Contribution Signal."""
 
-    kind = signal.get("kind") if isinstance(signal, dict) else None
+    record_type = signal.get("record_type") if isinstance(signal, dict) else None
+    claim_type = signal.get("claim_type") if isinstance(signal, dict) else None
     reference = signal.get("reference") if isinstance(signal, dict) else None
-    if kind not in {"issue", "maintainer-request", "accepted-proposal"}:
-        raise ValueError("Only Issue-like Contribution Signals can be published as an Issue")
+    if record_type != "issue" or claim_type not in {"bug_report", "maintainer_request", "accepted_proposal", "reproducible_evidence"}:
+        raise ValueError("Only Signal 0.3 issue records can be published as an Issue")
     if not isinstance(reference, str):
         raise ValueError("signal.reference must be a string")
     canonical_repo = canonical_repository_slug(repo)
-    subject_id = signal.get("publication_subject_id") or f"{kind}:{reference}"
+    subject_id = signal.get("publication_subject_id") or f"{record_type}:{claim_type}:{reference}"
     payload = {
         "purpose": "signal_publication",
         "subject_id": subject_id,
-        "signal_kind": kind,
+        "signal_record_type": record_type,
+        "signal_claim_type": claim_type,
         "signal_reference": subject_id,
         "repo": canonical_repo,
         "kind": "issue",
@@ -490,7 +492,6 @@ class GhClient:
         if len(parts) != 4 or parts[2] not in {"issues", "pull", "discussions"} or not parts[3].isdigit():
             raise GhError("Signal reference must use /OWNER/REPO/issues|pull|discussions/NUMBER")
         owner, repository, record_type, number = parts[0], parts[1], parts[2], parts[3]
-        api_type = "pulls" if record_type == "pull" else record_type
         repository_record = self._json(["api", f"repos/{owner}/{repository}", "--method", "GET"])
         if not isinstance(repository_record, dict):
             raise GhError("GitHub repository response was not an object")
@@ -506,8 +507,33 @@ class GhClient:
         }
         if repository_record.get("visibility") != "public":
             return {**base_result, "verified": False, "error": "repository_not_public"}
-        endpoint = f"repos/{owner}/{repository}/{api_type}/{number}"
-        record = self._json(["api", endpoint, "--method", "GET"])
+        if record_type == "discussions":
+            query = (
+                "query($owner:String!,$name:String!,$number:Int!){"
+                "repository(owner:$owner,name:$name){"
+                "discussion(number:$number){number url title closed authorAssociation}}}"
+            )
+            response = self._json(
+                [
+                    "api", "graphql", "-f", f"query={query}",
+                    "-F", f"owner={owner}", "-F", f"name={repository}", "-F", f"number={number}",
+                ]
+            )
+            repository_data = response.get("data", {}).get("repository") if isinstance(response, dict) else None
+            record = repository_data.get("discussion") if isinstance(repository_data, dict) else None
+            if not isinstance(record, dict):
+                raise GhError("GitHub Discussion GraphQL response did not include the requested discussion")
+            canonical_url = record.get("url")
+            normalized_record = {
+                "html_url": canonical_url,
+                "state": "closed" if record.get("closed") is True else "open",
+                "author_association": record.get("authorAssociation"),
+            }
+            record = normalized_record
+        else:
+            api_type = "pulls" if record_type == "pull" else record_type
+            endpoint = f"repos/{owner}/{repository}/{api_type}/{number}"
+            record = self._json(["api", endpoint, "--method", "GET"])
         if not isinstance(record, dict):
             raise GhError("GitHub public-reference response was not an object")
         expected_url = f"https://github.com/{owner}/{repository}/{record_type}/{number}"

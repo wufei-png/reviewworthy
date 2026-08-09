@@ -45,14 +45,19 @@ class SchemaTests(unittest.TestCase):
             "Schema errors for %s: %s" % (schema_name, [error.message for error in errors]),
         )
 
+    def _assert_invalid(self, schema_name: str, value: dict) -> None:
+        schema = self.schemas[schema_name]
+        resolver = RefResolver.from_schema(schema, store=self.store)
+        errors = list(Draft202012Validator(schema, resolver=resolver).iter_errors(value))
+        self.assertTrue(errors, f"Expected {schema_name} to reject {value!r}")
+
     def test_all_schemas_are_valid_draft_2020_12_documents(self) -> None:
         for schema in self.schemas.values():
             Draft202012Validator.check_schema(schema)
 
     def test_generated_artifacts_validate_against_portable_schemas(self) -> None:
         packet = valid_packet()
-        signal = skeleton_signal("issue", "https://github.com/example/project/issues/1")
-        signal["published"] = True
+        signal = skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/1")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "README.md").write_text("Example project.\n", encoding="utf-8")
@@ -66,3 +71,15 @@ class SchemaTests(unittest.TestCase):
         self._assert_valid("contribution-signal.schema.json", signal)
         self._assert_valid("project-brief.schema.json", brief)
         self._assert_valid("understanding.schema.json", packet["understanding"])
+
+    def test_signal_schema_binds_verification_record_type_to_signal_record_type(self) -> None:
+        signal = skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/1")
+        signal["verification"] = {
+            "status": "verified",
+            "provider": "github",
+            "reference": signal["reference"],
+            "record_type": "discussion",
+            "verified_at": "2026-08-09T00:00:00Z",
+        }
+
+        self._assert_invalid("contribution-signal.schema.json", signal)

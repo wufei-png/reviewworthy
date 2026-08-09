@@ -47,6 +47,26 @@ class ActionEvidenceTests(unittest.TestCase):
         })
         return append_evidence_summary("## Change\nA bounded change.", build_evidence_summary(packet, diff))
 
+    def _policy_repository(self, root: Path, readme: str, structured: str | None = None) -> tuple[Path, dict]:
+        repository = root / "policy-repository"
+        repository.mkdir()
+        self._git(repository, "init", "-q")
+        self._git(repository, "config", "user.email", "test@example.invalid")
+        self._git(repository, "config", "user.name", "Reviewworthy Test")
+        self._git(repository, "branch", "-M", "main")
+        (repository / "README.md").write_text(readme, encoding="utf-8")
+        (repository / "src").mkdir()
+        (repository / "src" / "example.py").write_text("one\n", encoding="utf-8")
+        if structured is not None:
+            (repository / ".reviewworthy").mkdir()
+            (repository / ".reviewworthy" / "policy.toml").write_text(structured, encoding="utf-8")
+        self._git(repository, "add", ".")
+        self._git(repository, "commit", "-qm", "base policy")
+        self._git(repository, "checkout", "-qb", "feature")
+        (repository / "src" / "example.py").write_text("one\ntwo\n", encoding="utf-8")
+        self._git(repository, "commit", "-qam", "feature")
+        return repository, capture_pr_diff(repository, "main", "feature")
+
     def test_composite_action_reads_pr_body_and_never_reads_a_packet(self) -> None:
         content = (Path(__file__).parents[1] / "action.yml").read_text(encoding="utf-8")
         self.assertIn("python -m reviewworthy action check", content)
@@ -115,6 +135,51 @@ class ActionEvidenceTests(unittest.TestCase):
         self.assertEqual(result["verified_facts"]["diff"]["subject_digest"], diff["subject_digest"])
         self.assertNotIn("verification", result["verified_facts"])
         self.assertEqual(result["contributor_claims"]["verification"]["claimed_outcome"], "passed")
+
+    def test_action_uses_only_structured_policy_from_the_base_as_positive_machine_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._policy_repository(
+                Path(directory),
+                "AI assistance is allowed.\n",
+                "[ai]\nallowed = true\ndisclosure_required = true\n",
+            )
+            (repository / "README.md").write_text("AI assistance is prohibited.\n", encoding="utf-8")
+            (repository / ".reviewworthy" / "policy.toml").write_text("[ai]\nallowed = false\n", encoding="utf-8")
+            self._git(repository, "add", ".")
+            self._git(repository, "commit", "-qm", "untrusted head policy")
+            diff = capture_pr_diff(repository, "main", "feature")
+
+            result = check_evidence(
+                self._body(diff),
+                root=repository,
+                event_name="pull_request",
+                event_repository="example/project",
+                event_repository_id=101,
+                event_base_sha=diff["base_tip_sha"],
+                event_head_sha=diff["head_sha"],
+                mode="evidence-enforce",
+            )
+
+        self.assertEqual(result["conclusion"], "success", result["violations"])
+        self.assertEqual(result["base_policy"]["machine_authority"]["ai_assistance"], "allowed")
+        self.assertTrue(result["base_policy"]["document_advisory"])
+
+    def test_explicit_document_prohibition_in_base_blocks_enforcement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._policy_repository(Path(directory), "AI assistance is prohibited.\n")
+            result = check_evidence(
+                self._body(diff),
+                root=repository,
+                event_name="pull_request",
+                event_repository="example/project",
+                event_repository_id=101,
+                event_base_sha=diff["base_tip_sha"],
+                event_head_sha=diff["head_sha"],
+                mode="evidence-enforce",
+            )
+
+        self.assertIn("base_policy_ai_prohibited", {item["code"] for item in result["violations"]})
+        self.assertEqual(result["base_policy"]["machine_authority"], {})
 
     def test_each_public_diff_identity_field_is_recomputed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
