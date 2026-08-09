@@ -264,7 +264,7 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
     basis = packet.get("basis", {})
     if not isinstance(basis, dict) or basis.get("kind") not in {"issue", "signal", "discovery-evidence"}:
         _error(errors, "invalid_basis", "basis.kind must be issue, signal, or discovery-evidence", "basis.kind")
-    elif not basis.get("references") and not basis.get("evidence"):
+    elif basis.get("kind") == "issue" and not basis.get("references") and not basis.get("evidence"):
         _error(errors, "empty_basis", "A contribution basis needs references or reproducible evidence", "basis")
     if isinstance(basis, dict):
         errors.extend(validate_basis_signal(basis, entry.get("mode") if isinstance(entry, dict) else ""))
@@ -704,6 +704,10 @@ def issue_basis_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     basis = packet.get("basis", {})
     if not isinstance(basis, dict) or basis.get("kind") not in {"issue", "signal"}:
         return []
+    if basis.get("kind") == "signal":
+        signal = basis.get("signal")
+        if isinstance(signal, dict) and signal.get("record_type") != "issue":
+            return []
     reference = issue_reference(packet)
     if not reference:
         return [{"code": "issue_reference_required", "message": "Issue-backed work needs a canonical GitHub Issue URL.", "path": "basis.references"}]

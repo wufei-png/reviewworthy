@@ -44,7 +44,8 @@ from .signal import (
     validate_signal,
 )
 from .understanding import record_understanding, validate_understanding
-from .util import has_normalized_label, normalize_label, read_json, utc_now
+from .util import atomic_write_json, atomic_write_text, has_normalized_label, normalize_label, read_json, utc_now
+from .workflow import workflow_status
 
 
 def _print(value: Any, as_json: bool) -> None:
@@ -68,20 +69,17 @@ def _load_object(path: Path) -> dict[str, Any]:
 def _write_json(path: Path, value: dict[str, Any], force: bool = False) -> None:
     if path.exists() and not force:
         raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_json(path, value)
 
 
 def _write_text(path: Path, value: str, force: bool = False) -> None:
     if path.exists() and not force:
         raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(value, encoding="utf-8")
+    atomic_write_text(path, value)
 
 
 def _replace_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_json(path, value)
 
 
 def _common_json(parser: argparse.ArgumentParser) -> None:
@@ -92,6 +90,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reviewworthy", description="Evidence-first, maintainer-first contribution checks")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
+
+    for name in ("status", "next"):
+        workflow_command = commands.add_parser(name, help=f"Show derived workflow {name} from a current Packet 0.3")
+        workflow_command.add_argument("--packet", type=Path, required=True)
+        _common_json(workflow_command)
 
     policy = commands.add_parser("policy", help="Inspect repository contribution policy")
     policy_commands = policy.add_subparsers(dest="policy_command", required=True)
@@ -490,6 +493,13 @@ def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
+        if args.command in {"status", "next"}:
+            result = workflow_status(_load_object(args.packet), args.packet)
+            if args.command == "next":
+                result = {**result, "blocking": result["blocking"], "next": result["next"][:1]}
+            _print(result, args.as_json)
+            return 0
+
         if args.command == "policy":
             result = inspect_policy(Path(args.path))
             _print(result, args.as_json)
@@ -724,8 +734,7 @@ def main(argv: list[str] | None = None) -> int:
                 if output.exists() and not args.force:
                     raise ValueError(f"Refusing to overwrite existing file: {output}; use --force to replace it")
                 packet = skeleton_packet(args.contribution_id, args.mode, args.repository)
-                output.parent.mkdir(parents=True, exist_ok=True)
-                output.write_text(json.dumps(packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                atomic_write_json(output, packet, sort_keys=False)
                 result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
                 _print(result, args.as_json)
                 return 0

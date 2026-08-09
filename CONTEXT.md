@@ -31,7 +31,7 @@ A possible change supported by project evidence that has not yet been selected a
 _Avoid_: opportunity, random improvement
 
 **Contribution signal**:
-A status-bearing, recorded contribution basis, such as a public issue, maintainer request, accepted proposal, discussion, or a reproducible failure that satisfies the project's contribution policy. External signals must be publicly recorded; reproducible evidence may remain unpublished. Maintainer confirmation is optional, while rejected or expired signals cannot progress.
+A recorded basis whose `record_type`, `claim_type`, `lifecycle`, `verification`, and `authority` are independent. External records use canonical public provider identity; local reproducible evidence may stay private when policy authorizes it. Provider verification does not imply maintainer confirmation, while rejected or expired signals cannot progress.
 _Avoid_: agent enthusiasm, inferred demand
 
 **Contribution basis**:
@@ -84,8 +84,8 @@ _Avoid_: anti-cheating gate, human detector
 A checkpoint where the final title and Body are previewed and approved before public submission; independent human expression of motivation and trade-offs is additionally required when policy or risk makes it material.
 _Avoid_: auto-generated PR description
 
-**Review depth**:
-The required depth of contribution checks, either `standard` or `heightened`; it is not a contribution-value or absolute-safety score. Risk signals and user escalation may raise it, but nothing may lower required checks, and hard-stops are evaluated separately.
+**Review profile**:
+The required contribution check profile: `standard`, risk-raised `heightened`, or explicitly educational `learning`. Standard requires Ownership Check; Heightened and Learning add full Orientation and Assessment. It is not a contribution-value or safety score, and hard-stops remain independent.
 _Avoid_: AI confidence score, quality score, safety rating
 
 **Hard-stop**:
@@ -109,7 +109,7 @@ Read-only evidence from a supported provider that an external Contribution Signa
 _Avoid_: maintainer approval, signal sync
 
 **Understanding record**:
-The structured Orientation or Assessment outcome, evidence, and material snapshot stored in the Contribution Packet. The CLI validates its shape and freshness; the Skill and contributor own the explanation and answers.
+The structured Orientation or Assessment outcome, evidence, and semantic snapshot stored in the Contribution Packet. The CLI validates its shape and freshness; the Skill and contributor own the explanation and answers.
 _Avoid_: generated teaching transcript, authorship certificate
 
 **Contribution policy**:

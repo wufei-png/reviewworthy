@@ -243,6 +243,31 @@ class PacketValidationTests(unittest.TestCase):
         self.assertIn("issue_not_actionable", codes)
         self.assertIn("issue_duplicate", codes)
 
+    def test_discussion_signal_is_not_treated_as_an_empty_issue_basis(self) -> None:
+        packet = valid_packet()
+        packet["entry"]["mode"] = "discovery"
+        packet["basis"] = {
+            "kind": "signal",
+            "references": [],
+            "summary": "A public design discussion",
+            "signal": {
+                "signal_version": "0.3",
+                "record_type": "discussion",
+                "claim_type": "accepted_proposal",
+                "lifecycle": "pending",
+                "reference": "https://github.com/org/repo/discussions/7",
+                "evidence": [],
+                "authority": {"kind": "contributor", "actor": "", "asserted_at": ""},
+            },
+        }
+        snapshot = semantic_snapshot(packet)
+        packet["snapshots"]["semantic"] = snapshot
+        packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
+        packet["understanding"]["assessment"]["semantic_snapshot"] = snapshot
+
+        self.assertNotIn("empty_basis", {error["code"] for error in validate_packet(packet)["errors"]})
+        self.assertEqual(issue_basis_blockers(packet), [])
+
     def test_unresolved_candidate_duplicate_disposition_blocks_readiness(self) -> None:
         packet = valid_packet()
         packet["candidate_selection"] = {

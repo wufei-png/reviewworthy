@@ -14,6 +14,8 @@ The repository currently provides an alpha, standard-library-only Python CLI wit
 
 ```text
 reviewworthy packet init --root . --contribution-id contribution-001
+reviewworthy status --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --json
+reviewworthy next --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --json
 reviewworthy policy inspect [REPOSITORY]
 reviewworthy brief create --output .reviewworthy/project-brief.json --focus src/relevant_file.py
 reviewworthy brief validate .reviewworthy/project-brief.json --root .
@@ -44,7 +46,7 @@ reviewworthy remote plan ...
 reviewworthy remote create ... --confirm-operation-id rw-...
 ```
 
-The CLI and Skill form one contributor-first product. The full Contribution Packet stays in Git-private local state; a minimal Evidence Summary is published in the PR Body for the optional repository-side Action. Packets bind evidence to a GitHub repository identity. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
+The CLI and Skill form one contributor-first product. The full Contribution Packet stays in Git-private local state; a minimal Evidence Summary is published in the PR Body for the optional repository-side Action. `status` derives the current stage and blockers; `next` returns one deterministic next action so the Skill does not have to reconstruct the state machine. Packets bind evidence to a GitHub repository identity. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
 
 ## Workflow contract
 
@@ -62,7 +64,7 @@ Candidate recommendations are evidence-backed guidance, not authorization. `do_n
 
 Every node records a result. Review profile is `standard`, `heightened`, or `learning`; risk signals raise Standard to Heightened. Standard requires a light Ownership Check covering the problem, scope, verification, and risks. Heightened and Learning additionally require Orientation and Assessment with the full behavior, invariant, test, flow, tradeoff, failure, and regression rubric. Security issues, policy conflicts, irreversible changes, and unverifiable results remain independent hard-stops.
 
-The contract must be explicitly approved before remote readiness. Verification is defined by a versioned Packet plan whose checks have stable IDs, argv, repository-relative cwd, and a required flag. `verify run` executes a named check and records a receipt `0.3` bound to the exact plan digest, canonical `subject_digest`, stable HEAD, and clean worktree. A required check is ready only with `command_outcome=passed`, `integrity_status=stable`, and `provenance=contributor_local`. Timestamps and output hashes are audit-only. For Heightened and Learning, Orientation must pass before Assessment and both bind to the semantic snapshot; changing contribution decisions, the subject, plan, or semantic outcome invalidates them.
+The contract must be explicitly approved before remote readiness. Verification is defined by a versioned Packet plan whose checks have stable IDs, argv, repository-relative cwd, and a required flag. `verify run` executes a named check with bounded time and captured output, then records a receipt `0.3` bound to the exact plan digest, canonical `subject_digest`, stable HEAD, and clean worktree. A required check is ready only with `command_outcome=passed`, `integrity_status=stable`, and `provenance=contributor_local`. Timestamps and output hashes are audit-only. For Heightened and Learning, Orientation must pass before Assessment and both bind to the semantic snapshot; changing contribution decisions, the subject, plan, or semantic outcome invalidates them.
 
 ## Local development
 
@@ -100,7 +102,7 @@ The operation ID is embedded in a hidden Body marker. Before creating an Issue o
 
 For Pull Requests, `remote plan/create` recomputes the contribution Diff from the selected base/head merge base. Packet `0.3` binds `comparison=merge_base`, `base_tip_sha`, `merge_base_sha`, `head_sha`, `subject_digest`, `fingerprint_algorithm`, changed files, additions, and deletions; every field must match before the operation is rendered or written. Version `0.3` does not read, recognize, migrate, or reconcile older Packet, Signal, receipt, pending-state, or marker formats.
 
-For a policy-required Draft PR, the draft state is included in the operation ID and passed to `gh pr create --draft`. A pending local operation record is persisted immediately before a create; if the create or receipt persistence is uncertain, later retries stop for reconciliation instead of issuing another create. After a successful create, the ignored local operation receipt under `.reviewworthy/local/operations/` protects immediate retries during GitHub's read-after-write delay. Reviewworthy reads the actual remote PR head after create or remote reconciliation and again immediately before an Issue-note write; an unavailable or mismatched head becomes `remote_pr_head_unavailable` or `remote_pr_head_mismatch` and requires reconciliation. Issue-backed PRs contain the canonical Issue URL in the Body and add one exact PR URL note to that Issue; head uncertainty and note failures become `needs_reconciliation` without a second confirmation or another PR. Because GitHub exposes head reads and Issue comments as separate APIs, a head update concurrent with the comment POST remains a narrow provider race that receipts cannot make atomic.
+For a policy-required Draft PR, the draft state is included in the operation ID and passed to `gh pr create --draft`. A pending local operation record is persisted immediately before a create; if the create or receipt persistence is uncertain, later retries stop for reconciliation instead of issuing another create. Current receipts live only under ignored `local/v0.3/operations/` state and carry `state_version=0.3`; older pending or receipt paths are not inspected. Reviewworthy reads the actual remote PR head after create or remote reconciliation and again immediately before an Issue-note write; an unavailable or mismatched head becomes `remote_pr_head_unavailable` or `remote_pr_head_mismatch` and requires reconciliation. Multiple current marker matches stop for reconciliation. Issue-backed PRs contain the canonical Issue URL in the Body and add one exact PR URL note to that Issue; head uncertainty and note failures become `needs_reconciliation` without a second confirmation or another PR. Because GitHub exposes head reads and Issue comments as separate APIs, a head update concurrent with the comment POST remains a narrow provider race that receipts cannot make atomic.
 
 The first release does not create review comments or Discussions, close PRs, merge changes, or use an LLM as an Action gatekeeper. It can verify a referenced Discussion read-only through GraphQL; it does not publish Discussions or interpret maintainer responses.
 
@@ -123,6 +125,7 @@ The runtime has no third-party dependencies. Schema validation is a test/CI-only
 - [Understanding gate reference](./references/understanding-gate.md)
 - [Remote write reference](./references/remote-writes.md)
 - [Architecture decisions](./docs/adr/)
+- [Threat model](./THREAT_MODEL.md)
 
 ## Status
 

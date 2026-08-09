@@ -13,12 +13,11 @@ import hashlib
 from pathlib import Path
 from pathlib import PurePosixPath
 import re
-import subprocess
 import tempfile
 import tomllib
 from typing import Any, Iterable
 
-from .util import relative_path
+from .util import CommandOutputLimitError, CommandTimeoutError, relative_path, run_bounded
 
 
 CLAIM_KEYS = (
@@ -445,11 +444,14 @@ def inspect_policy_at_commit(root: Path, commit_sha: str) -> dict[str, Any]:
     root = root.resolve()
 
     def git(*args: str) -> bytes:
-        completed = subprocess.run(
-            ["git", "-C", str(root), *args],
-            capture_output=True,
-            check=False,
-        )
+        try:
+            completed = run_bounded(
+                ["git", "-C", str(root), *args],
+                timeout_seconds=60,
+                max_capture_bytes=16 * 1024 * 1024,
+            )
+        except (OSError, CommandTimeoutError, CommandOutputLimitError) as exc:
+            raise PolicyTreeError(str(exc)) from exc
         if completed.returncode != 0:
             detail = completed.stderr.decode("utf-8", errors="replace").strip() or "git command failed"
             raise PolicyTreeError(detail)

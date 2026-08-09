@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from hashlib import sha256
 from pathlib import Path
-import subprocess
 from typing import Any
 
-from .util import canonical_json, relative_path, utc_now
+from .util import CommandOutputLimitError, CommandTimeoutError, canonical_json, relative_path, run_bounded, utc_now
 
 
 PR_DIFF_FIELDS = (
@@ -31,10 +30,15 @@ class GitError(RuntimeError):
     """A requested Git evidence operation could not be completed."""
 
 
-def _run_git(root: Path, args: list[str], *, text: bool = True) -> subprocess.CompletedProcess[Any]:
+def _run_git(root: Path, args: list[str], *, text: bool = True) -> Any:
     try:
-        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=text, check=False)
-    except OSError as exc:
+        return run_bounded(
+            ["git", "-C", str(root), *args],
+            timeout_seconds=60,
+            max_capture_bytes=16 * 1024 * 1024,
+            text=text,
+        )
+    except (OSError, CommandTimeoutError, CommandOutputLimitError) as exc:
         raise GitError(f"Could not invoke git: {exc}") from exc
 
 
@@ -178,6 +182,8 @@ def run_verification(
     plan_digest: str,
     subject_digest: str,
     cwd: str = ".",
+    timeout_seconds: float = 600,
+    max_output_bytes: int = 4 * 1024 * 1024,
 ) -> dict[str, Any]:
     root = root.resolve()
     if not argv:
@@ -195,8 +201,14 @@ def run_verification(
         raise GitError("Verification requires a clean worktree before execution")
     started_at = utc_now()
     try:
-        completed = subprocess.run(argv, cwd=command_root, capture_output=True, text=False, check=False)
-    except OSError as exc:
+        completed = run_bounded(
+            argv,
+            cwd=command_root,
+            timeout_seconds=timeout_seconds,
+            max_capture_bytes=max_output_bytes,
+            text=False,
+        )
+    except (OSError, CommandTimeoutError, CommandOutputLimitError) as exc:
         raise GitError(f"Could not execute verification command: {exc}") from exc
     finished_at = utc_now()
     stdout = bytes(completed.stdout or b"")

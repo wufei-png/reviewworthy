@@ -8,14 +8,27 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from subprocess import CompletedProcess, run
+from subprocess import CompletedProcess
+import tempfile
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .evidence import append_evidence_summary, build_evidence_summary
 from .git import PR_DIFF_FIELDS
 from .repository import canonical_repository_slug, parse_public_record, repository_slugs_match
-from .util import canonical_json, has_normalized_label, normalize_label, utc_now
+from .util import (
+    CommandOutputLimitError,
+    CommandTimeoutError,
+    atomic_write_json,
+    canonical_json,
+    has_normalized_label,
+    normalize_label,
+    run_bounded,
+    utc_now,
+)
+
+
+OPERATION_STATE_VERSION = "0.3"
 
 
 class GhError(RuntimeError):
@@ -231,7 +244,7 @@ def build_signal_operation(
 def operation_receipt_path(packet_path: Path, operation_id: str) -> Path:
     """Return ignored local state used to bridge GitHub read-after-write delay."""
 
-    return packet_path.parent / "local" / "operations" / f"{operation_id}.json"
+    return packet_path.parent / "local" / "v0.3" / "operations" / f"{operation_id}.json"
 
 
 @contextmanager
@@ -243,7 +256,7 @@ def operation_lock(path: Path):
     try:
         descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps({"operation_id": path.stem, "recorded_at": utc_now()}) + "\n")
+            handle.write(json.dumps({"state_version": OPERATION_STATE_VERSION, "operation_id": path.stem, "recorded_at": utc_now()}) + "\n")
     except FileExistsError as exc:
         raise GhError(f"Operation is already in progress; reconcile the lock before retrying: {lock_path}") from exc
     try:
@@ -262,7 +275,7 @@ def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, 
         receipt = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise GhError(f"Operation receipt is unreadable; reconcile before retrying: {path}: {exc}") from exc
-    if not isinstance(receipt, dict) or any(
+    if not isinstance(receipt, dict) or receipt.get("state_version") != OPERATION_STATE_VERSION or any(
         receipt.get(key) != expected
         for key, expected in {
             "operation_id": operation.operation_id,
@@ -296,17 +309,15 @@ def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, 
 
 
 def _write_operation_record(path: Path, record: dict[str, Any], failure_message: str) -> None:
-    temporary_path = path.with_name(f".{path.name}.tmp")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(temporary_path, path)
+        atomic_write_json(path, record, sort_keys=False)
     except OSError as exc:
         raise GhError(f"{failure_message}: {path}: {exc}") from exc
 
 
 def save_operation_pending(path: Path, operation: RemoteOperation) -> None:
     record = {
+        "state_version": OPERATION_STATE_VERSION,
         "operation_id": operation.operation_id,
         "marker": operation.marker,
         "repo": operation.repo,
@@ -324,6 +335,7 @@ def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str) 
     if not isinstance(remote, str) or not remote.strip():
         raise GhError("Remote write returned an empty remote result; reconcile before retrying")
     receipt = {
+        "state_version": OPERATION_STATE_VERSION,
         "operation_id": operation.operation_id,
         "marker": operation.marker,
         "repo": operation.repo,
@@ -342,6 +354,7 @@ def _save_link_state(path: Path, operation: RemoteOperation, status: str, pr_url
     if not pr_url.strip():
         raise GhError("Pull-request link state needs a non-empty pr_url")
     record = {
+        "state_version": OPERATION_STATE_VERSION,
         "operation_id": operation.operation_id,
         "marker": operation.marker,
         "repo": operation.repo,
@@ -374,11 +387,19 @@ def save_operation_needs_reconciliation(path: Path, operation: RemoteOperation, 
 
 
 class GhClient:
-    def __init__(self, runner: Callable[..., CompletedProcess[str]] = run):
+    def __init__(self, runner: Callable[..., CompletedProcess[str]] = run_bounded):
         self._runner = runner
 
     def _invoke(self, args: list[str]) -> str:
-        completed = self._runner(["gh", *args], capture_output=True, text=True, check=False)
+        try:
+            completed = self._runner(
+                ["gh", *args],
+                timeout_seconds=60,
+                max_capture_bytes=8 * 1024 * 1024,
+                text=True,
+            )
+        except (OSError, CommandTimeoutError, CommandOutputLimitError) as exc:
+            raise GhError(f"Could not invoke gh: {exc}") from exc
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "gh command failed").strip()
             raise GhError(detail)
@@ -429,6 +450,10 @@ class GhClient:
                 }
                 if operation.marker in str(normalized["body"]):
                     items.append(normalized)
+        if len(items) > 1:
+            raise GhError(
+                f"Multiple remote records contain the current operation marker; reconcile before retrying: {operation.operation_id}"
+            )
         return items
 
     def pull_request_head(self, pr_url: str) -> str:
@@ -641,24 +666,17 @@ class GhClient:
         return comment
 
     def create(self, operation: RemoteOperation) -> str:
-        if operation.kind == "issue":
-            return self._invoke(
-                ["issue", "create", "--repo", operation.repo, "--title", operation.title, "--body", operation.body]
-            ).strip()
-        args = [
-            "pr",
-            "create",
-            "--repo",
-            operation.repo,
-            "--title",
-            operation.title,
-            "--body",
-            operation.body,
-            "--base",
-            operation.base or "main",
-            "--head",
-            operation.head or "",
-        ]
-        if operation.draft:
-            args.append("--draft")
-        return self._invoke(args).strip()
+        with tempfile.TemporaryDirectory(prefix="reviewworthy-gh-") as directory:
+            body_path = Path(directory) / "body.md"
+            body_path.write_text(operation.body, encoding="utf-8")
+            if operation.kind == "issue":
+                return self._invoke(
+                    ["issue", "create", "--repo", operation.repo, "--title", operation.title, "--body-file", str(body_path)]
+                ).strip()
+            args = [
+                "pr", "create", "--repo", operation.repo, "--title", operation.title,
+                "--body-file", str(body_path), "--base", operation.base or "main", "--head", operation.head or "",
+            ]
+            if operation.draft:
+                args.append("--draft")
+            return self._invoke(args).strip()

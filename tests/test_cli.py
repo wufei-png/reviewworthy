@@ -786,7 +786,7 @@ class CliBoundaryTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()):
                     second_code = main(args)
 
-            receipt_path = root / "local" / "operations" / f"{operation_id}.json"
+            receipt_path = root / "local" / "v0.3" / "operations" / f"{operation_id}.json"
             self.assertEqual(first_code, 2)
             self.assertEqual(second_code, 2)
             self.assertEqual(fake_client.create.call_count, 1)
@@ -854,7 +854,7 @@ class CliBoundaryTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()):
                     second_code = main(create_args)
 
-            receipt_files = list((root / "local" / "operations").glob("*.json"))
+            receipt_files = list((root / "local" / "v0.3" / "operations").glob("*.json"))
             self.assertEqual(first_code, 0)
             self.assertEqual(second_code, 0)
             self.assertEqual(len(receipt_files), 1)
@@ -940,7 +940,7 @@ class CliBoundaryTests(unittest.TestCase):
                         second_code = main(create_args)
 
                 result = json.loads(first_output.getvalue())
-                receipt_files = list((root / "local" / "operations").glob("*.json"))
+                receipt_files = list((root / "local" / "v0.3" / "operations").glob("*.json"))
                 self.assertEqual((first_code, second_code), (1, 1))
                 self.assertEqual(result["outcome"], "needs_reconciliation")
                 self.assertTrue(result["reason"].startswith(expected_reason))
@@ -1063,7 +1063,7 @@ class CliBoundaryTests(unittest.TestCase):
                     first_code = main(create_args)
                 with redirect_stdout(io.StringIO()):
                     second_code = main(create_args)
-            receipt_files = list((root / "local" / "operations").glob("*.json"))
+            receipt_files = list((root / "local" / "v0.3" / "operations").glob("*.json"))
             self.assertEqual(first_code, 1)
             self.assertEqual(second_code, 1)
             self.assertEqual(json.loads(receipt_files[0].read_text())["status"], "needs_reconciliation")

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-import subprocess
 from typing import Any
 from urllib.parse import urlparse
 
 from .policy import inspect_policy
 from .repository import parse_repository_slug
-from .util import relative_path, sha256_json
+from .util import CommandOutputLimitError, CommandTimeoutError, relative_path, run_bounded, sha256_json
 
 
 BRIEF_VERSION = "0.1"
@@ -110,8 +109,13 @@ def _entrypoint_hints(root: Path, tooling: list[Path], test_paths: list[Path]) -
 
 def _git_output(root: Path, args: list[str]) -> str:
     try:
-        completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
-    except OSError:
+        completed = run_bounded(
+            ["git", "-C", str(root), *args],
+            timeout_seconds=30,
+            max_capture_bytes=1024 * 1024,
+            text=True,
+        )
+    except (OSError, CommandTimeoutError, CommandOutputLimitError):
         return ""
     if completed.returncode != 0:
         return ""

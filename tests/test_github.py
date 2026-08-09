@@ -99,6 +99,7 @@ class GitHubOperationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "receipt.json"
             path.write_text(json.dumps({
+                "state_version": "0.3",
                 "operation_id": operation.operation_id,
                 "marker": operation.marker,
                 "repo": operation.repo,
@@ -123,14 +124,20 @@ class GitHubOperationTests(unittest.TestCase):
         packet["policy"]["authoritative_claims"]["draft_pr_required"] = True
         operation = build_operation(packet, "example/project", "pull_request", "Fix", "Body", "main", "fix/input", packet["diff"])
         calls = []
+        bodies = []
 
         def fake_runner(argv, **kwargs):
             calls.append(argv)
+            body_path = Path(argv[argv.index("--body-file") + 1])
+            bodies.append(body_path.read_text())
             return CompletedProcess(argv, 0, "https://github.com/example/project/pull/7\n", "")
 
         self.assertTrue(operation.draft)
         GhClient(fake_runner).create(operation)
         self.assertIn("--draft", calls[0])
+        self.assertIn("--body-file", calls[0])
+        self.assertNotIn(operation.body, calls[0])
+        self.assertEqual(bodies, [operation.body])
 
     def test_candidate_search_is_read_only_and_normalizes_issue_and_pr_kind(self) -> None:
         calls = []
@@ -310,6 +317,19 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertIn("--paginate", calls[0])
         self.assertIn("--slurp", calls[0])
 
+    def test_multiple_current_marker_matches_require_reconciliation(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix input", "Body")
+
+        def fake_runner(argv, **kwargs):
+            records = [[
+                {"number": 2, "html_url": "https://github.com/example/project/issues/2", "body": operation.marker},
+                {"number": 3, "html_url": "https://github.com/example/project/issues/3", "body": operation.marker},
+            ]]
+            return CompletedProcess(argv, 0, json.dumps(records), "")
+
+        with self.assertRaisesRegex(GhError, "Multiple remote records"):
+            GhClient(fake_runner).find_existing(operation)
+
     def test_pull_request_head_reads_the_canonical_remote_commit(self) -> None:
         calls = []
 
@@ -339,6 +359,26 @@ class GitHubOperationTests(unittest.TestCase):
             save_operation_receipt(path, operation, "https://github.com/example/project/issues/7")
             receipt = load_operation_receipt(path, operation)
             self.assertEqual(receipt["remote"], "https://github.com/example/project/issues/7")
+            self.assertEqual(receipt["state_version"], "0.3")
+            self.assertIn("local/v0.3/operations", path.as_posix())
+
+    def test_unversioned_operation_state_is_not_recognized(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix input", "Body")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            path.write_text(json.dumps({
+                "operation_id": operation.operation_id,
+                "marker": operation.marker,
+                "repo": operation.repo,
+                "kind": operation.kind,
+                "operation": operation.as_dict(),
+                "status": "succeeded",
+                "remote": "https://github.com/example/project/issues/7",
+                "recorded_at": "2026-08-09T00:00:00Z",
+            }), encoding="utf-8")
+
+            with self.assertRaisesRegex(GhError, "does not match"):
+                load_operation_receipt(path, operation)
 
     def test_incomplete_operation_receipt_requires_reconciliation(self) -> None:
         operation = build_operation(valid_packet(), "example/project", "issue", "Fix input", "Body", "main")

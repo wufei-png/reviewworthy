@@ -2,8 +2,23 @@
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from fnmatch import fnmatchcase
 from typing import Any
+
+
+DEFAULT_HEIGHTENED_PATH_GLOBS = (
+    ".github/workflows/**",
+    "migrations/**",
+    "**/migrations/**",
+    "auth/**",
+    "**/auth/**",
+    "security/**",
+    "**/security/**",
+    "credentials/**",
+    "**/credentials/**",
+    "permissions/**",
+    "**/permissions/**",
+)
 
 
 def _add_signal(signals: list[dict[str, str]], code: str, reason: str) -> None:
@@ -41,18 +56,44 @@ def assess_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if manifest.get("low_verifiability"):
         _add_signal(signals, "low_verifiability", "Evidence is available but difficult to reproduce or observe.")
 
-    changed_files = [str(value) for value in manifest.get("changed_files", [])]
-    sensitive_patterns = (".github/workflows/", "migrations/", "auth", "permission", "security", "credential")
-    if any(any(pattern in path.lower() for pattern in sensitive_patterns) for path in changed_files):
-        _add_signal(signals, "sensitive_path", "Changed files include a sensitive or operational path.")
+    raw_changed_files = manifest.get("changed_files", [])
+    if not isinstance(raw_changed_files, list) or not all(isinstance(value, str) and value.strip() for value in raw_changed_files):
+        _add_hard_stop(hard_stops, "invalid_risk_manifest", "changed_files must be a list of non-empty repository paths.")
+        changed_files: list[str] = []
+    else:
+        changed_files = [value.replace("\\", "/") for value in raw_changed_files]
+    raw_globs = manifest.get("heightened_path_globs", list(DEFAULT_HEIGHTENED_PATH_GLOBS))
+    if not isinstance(raw_globs, list) or not all(isinstance(value, str) and value.strip() for value in raw_globs):
+        _add_hard_stop(hard_stops, "invalid_risk_manifest", "heightened_path_globs must be a list of non-empty globs.")
+        heightened_globs = list(DEFAULT_HEIGHTENED_PATH_GLOBS)
+    else:
+        heightened_globs = list(raw_globs)
+    matched_path_rules = [
+        {"path": path, "rule": rule}
+        for path in changed_files
+        for rule in heightened_globs
+        if fnmatchcase(path.casefold(), rule.casefold())
+    ]
+    if matched_path_rules:
+        first = matched_path_rules[0]
+        signals.append({
+            "code": "sensitive_path",
+            "reason": "Changed files match a configured heightened-review path rule.",
+            "path": first["path"],
+            "rule": first["rule"],
+        })
 
     diff = manifest.get("diff", {})
     if isinstance(diff, dict):
-        additions = int(diff.get("additions", 0) or 0)
-        deletions = int(diff.get("deletions", 0) or 0)
-        max_lines = int(manifest.get("max_diff_lines", 400) or 400)
-        if additions + deletions > max_lines:
+        additions = diff.get("additions", 0)
+        deletions = diff.get("deletions", 0)
+        max_lines = manifest.get("max_diff_lines", 400)
+        if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in (additions, deletions, max_lines)):
+            _add_hard_stop(hard_stops, "invalid_risk_manifest", "Diff line counts and max_diff_lines must be non-negative integers.")
+        elif additions + deletions > max_lines:
             _add_signal(signals, "large_diff", f"Diff has {additions + deletions} changed lines, over the {max_lines}-line review budget.")
+    elif diff is not None:
+        _add_hard_stop(hard_stops, "invalid_risk_manifest", "diff must be an object when present.")
 
     user_escalated = bool(manifest.get("user_escalated"))
     profile = requested if requested == "learning" else ("heightened" if requested == "heightened" or user_escalated or signals else "standard")
@@ -63,4 +104,6 @@ def assess_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "user_escalated": user_escalated,
         "requested_review_profile": requested,
         "changed_files": changed_files,
+        "heightened_path_globs": heightened_globs,
+        "matched_path_rules": matched_path_rules,
     }
