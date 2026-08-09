@@ -8,13 +8,21 @@ import tempfile
 import unittest
 
 from reviewworthy.cli import main
-from reviewworthy.packet import semantic_snapshot
+from reviewworthy.packet import semantic_snapshot, skeleton_packet
 from reviewworthy.workflow import workflow_status
 
 from helpers import valid_packet
 
 
 class WorkflowStatusTests(unittest.TestCase):
+    def test_fresh_packet_starts_at_basis_instead_of_invalid(self) -> None:
+        packet = skeleton_packet("fresh-001", "issue-backed", "example/project")
+
+        result = workflow_status(packet, Path("packet.json"))
+
+        self.assertEqual(result["current_stage"], "basis")
+        self.assertIn("canonical GitHub Issue URL", result["next"][0]["reason"])
+
     def test_ready_packet_has_remote_plan_as_next_step(self) -> None:
         result = workflow_status(valid_packet(), Path("packet.json"))
 
@@ -97,3 +105,11 @@ class WorkflowStatusTests(unittest.TestCase):
         self.assertEqual(result["current_stage"], "basis")
         self.assertEqual(result["next"][0]["kind"], "decision")
         self.assertNotIn("issue verify", result["next"][0]["reason"])
+
+    def test_missing_narrative_reaches_narrative_stage(self) -> None:
+        packet = valid_packet()
+        packet["narrative"].update({"title": "", "body": "", "final_preview_confirmed": False})
+
+        result = workflow_status(packet, Path("packet.json"))
+
+        self.assertEqual(result["current_stage"], "narrative")

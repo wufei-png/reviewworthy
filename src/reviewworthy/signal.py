@@ -15,6 +15,14 @@ SIGNAL_VERIFICATION_STATUSES = {"verified", "local_only"}
 SIGNAL_AUTHORITY_KINDS = {"contributor", "maintainer", "repository"}
 
 
+def require_current_signal(signal: Any) -> dict[str, Any]:
+    """Reject non-0.3 Signal records before interpreting any other field."""
+
+    if not isinstance(signal, dict) or signal.get("signal_version") != SIGNAL_VERSION:
+        raise ValueError(f"Only Signal {SIGNAL_VERSION} is supported; older formats are not read or migrated")
+    return signal
+
+
 def skeleton_signal(
     record_type: str = "issue",
     claim_type: str = "bug_report",
@@ -44,14 +52,15 @@ def validate_signal(signal: Any, *, require_confirmed: bool = False) -> dict[str
     if not isinstance(signal, dict):
         _error(errors, "invalid_signal", "Signal must be an object", "signal")
         return {"valid": False, "errors": errors}
+    if signal.get("signal_version") != SIGNAL_VERSION:
+        _error(errors, "invalid_signal_version", f"signal_version must be {SIGNAL_VERSION}", "signal.signal_version")
+        return {"valid": False, "errors": errors}
     allowed = {
         "signal_version", "record_type", "claim_type", "lifecycle", "reference", "evidence",
         "authority", "verification", "publication_subject_id", "publication",
     }
     for key in sorted(set(signal) - allowed):
         _error(errors, "unknown_signal_field", f"signal.{key} is not part of Signal {SIGNAL_VERSION}", f"signal.{key}")
-    if signal.get("signal_version") != SIGNAL_VERSION:
-        _error(errors, "invalid_signal_version", f"signal_version must be {SIGNAL_VERSION}", "signal.signal_version")
     record_type = signal.get("record_type")
     claim_type = signal.get("claim_type")
     lifecycle = signal.get("lifecycle")

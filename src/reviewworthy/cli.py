@@ -31,7 +31,17 @@ from .github import (
     save_operation_pr_created,
     save_operation_receipt,
 )
-from .packet import good_first_issue_policy_errors, issue_link_blockers, issue_reference, semantic_snapshot, readiness_blockers, require_contribution_id, skeleton_packet, validate_packet
+from .packet import (
+    good_first_issue_policy_errors,
+    issue_link_blockers,
+    issue_reference,
+    readiness_blockers,
+    require_contribution_id,
+    require_current_packet,
+    semantic_snapshot,
+    skeleton_packet,
+    validate_packet,
+)
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .risk import assess_manifest
@@ -40,6 +50,7 @@ from .signal import (
     SIGNAL_CLAIM_TYPES,
     SIGNAL_LIFECYCLES,
     SIGNAL_RECORD_TYPES,
+    require_current_signal,
     skeleton_signal,
     validate_signal,
 )
@@ -64,6 +75,10 @@ def _load_object(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"Expected a JSON object in {path}")
     return value
+
+
+def _load_current_packet(path: Path) -> dict[str, Any]:
+    return require_current_packet(_load_object(path))
 
 
 def _write_json(path: Path, value: dict[str, Any], force: bool = False) -> None:
@@ -318,7 +333,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any, dict[str, Any] | None]:
-    packet = _load_object(args.packet)
+    packet = _load_current_packet(args.packet)
     if not repository_matches(packet.get("repository"), args.repo):
         raise ValueError("Remote target repository must exactly match packet.repository")
     body = args.body_file.read_text(encoding="utf-8")
@@ -494,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         if args.command in {"status", "next"}:
-            result = workflow_status(_load_object(args.packet), args.packet)
+            result = workflow_status(_load_current_packet(args.packet), args.packet)
             if args.command == "next":
                 result = {**result, "blocking": result["blocking"], "next": result["next"][:1]}
             _print(result, args.as_json)
@@ -521,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "understanding":
-            packet = _load_object(args.path)
+            packet = _load_current_packet(args.path)
             if args.understanding_command == "validate":
                 depth = packet.get("review", {}).get("profile", "standard") if isinstance(packet.get("review"), dict) else "standard"
                 result = validate_understanding(packet.get("understanding"), semantic_snapshot(packet), review_profile=depth)
@@ -648,7 +663,7 @@ def main(argv: list[str] | None = None) -> int:
                     result["recorded"] = str(args.path)
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
-            signal_value = _load_object(args.path)
+            signal_value = require_current_signal(_load_object(args.path))
             body = args.body_file.read_text(encoding="utf-8")
             if not args.title.strip() or not body.strip():
                 raise ValueError("Signal publication requires a non-empty title and body")
@@ -684,7 +699,7 @@ def main(argv: list[str] | None = None) -> int:
             if signal_value.get("lifecycle") != "pending":
                 raise ValueError("Only pending signals can be published")
             if target != args.path and target.exists() and not args.force:
-                existing_target = _load_object(target)
+                existing_target = require_current_signal(_load_object(target))
                 existing_publication = existing_target.get("publication")
                 if not (
                     existing_target.get("publication_subject_id") == operation.subject_id
@@ -778,7 +793,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if args.candidate_command == "bind":
                 menu = _load_object(args.menu)
-                packet = _load_object(args.packet)
+                packet = _load_current_packet(args.packet)
                 updated = bind_candidate(menu, packet, args.candidate_id)
                 snapshot = semantic_snapshot(updated)
                 snapshots = updated.setdefault("snapshots", {})
@@ -799,7 +814,7 @@ def main(argv: list[str] | None = None) -> int:
                 _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "semantic_snapshot": snapshot}, args.as_json)
                 return 0
             if args.candidate_command == "transition":
-                packet = _load_object(args.packet)
+                packet = _load_current_packet(args.packet)
                 updated = transition_candidate(packet, to=args.to, reason=args.reason, human_confirmed=args.confirm)
                 snapshot = semantic_snapshot(updated)
                 snapshots = updated.setdefault("snapshots", {})
@@ -849,7 +864,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "disclosure":
-            packet = _load_object(args.packet)
+            packet = _load_current_packet(args.packet)
             result = render_disclosure(packet, args.location)
             if args.output:
                 _write_text(args.output, result["text"] + "\n", args.force)
@@ -869,7 +884,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "verify":
-            packet = _load_object(args.packet)
+            packet = _load_current_packet(args.packet)
             verification = packet.get("verification")
             plan = verification.get("plan") if isinstance(verification, dict) else None
             checks = plan.get("checks", []) if isinstance(plan, dict) else []
@@ -905,7 +920,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if receipt["command_outcome"] == "passed" and receipt["integrity_status"] == "stable" else 1
 
         if args.command == "issue":
-            packet = _load_object(args.packet)
+            packet = _load_current_packet(args.packet)
             result = _verify_and_record_issue(packet, args.packet, record=args.record)
             _print(result, args.as_json)
             return 0 if result["valid"] else 1

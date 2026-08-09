@@ -90,6 +90,4 @@ class SignalTests(unittest.TestCase):
         result = validate_signal(old_signal)
         codes = {error["code"] for error in result["errors"]}
 
-        self.assertIn("invalid_signal_version", codes)
-        self.assertIn("unknown_signal_field", codes)
-        self.assertIn("invalid_signal_record_type", codes)
+        self.assertEqual(codes, {"invalid_signal_version"})

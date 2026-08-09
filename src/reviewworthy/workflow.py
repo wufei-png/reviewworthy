@@ -10,14 +10,24 @@ from .packet import issue_reference, readiness_blockers, validate_packet
 
 
 _STAGE_CODES = (
-    ("basis", {"issue_reference_required", "issue_verification_required", "signal_verification_required", "missing_signal_record", "discovery_signal_required"}),
-    ("contract", {"contract_not_approved", "candidate_transition_required", "duplicate_work_unresolved"}),
-    ("diff", {"missing_diff_receipt"}),
+    ("basis", {
+        "empty_basis", "missing_signal_record", "missing_signal_reference", "missing_signal_evidence",
+        "missing_signal_authority", "issue_reference_required", "issue_verification_required",
+        "signal_verification_required", "discovery_signal_required",
+    }),
+    ("contract", {"empty_scope", "contract_not_approved", "candidate_transition_required", "duplicate_work_unresolved"}),
+    ("diff", {"invalid_diff_receipt", "missing_diff_receipt", "scope_unverifiable"}),
     ("verification", {"missing_verification_plan", "missing_executed_verification", "required_verification_missing", "verification_head_mismatch"}),
     ("ownership", {"ownership_not_passed"}),
     ("understanding", {"orientation_not_passed", "assessment_not_passed", "stale_orientation", "stale_assessment"}),
-    ("narrative", {"missing_human_expression", "missing_result_evidence", "node_not_passed"}),
+    ("narrative", {
+        "missing_pr_title", "missing_pr_body", "narrative_not_confirmed", "missing_ai_disclosure",
+        "missing_disclosure_location", "disclosure_not_human_confirmed", "missing_human_expression",
+        "missing_result_evidence", "node_not_passed",
+    }),
 )
+
+_EXPECTED_INCOMPLETE_CODES = set().union(*(codes for _, codes in _STAGE_CODES))
 
 
 def _deduplicated(items: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -63,6 +73,8 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
         if issue_reference(packet):
             return [{"kind": "command", "command": f"reviewworthy issue verify --packet {quoted_packet} --record --json", "reason": "Record current provider evidence for the Issue contribution basis."}]
         basis = packet.get("basis") if isinstance(packet.get("basis"), dict) else {}
+        if basis.get("kind") == "issue":
+            return [{"kind": "decision", "command": "", "reason": "Add the canonical GitHub Issue URL that supports this Issue-backed contribution."}]
         signal = basis.get("signal") if isinstance(basis.get("signal"), dict) else {}
         if signal.get("record_type") in {"pull_request", "discussion"}:
             return [{"kind": "decision", "command": "", "reason": "Verify the source Signal artifact with `reviewworthy signal verify SIGNAL_PATH --record --json`, then bind that updated Signal 0.3 record to this Packet."}]
@@ -109,7 +121,8 @@ def workflow_status(packet: Any, packet_path: Path) -> dict[str, Any]:
     validation_errors = list(validation.get("errors", []))
     readiness = readiness_blockers(packet)
     blockers = _deduplicated([*validation_errors, *readiness])
-    if validation_errors or not isinstance(packet, dict):
+    structural_errors = [item for item in validation_errors if item.get("code") not in _EXPECTED_INCOMPLETE_CODES]
+    if structural_errors or not isinstance(packet, dict):
         stage = "invalid"
     elif not blockers:
         stage = "ready"

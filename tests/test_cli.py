@@ -75,6 +75,75 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(validation_code, 0)
             self.assertEqual(readiness_code, 1)
 
+    def test_packet_consumers_reject_old_packet_signal_and_receipt_formats(self) -> None:
+        cases = []
+        old_packet = valid_packet()
+        old_packet["packet_version"] = "0.2"
+        cases.append(old_packet)
+        old_signal = valid_packet()
+        old_signal["basis"] = {
+            "kind": "signal",
+            "references": [],
+            "summary": "old signal",
+            "signal": {"signal_version": "0.2"},
+        }
+        cases.append(old_signal)
+        old_receipt = valid_packet()
+        old_receipt["verification"]["receipts"][0]["receipt_version"] = "0.2"
+        cases.append(old_receipt)
+
+        with tempfile.TemporaryDirectory() as directory:
+            for index, packet in enumerate(cases):
+                path = Path(directory) / f"packet-{index}.json"
+                original = json.dumps(packet, sort_keys=True)
+                path.write_text(original, encoding="utf-8")
+                output = io.StringIO()
+
+                with redirect_stdout(output):
+                    code = main(["understanding", "validate", str(path), "--json"])
+
+                self.assertEqual(code, 2, output.getvalue())
+                self.assertIn("Only Packet 0.3", json.loads(output.getvalue())["error"])
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+
+    def test_old_signal_cannot_reach_publication_planning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            signal_path = root / "signal.json"
+            body_path = root / "body.md"
+            signal_path.write_text(json.dumps({"signal_version": "0.2", "kind": "issue"}), encoding="utf-8")
+            body_path.write_text("candidate\n", encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main([
+                    "signal", "publish", "plan", str(signal_path), "--repo", "example/project",
+                    "--title", "Candidate", "--body-file", str(body_path), "--json",
+                ])
+
+            self.assertEqual(code, 2)
+            self.assertIn("Only Signal 0.3", json.loads(output.getvalue())["error"])
+
+    def test_verify_run_rejects_old_packet_before_git_or_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "packet.json"
+            packet = valid_packet()
+            packet["packet_version"] = "0.2"
+            original = json.dumps(packet)
+            path.write_text(original, encoding="utf-8")
+            output = io.StringIO()
+
+            with patch("reviewworthy.cli.capture_pr_diff") as capture, patch("reviewworthy.cli.run_verification") as run, redirect_stdout(output):
+                code = main([
+                    "verify", "run", "--root", directory, "--packet", str(path),
+                    "--check-id", "unit", "--json",
+                ])
+
+            self.assertEqual(code, 2)
+            capture.assert_not_called()
+            run.assert_not_called()
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+
     def test_signal_verify_is_read_only_and_signal_publish_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

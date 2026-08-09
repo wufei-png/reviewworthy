@@ -11,7 +11,7 @@ from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
 from .git import FINGERPRINT_ALGORITHM, PR_DIFF_FIELDS, VERIFICATION_PLAN_VERSION, VERIFICATION_RECEIPT_VERSION, verification_plan_digest
 from .repository import parse_public_record, parse_repository_slug, repository_slugs_match, validate_repository_identity
-from .signal import signal_readiness_blockers, skeleton_signal, validate_basis_signal
+from .signal import SIGNAL_VERSION, signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .understanding import validate_understanding
 from .util import has_normalized_label, normalize_label, sha256_json
 
@@ -35,6 +35,45 @@ PR_DIFF_STRING_FIELDS = (
     "subject_digest",
     "fingerprint_algorithm",
 )
+
+
+def packet_format_errors(packet: Any) -> list[dict[str, str]]:
+    """Return hard current-format boundary errors without interpreting content."""
+
+    if not isinstance(packet, dict):
+        return [{"code": "invalid_packet", "message": "Contribution Packet must be a JSON object", "path": "packet"}]
+    if packet.get("packet_version") != PACKET_VERSION:
+        return [{"code": "invalid_packet_version", "message": f"packet_version must be {PACKET_VERSION}", "path": "packet_version"}]
+    basis = packet.get("basis")
+    if isinstance(basis, dict) and "signal" in basis:
+        signal = basis.get("signal")
+        if not isinstance(signal, dict) or signal.get("signal_version") != SIGNAL_VERSION:
+            return [{"code": "invalid_signal_version", "message": f"Embedded Signal must be {SIGNAL_VERSION}", "path": "basis.signal.signal_version"}]
+    verification = packet.get("verification")
+    receipts = verification.get("receipts") if isinstance(verification, dict) else None
+    if isinstance(verification, dict) and "receipts" in verification and not isinstance(receipts, list):
+        return [{"code": "invalid_receipts", "message": "verification.receipts must be a current list", "path": "verification.receipts"}]
+    if isinstance(receipts, list):
+        for index, receipt in enumerate(receipts):
+            if not isinstance(receipt, dict) or receipt.get("receipt_version") != VERIFICATION_RECEIPT_VERSION:
+                return [{
+                    "code": "invalid_receipt_version",
+                    "message": f"Embedded verification receipts must be {VERIFICATION_RECEIPT_VERSION}",
+                    "path": f"verification.receipts[{index}].receipt_version",
+                }]
+    return []
+
+
+def require_current_packet(packet: Any) -> dict[str, Any]:
+    """Reject non-current Packet, Signal, or receipt formats before consumption."""
+
+    errors = packet_format_errors(packet)
+    if errors:
+        raise ValueError(
+            f"Only Packet {PACKET_VERSION} with current Signal and receipt formats is supported; "
+            f"older formats are not read or migrated ({errors[0]['path']})"
+        )
+    return packet
 
 
 def _is_repository_relative_path(value: str) -> bool:
@@ -593,10 +632,11 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
 def validate_packet(packet: Any) -> dict[str, Any]:
     """Validate any JSON-like value and always return structured errors."""
 
-    if not isinstance(packet, dict):
+    format_errors = packet_format_errors(packet)
+    if format_errors:
         return {
             "valid": False,
-            "errors": [{"code": "invalid_packet", "message": "Contribution Packet must be a JSON object", "path": "packet"}],
+            "errors": format_errors,
             "result_nodes": [],
         }
     try:
@@ -1029,7 +1069,7 @@ def readiness_blockers(packet: Any) -> list[dict[str, str]]:
     """Evaluate readiness for any JSON-like value without throwing."""
 
     validation = validate_packet(packet)
-    if not isinstance(packet, dict):
+    if packet_format_errors(packet):
         return list(validation["errors"])
     try:
         return _readiness_blockers_object(packet)
