@@ -1,5 +1,7 @@
 # Separate Orientation from Assessment and invalidate stale understanding
 
+Status: Superseded by ADR 0017 for semantic snapshots and profile-specific understanding requirements.
+
 The understanding gate has two deliberate phases: Orientation explains the fixed contribution contract, final Diff, verification evidence, and policy result; Assessment then asks new questions that test the contributor's understanding without repeating the explanation. The Assessment is bound to a material snapshot and becomes invalid whenever those materials materially change, preventing an earlier answer from being treated as evidence for a different contribution.
 
 ## Considered Options

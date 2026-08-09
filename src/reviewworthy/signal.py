@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .repository import parse_public_record
+from .repository import parse_public_record, repository_slugs_match
 
 
 SIGNAL_VERSION = "0.3"
@@ -45,7 +45,69 @@ def _error(errors: list[dict[str, str]], code: str, message: str, path: str) -> 
     errors.append({"code": code, "message": message, "path": path})
 
 
-def validate_signal(signal: Any, *, require_confirmed: bool = False) -> dict[str, Any]:
+def _external_verification_errors(
+    signal: dict[str, Any],
+    verification: dict[str, Any],
+    repository: Any = None,
+) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    parsed = parse_public_record(signal.get("reference"))
+    if not parsed:
+        return errors
+    expected_slug = f"{parsed['owner']}/{parsed['name']}"
+    required_identity = {
+        "host": "github.com",
+        "repository": expected_slug,
+        "number": parsed["number"],
+        "url": parsed["url"],
+        "visibility": "public",
+    }
+    for field, expected in required_identity.items():
+        actual = verification.get(field)
+        matches = repository_slugs_match(actual, expected) if field == "repository" else actual == expected
+        if field == "number" and isinstance(actual, bool):
+            matches = False
+        if not matches:
+            _error(
+                errors,
+                "signal_verification_identity_mismatch",
+                f"verification.{field} must match the canonical public Signal identity",
+                f"signal.verification.{field}",
+            )
+    repository_id = verification.get("repository_id")
+    if not isinstance(repository_id, int) or isinstance(repository_id, bool) or repository_id <= 0:
+        _error(
+            errors,
+            "invalid_signal_verification_repository_id",
+            "verification.repository_id must be a positive integer",
+            "signal.verification.repository_id",
+        )
+    if isinstance(repository, dict):
+        packet_slug = f"{repository.get('owner', '')}/{repository.get('name', '')}"
+        if not repository_slugs_match(verification.get("repository"), packet_slug):
+            _error(
+                errors,
+                "signal_packet_repository_mismatch",
+                "Signal verification repository must match packet.repository",
+                "signal.verification.repository",
+            )
+        packet_repository_id = repository.get("repository_id")
+        if packet_repository_id is not None and repository_id != packet_repository_id:
+            _error(
+                errors,
+                "signal_packet_repository_id_mismatch",
+                "Signal verification repository_id must match packet.repository_id",
+                "signal.verification.repository_id",
+            )
+    return errors
+
+
+def validate_signal(
+    signal: Any,
+    *,
+    require_confirmed: bool = False,
+    repository: Any = None,
+) -> dict[str, Any]:
     """Validate only Signal 0.3; earlier axes are unknown fields, not aliases."""
 
     errors: list[dict[str, str]] = []
@@ -126,6 +188,8 @@ def validate_signal(signal: Any, *, require_confirmed: bool = False) -> dict[str
                     _error(errors, "signal_verification_record_mismatch", "local_evidence requires local_only/local verification", "signal.verification")
             elif verification.get("status") != "verified" or verification.get("provider") != "github" or verification.get("record_type") != record_type:
                 _error(errors, "signal_verification_record_mismatch", "External verification must be verified by GitHub for the same record_type", "signal.verification")
+            else:
+                errors.extend(_external_verification_errors(signal, verification, repository))
 
     subject_id = signal.get("publication_subject_id")
     publication = signal.get("publication")
@@ -148,7 +212,7 @@ def validate_signal(signal: Any, *, require_confirmed: bool = False) -> dict[str
     return {"valid": not errors, "errors": errors}
 
 
-def validate_basis_signal(basis: dict[str, Any], mode: str) -> list[dict[str, str]]:
+def validate_basis_signal(basis: dict[str, Any], mode: str, repository: Any = None) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     basis_kind = basis.get("kind")
     if mode == "discovery" and basis_kind not in {"signal", "discovery-evidence"}:
@@ -159,7 +223,7 @@ def validate_basis_signal(basis: dict[str, Any], mode: str) -> list[dict[str, st
     if not isinstance(signal, dict):
         _error(errors, "missing_signal_record", "This basis needs a structured Signal 0.3 record", "basis.signal")
         return errors
-    for error in validate_signal(signal)["errors"]:
+    for error in validate_signal(signal, repository=repository)["errors"]:
         errors.append({**error, "path": error["path"].replace("signal", "basis.signal", 1)})
     if basis_kind == "discovery-evidence" and not (
         signal.get("record_type") == "local_evidence" and signal.get("claim_type") == "reproducible_evidence"
@@ -168,7 +232,7 @@ def validate_basis_signal(basis: dict[str, Any], mode: str) -> list[dict[str, st
     return errors
 
 
-def signal_readiness_blockers(basis: dict[str, Any], mode: str) -> list[dict[str, str]]:
+def signal_readiness_blockers(basis: dict[str, Any], mode: str, repository: Any = None) -> list[dict[str, str]]:
     if mode not in {"issue-backed", "discovery"}:
         return []
     if mode == "discovery" and basis.get("kind") not in {"signal", "discovery-evidence"}:
@@ -182,6 +246,11 @@ def signal_readiness_blockers(basis: dict[str, Any], mode: str) -> list[dict[str
         return [{"code": "signal_unavailable", "message": "The Signal was rejected or expired.", "path": "basis.signal.lifecycle"}]
     if signal.get("record_type") != "local_evidence":
         verification = signal.get("verification")
-        if not isinstance(verification, dict) or verification.get("status") != "verified" or verification.get("reference") != signal.get("reference"):
+        verification_errors = [
+            error
+            for error in validate_signal(signal, repository=repository)["errors"]
+            if error["path"].startswith("signal.verification")
+        ]
+        if not isinstance(verification, dict) or verification_errors:
             return [{"code": "signal_verification_required", "message": "An external Signal needs current public-record verification.", "path": "basis.signal.verification"}]
     return []

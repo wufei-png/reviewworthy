@@ -28,7 +28,7 @@ reviewworthy candidate validate .reviewworthy/candidates.json
 reviewworthy signal init --record-type issue --claim-type maintainer_request --reference https://github.com/OWNER/REPO/issues/123
 reviewworthy signal validate .reviewworthy/contribution-signal.json
 reviewworthy signal verify .reviewworthy/contribution-signal.json
-reviewworthy signal publish plan .reviewworthy/contribution-signal.json --repo OWNER/REPO --title "Candidate request" --body-file signal.md
+reviewworthy signal publish plan .reviewworthy/contribution-signal.json --repo OWNER/REPO --repository-id REPOSITORY_ID --title "Candidate request" --body-file signal.md
 reviewworthy candidate select .reviewworthy/candidates.json --candidate-id candidate-001 --confirm
 reviewworthy candidate bind --menu .reviewworthy/candidates.json --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json
 reviewworthy candidate transition --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --to plan_directly --reason "Human-confirmed reason" --confirm

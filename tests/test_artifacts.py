@@ -177,14 +177,15 @@ class ArtifactTests(unittest.TestCase):
                     "disclosure_stages": ["verification"],
                 },
             },
-            "narrative": {
-                "ai_disclosure": {
+            "ai_assistance": {
+                "used": True,
+                "stages": [{"name": "implementation"}],
+                "disclosure": {
                     "text": "Assistance was reviewed.",
                     "locations": ["pr_body"],
                     "human_confirmed": True,
-                }
+                },
             },
-            "ai_assistance": {"stages": [{"name": "implementation"}]},
         }
         codes = {error["code"] for error in disclosure_errors(packet)}
         self.assertIn("missing_disclosure_location", codes)
@@ -198,6 +199,16 @@ class ArtifactTests(unittest.TestCase):
         packet["ai_assistance"]["used"] = False
         self.assertEqual(disclosure_errors(packet), [])
         self.assertEqual(render_disclosure(packet)["text"], "")
+
+    def test_legacy_narrative_disclosure_is_not_read(self) -> None:
+        packet = {
+            "policy": {"posture": "explicit", "authoritative_claims": {"disclosure_required": True}},
+            "narrative": {"ai_disclosure": "Legacy disclosure"},
+            "ai_assistance": {"used": True, "stages": []},
+        }
+
+        with self.assertRaises(ValueError):
+            render_disclosure(packet)
 
     def test_disclosure_rejects_policy_disallowed_record_location(self) -> None:
         packet = {

@@ -83,3 +83,40 @@ class SchemaTests(unittest.TestCase):
         }
 
         self._assert_invalid("contribution-signal.schema.json", signal)
+
+    def test_packet_schema_requires_candidate_recommendation(self) -> None:
+        packet = valid_packet()
+        packet["candidate_selection"] = {
+            "candidate_id": "candidate-incomplete",
+            "repository": "example/project",
+            "menu_snapshot": "menu-sha",
+            "duplicate_disposition": "not_duplicate",
+            "confirmed": True,
+        }
+
+        self._assert_invalid("contribution-packet.schema.json", packet)
+
+    def test_packet_schema_rejects_legacy_narrative_disclosure(self) -> None:
+        packet = valid_packet()
+        packet["narrative"]["ai_disclosure"] = "Legacy disclosure"
+
+        self._assert_invalid("contribution-packet.schema.json", packet)
+
+    def test_packet_schema_requires_complete_issue_verification_identity(self) -> None:
+        packet = valid_packet()
+        packet["basis"]["verification"] = {
+            "status": "verified",
+            "provider": "github",
+            "reference": "https://github.com/example/project/issues/1",
+            "verified_at": "2026-08-10T00:00:00Z",
+        }
+
+        self._assert_invalid("contribution-packet.schema.json", packet)
+
+    def test_evidence_summary_schema_rejects_open_or_untyped_claims(self) -> None:
+        packet = valid_packet()
+        summary = build_evidence_summary(packet, packet["diff"])
+        summary["claims"]["verification"]["private_packet_path"] = "private/packet.json"
+        summary["claims"]["ai_disclosure"]["claimed_present"] = "yes"
+
+        self._assert_invalid("evidence-summary.schema.json", summary)

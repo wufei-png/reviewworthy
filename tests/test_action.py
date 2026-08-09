@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.action import check_evidence, github_event_context
-from reviewworthy.evidence import append_evidence_summary, build_evidence_summary, render_evidence_summary
+from reviewworthy.evidence import append_evidence_summary, build_evidence_summary, render_evidence_summary, validate_evidence_summary
 from reviewworthy.git import PR_DIFF_FIELDS, capture_pr_diff
 
 from helpers import valid_packet
@@ -136,6 +136,23 @@ class ActionEvidenceTests(unittest.TestCase):
         self.assertNotIn("verification", result["verified_facts"])
         self.assertEqual(result["contributor_claims"]["verification"]["claimed_outcome"], "passed")
 
+    def test_report_mode_keeps_mismatched_summary_non_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._repository(Path(directory))
+            result = check_evidence(
+                self._body(diff),
+                root=repository,
+                event_name="pull_request",
+                event_repository="other/project",
+                event_repository_id=999,
+                event_base_sha=diff["base_tip_sha"],
+                event_head_sha=diff["head_sha"],
+                mode="report",
+            )
+
+        self.assertEqual(result["conclusion"], "success")
+        self.assertIn("repository_identity_mismatch", {item["code"] for item in result["violations"]})
+
     def test_action_uses_only_structured_policy_from_the_base_as_positive_machine_authority(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository, diff = self._policy_repository(
@@ -234,6 +251,27 @@ class ActionEvidenceTests(unittest.TestCase):
             summary["claims"].pop("ownership")
             with self.assertRaises(ValueError):
                 render_evidence_summary(summary)
+
+    def test_summary_claims_are_closed_and_typed(self) -> None:
+        summary = build_evidence_summary(valid_packet(), valid_packet()["diff"])
+        summary["claims"]["verification"]["private_packet_path"] = ".reviewworthy/private/packet.json"
+        summary["claims"]["ownership"]["profile"] = "custom"
+        summary["claims"]["ai_disclosure"]["claimed_present"] = "yes"
+
+        codes = {error["code"] for error in validate_evidence_summary(summary)["errors"]}
+
+        self.assertIn("unknown_summary_field", codes)
+        self.assertIn("invalid_summary_profile", codes)
+        self.assertIn("invalid_summary_disclosure_claim", codes)
+
+    def test_summary_verification_claim_and_count_must_agree(self) -> None:
+        summary = build_evidence_summary(valid_packet(), valid_packet()["diff"])
+        summary["claims"]["verification"] = {"claimed_outcome": "not_recorded", "receipt_count": 1}
+
+        self.assertIn(
+            "inconsistent_summary_verification_claim",
+            {error["code"] for error in validate_evidence_summary(summary)["errors"]},
+        )
 
     def test_old_receipt_is_not_recognized_as_a_public_verification_claim(self) -> None:
         packet = valid_packet()

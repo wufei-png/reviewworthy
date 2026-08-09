@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
+from .action import check_evidence
 from .candidate import validate_candidate_menu
 from .contract import contract_snapshot
 from .git import verification_plan_digest
@@ -254,6 +255,29 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
         elif kind == "risk":
             actual = assess_manifest(fixture["manifest"])
             checks = [("hard_stop", actual["hard_stops"][0]["code"] if actual["hard_stops"] else None, expected.get("hard_stop")), ("review_profile", actual["review_profile"], expected.get("review_profile", actual["review_profile"]))]
+        elif kind == "action":
+            event = fixture.get("event", {})
+            if not isinstance(event, dict):
+                raise ValueError("action eval event must be an object")
+            if not isinstance(expected.get("violation_codes"), list) or not isinstance(expected.get("conclusion"), str) or not isinstance(expected.get("result"), str):
+                raise ValueError("action evals must assert exact violation_codes, conclusion, and result")
+            with tempfile.TemporaryDirectory() as directory:
+                actual = check_evidence(
+                    fixture.get("body", ""),
+                    root=Path(directory),
+                    event_name=event.get("name"),
+                    event_repository=event.get("repository"),
+                    event_repository_id=event.get("repository_id"),
+                    event_base_sha=event.get("base_sha"),
+                    event_head_sha=event.get("head_sha"),
+                    mode=fixture.get("mode", "report"),
+                )
+            actual_result = "failed" if actual["conclusion"] == "failure" else "passed"
+            checks = [
+                ("violation_codes", sorted(item["code"] for item in actual["violations"]), sorted(expected["violation_codes"])),
+                ("conclusion", actual["conclusion"], expected["conclusion"]),
+                ("result", actual_result, expected["result"]),
+            ]
         else:
             raise ValueError(f"Unsupported fixture kind: {kind}")
 

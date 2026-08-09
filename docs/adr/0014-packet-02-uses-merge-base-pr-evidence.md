@@ -1,5 +1,7 @@
 # Packet 0.2 uses merge-base Pull Request evidence
 
+Status: Superseded by ADR 0016 (private Packet/public Summary), ADR 0017 (Packet 0.3 clean break), and ADR 0019 (subject-digest evidence). This file is historical and is not a current compatibility contract.
+
 Pull Request evidence uses the merge base of the selected base tip and head, matching the contribution view represented by GitHub's three-dot comparison. Packet `0.2` records `comparison=merge_base`, `base_tip_sha`, `merge_base_sha`, `head_sha`, the patch hash, changed files, and line counts. Remote operation identity binds the comparison mode, base tip, merge base, head, and patch hash. Remote readiness and Action enforcement additionally validate the complete record, including files and counts.
 
 ## Considered Options

@@ -12,6 +12,8 @@ from .util import canonical_json
 
 
 SUMMARY_VERSION = "0.1"
+SUMMARY_PROFILES = {"standard", "heightened", "learning"}
+SUMMARY_OWNERSHIP_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run", "not_recorded"}
 SUMMARY_START = f"<!-- reviewworthy:evidence-summary:start:v{SUMMARY_VERSION} -->"
 SUMMARY_END = f"<!-- reviewworthy:evidence-summary:end:v{SUMMARY_VERSION} -->"
 _CONTRIBUTION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -154,6 +156,51 @@ def validate_evidence_summary(summary: Any) -> dict[str, Any]:
         for claim in sorted(required_claims):
             if not isinstance(claims.get(claim), dict):
                 error("invalid_summary_claim", f"claims.{claim} must be an object.", f"claims.{claim}")
+        verification_claim = claims.get("verification")
+        if isinstance(verification_claim, dict):
+            reject_unknown(verification_claim, {"claimed_outcome", "receipt_count"}, "claims.verification")
+            if verification_claim.get("claimed_outcome") not in {"passed", "not_recorded"}:
+                error(
+                    "invalid_summary_verification_claim",
+                    "claims.verification.claimed_outcome must be passed or not_recorded.",
+                    "claims.verification.claimed_outcome",
+                )
+            receipt_count = verification_claim.get("receipt_count")
+            if not isinstance(receipt_count, int) or isinstance(receipt_count, bool) or receipt_count < 0:
+                error(
+                    "invalid_summary_receipt_count",
+                    "claims.verification.receipt_count must be a non-negative integer.",
+                    "claims.verification.receipt_count",
+                )
+            elif (
+                (verification_claim.get("claimed_outcome") == "passed" and receipt_count == 0)
+                or (verification_claim.get("claimed_outcome") == "not_recorded" and receipt_count != 0)
+            ):
+                error(
+                    "inconsistent_summary_verification_claim",
+                    "A passed claim needs at least one receipt; not_recorded needs zero receipts.",
+                    "claims.verification",
+                )
+        ownership_claim = claims.get("ownership")
+        if isinstance(ownership_claim, dict):
+            reject_unknown(ownership_claim, {"profile", "claimed_status"}, "claims.ownership")
+            if ownership_claim.get("profile") not in SUMMARY_PROFILES:
+                error("invalid_summary_profile", "claims.ownership.profile is not recognized.", "claims.ownership.profile")
+            if ownership_claim.get("claimed_status") not in SUMMARY_OWNERSHIP_STATUSES:
+                error(
+                    "invalid_summary_ownership_status",
+                    "claims.ownership.claimed_status is not recognized.",
+                    "claims.ownership.claimed_status",
+                )
+        disclosure_claim = claims.get("ai_disclosure")
+        if isinstance(disclosure_claim, dict):
+            reject_unknown(disclosure_claim, {"claimed_present"}, "claims.ai_disclosure")
+            if not isinstance(disclosure_claim.get("claimed_present"), bool):
+                error(
+                    "invalid_summary_disclosure_claim",
+                    "claims.ai_disclosure.claimed_present must be a boolean.",
+                    "claims.ai_disclosure.claimed_present",
+                )
     return {"valid": not errors, "errors": errors}
 
 

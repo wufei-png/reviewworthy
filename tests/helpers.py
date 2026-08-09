@@ -150,7 +150,7 @@ def valid_packet() -> dict:
             "body": "https://github.com/example/project/issues/1\n\n## Why\nFixes the reported regression.\n\n## Testing\n`python -m unittest`",
             "final_preview_confirmed": True,
             "human_expression_required": False,
-            "ai_disclosure": "AI assistance was reviewed by the contributor.",
+            "human_expression": "",
         },
     }
     packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])

@@ -187,7 +187,7 @@ def check_evidence(
             verified_facts["diff"] = {field: current_diff.get(field) for field in PR_DIFF_FIELDS}
 
     return {
-        "conclusion": "failure" if violations else "success",
+        "conclusion": "failure" if enforce and violations else "success",
         "mode": mode,
         "checked": True,
         "violations": violations,

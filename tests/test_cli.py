@@ -117,7 +117,7 @@ class CliBoundaryTests(unittest.TestCase):
 
             with redirect_stdout(output):
                 code = main([
-                    "signal", "publish", "plan", str(signal_path), "--repo", "example/project",
+                    "signal", "publish", "plan", str(signal_path), "--repo", "example/project", "--repository-id", "101",
                     "--title", "Candidate", "--body-file", str(body_path), "--json",
                 ])
 
@@ -162,14 +162,14 @@ class CliBoundaryTests(unittest.TestCase):
             published_path = root / "published" / "signal.json"
             plan_output = io.StringIO()
             plan_args = [
-                "signal", "publish", "plan", str(signal_path), "--repo", "example/project",
+                "signal", "publish", "plan", str(signal_path), "--repo", "example/project", "--repository-id", "101",
                 "--title", "Candidate request", "--body-file", str(body_path), "--json",
             ]
             with redirect_stdout(plan_output):
                 plan_code = main(plan_args)
             operation_id = json.loads(plan_output.getvalue())["operation_id"]
             create_args = [
-                "signal", "publish", "create", str(signal_path), "--repo", "example/project",
+                "signal", "publish", "create", str(signal_path), "--repo", "example/project", "--repository-id", "101",
                 "--title", "Candidate request", "--body-file", str(body_path),
                 "--confirm-operation-id", operation_id, "--output", str(published_path), "--json",
             ]
@@ -180,7 +180,7 @@ class CliBoundaryTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()):
                     first_code = main(create_args)
                 retry_args = [
-                    "signal", "publish", "create", str(published_path), "--repo", "Example/Project",
+                    "signal", "publish", "create", str(published_path), "--repo", "Example/Project", "--repository-id", "101",
                     "--title", "Candidate request", "--body-file", str(body_path),
                     "--confirm-operation-id", operation_id, "--json",
                 ]
@@ -198,6 +198,7 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertNotIn("published", published)
             self.assertEqual(published["reference"], "https://github.com/example/project/issues/9")
             self.assertEqual(fake_client.create.call_count, 1)
+            fake_client.verify_repository_identity.assert_called_once_with("example/project", 101)
 
     def test_signal_verify_checks_github_reference_without_mutating_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -213,13 +214,47 @@ class CliBoundaryTests(unittest.TestCase):
             }
             signal_path.write_text(json.dumps(signal), encoding="utf-8")
             fake_client = unittest.mock.MagicMock()
-            fake_client.verify_public_reference.return_value = {"verified": True, "provider": "github", "url": signal["reference"]}
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "provider": "github",
+                "host": "github.com",
+                "repository": "example/project",
+                "repository_id": 101,
+                "record_type": "issue",
+                "number": 2,
+                "url": signal["reference"],
+                "visibility": "public",
+            }
             output = io.StringIO()
             with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
                 code = main(["signal", "verify", str(signal_path), "--json"])
 
             self.assertEqual(code, 0)
             self.assertTrue(json.loads(output.getvalue())["valid"])
+            self.assertEqual(json.loads(signal_path.read_text()), signal)
+
+    def test_signal_verify_rejects_mismatched_provider_identity_before_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            signal_path = Path(directory) / "signal.json"
+            signal = skeleton_signal("discussion", "accepted_proposal", "https://github.com/example/project/discussions/4")
+            signal_path.write_text(json.dumps(signal), encoding="utf-8")
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_public_reference.return_value = {
+                "verified": True,
+                "provider": "github",
+                "host": "github.com",
+                "repository": "other/project",
+                "repository_id": 202,
+                "record_type": "discussion",
+                "number": 4,
+                "url": signal["reference"],
+                "visibility": "public",
+            }
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(io.StringIO()):
+                code = main(["signal", "verify", str(signal_path), "--record", "--json"])
+
+            self.assertEqual(code, 1)
             self.assertEqual(json.loads(signal_path.read_text()), signal)
 
     def test_issue_revalidation_normalizes_state_reason_and_duplicate_label(self) -> None:
@@ -541,6 +576,23 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertIn(".git/reviewworthy/v0.3/contributions/local-001/packet.json", str(created))
             self.assertEqual(self._git(root, "status", "--porcelain=v1", "--untracked-files=all"), "")
 
+    def test_packet_init_rejects_output_outside_git_private_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            public_output = root / ".reviewworthy" / "packet.json"
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main([
+                    "packet", "init", "--root", str(root), "--contribution-id", "private-001",
+                    "--output", str(public_output), "--json",
+                ])
+
+            self.assertEqual(code, 2)
+            self.assertFalse(public_output.exists())
+            self.assertIn("Git-private", json.loads(output.getvalue())["error"])
+
     def test_verify_cli_persists_invalid_receipt_and_returns_failure_when_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -634,6 +686,27 @@ class CliBoundaryTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(mismatch_code, 2)
+
+    def test_remote_plan_requires_immutable_packet_repository_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packet_path = Path(directory) / "packet.json"
+            body_path = Path(directory) / "body.md"
+            packet = valid_packet()
+            packet["repository"]["repository_id"] = None
+            packet["basis"]["verification"]["repository_id"] = None
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main([
+                    "remote", "plan", "--packet", str(packet_path), "--repo", "example/project",
+                    "--kind", "issue", "--title", packet["narrative"]["title"],
+                    "--body-file", str(body_path), "--json",
+                ])
+
+            self.assertEqual(code, 2)
+            self.assertIn("repository_id", json.loads(output.getvalue())["error"])
 
     def test_remote_plan_rejects_packet_when_recomputed_diff_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -825,6 +898,33 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(first_code, 0)
             self.assertEqual(second_code, 0)
             self.assertEqual(fake_client.create.call_count, 1)
+
+    def test_remote_create_rejects_live_repository_id_mismatch_before_reconciliation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packet_path = root / "packet.json"
+            body_path = root / "body.md"
+            packet = valid_packet()
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+            common = [
+                "--packet", str(packet_path), "--repo", "example/project", "--kind", "issue",
+                "--title", packet["narrative"]["title"], "--body-file", str(body_path),
+            ]
+            plan_output = io.StringIO()
+            with redirect_stdout(plan_output):
+                self.assertEqual(main(["remote", "plan", *common, "--json"]), 0)
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            fake_client = unittest.mock.MagicMock()
+            fake_client.verify_repository_identity.side_effect = GhError("Live repository_id does not match")
+            output = io.StringIO()
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
+                code = main(["remote", "create", *common, "--confirm-operation-id", operation_id, "--json"])
+
+            self.assertEqual(code, 2)
+            fake_client.find_existing.assert_not_called()
+            fake_client.create.assert_not_called()
 
     def test_uncertain_remote_write_does_not_retry_create(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

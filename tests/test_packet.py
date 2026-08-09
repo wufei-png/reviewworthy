@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from reviewworthy.git import verification_plan_digest
 from reviewworthy.packet import issue_basis_blockers, semantic_snapshot, policy_violations, readiness_blockers, skeleton_packet, validate_packet
 from reviewworthy.signal import skeleton_signal
 
@@ -86,6 +87,23 @@ class PacketValidationTests(unittest.TestCase):
         }
 
         self.assertNotIn("good_first_issue_ai_disallowed", {item["code"] for item in policy_violations(packet, enforce_disclosure=False)})
+
+    def test_plain_issue_basis_requires_complete_canonical_verification(self) -> None:
+        packet = valid_packet()
+        packet["basis"]["verification"] = {
+            "status": "verified",
+            "provider": "github",
+            "reference": "https://github.com/example/project/issues/1",
+            "repository_id": 101,
+        }
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+
+        validation_codes = {error["code"] for error in validate_packet(packet)["errors"]}
+        readiness_codes = {error["code"] for error in readiness_blockers(packet)}
+
+        self.assertIn("issue_verification_identity_mismatch", validation_codes)
+        self.assertIn("issue_verification_time_required", validation_codes)
+        self.assertIn("issue_verification_identity_mismatch", readiness_codes)
 
     def test_policy_ambiguity_is_not_reported_as_policy_conflict(self) -> None:
         packet = valid_packet()
@@ -207,6 +225,14 @@ class PacketValidationTests(unittest.TestCase):
 
             self.assertIn("absolute_verification_cwd", codes, cwd)
 
+    def test_noncanonical_verification_plan_cwd_is_rejected(self) -> None:
+        packet = valid_packet()
+        packet["verification"]["plan"]["checks"][0]["cwd"] = "./nested"
+        packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
+        packet["verification"]["receipts"] = []
+
+        self.assertIn("invalid_verification_cwd", {error["code"] for error in validate_packet(packet)["errors"]})
+
     def test_remote_readiness_rejects_receipt_without_clean_worktree_proof(self) -> None:
         packet = valid_packet()
         packet["verification"]["receipts"][0].pop("worktree_clean_before")
@@ -307,6 +333,12 @@ class PacketValidationTests(unittest.TestCase):
 
         self.assertIn("missing_ai_disclosure_record", {error["code"] for error in result["errors"]})
 
+    def test_legacy_narrative_disclosure_is_rejected(self) -> None:
+        packet = valid_packet()
+        packet["narrative"]["ai_disclosure"] = "Legacy disclosure"
+
+        self.assertIn("unknown_narrative_field", {error["code"] for error in validate_packet(packet)["errors"]})
+
     def test_ai_used_false_cannot_retain_assistance_stages(self) -> None:
         packet = valid_packet()
         packet["ai_assistance"]["used"] = False
@@ -388,12 +420,41 @@ class PacketValidationTests(unittest.TestCase):
             "record_type": "issue",
             "reference": packet["basis"]["signal"]["reference"],
             "verified_at": "2026-08-06T00:00:00Z",
+            "host": "github.com",
+            "repository": "example/project",
+            "repository_id": 101,
+            "number": 2,
+            "url": packet["basis"]["signal"]["reference"],
+            "visibility": "public",
         }
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
         packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
 
         self.assertNotIn("signal_verification_required", {blocker["code"] for blocker in readiness_blockers(packet)})
+
+        packet["basis"]["signal"]["verification"]["repository_id"] = 202
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+
+        codes = {blocker["code"] for blocker in readiness_blockers(packet)}
+        self.assertIn("signal_packet_repository_id_mismatch", codes)
+        self.assertIn("signal_verification_required", codes)
+
+    def test_candidate_selection_requires_a_current_recommendation(self) -> None:
+        packet = valid_packet()
+        packet["candidate_selection"] = {
+            "candidate_id": "candidate-incomplete",
+            "repository": "example/project",
+            "menu_snapshot": "menu-sha",
+            "duplicate_disposition": "not_duplicate",
+            "confirmed": True,
+        }
+        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
+
+        codes = {error["code"] for error in validate_packet(packet)["errors"]}
+
+        self.assertIn("invalid_candidate_recommendation", codes)
+        self.assertIn("invalid_candidate_recommendation", {blocker["code"] for blocker in readiness_blockers(packet)})
 
     def test_rejected_signal_blocks_remote_readiness(self) -> None:
         packet = valid_packet()

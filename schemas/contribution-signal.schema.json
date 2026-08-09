@@ -79,9 +79,16 @@
         "properties": {
           "reference": { "minLength": 1 },
           "verification": {
+            "required": ["status", "provider", "reference", "record_type", "verified_at", "host", "repository", "repository_id", "number", "url", "visibility"],
             "properties": {
               "status": { "const": "verified" },
-              "provider": { "const": "github" }
+              "provider": { "const": "github" },
+              "host": { "const": "github.com" },
+              "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+              "repository_id": { "type": "integer", "exclusiveMinimum": 0 },
+              "number": { "type": "integer", "minimum": 1 },
+              "url": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/(issues|pull|discussions)/[1-9][0-9]*$" },
+              "visibility": { "const": "public" }
             }
           }
         }

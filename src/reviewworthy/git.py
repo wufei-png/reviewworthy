@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .util import CommandOutputLimitError, CommandTimeoutError, canonical_json, relative_path, run_bounded, utc_now
@@ -64,6 +64,25 @@ def local_state_path(root: Path, relative: str) -> Path:
         raise GitError(f"Could not resolve Git-private state: {detail}")
     value = Path(str(completed.stdout).strip())
     return value if value.is_absolute() else (root / value).resolve()
+
+
+def is_canonical_repository_relative_path(value: Any) -> bool:
+    """Accept one stable POSIX spelling for a path contained by the repository."""
+
+    if not isinstance(value, str) or not value.strip() or "\\" in value:
+        return False
+    posix_path = PurePosixPath(value)
+    windows_path = PureWindowsPath(value)
+    if (
+        posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or windows_path.root
+        or ".." in posix_path.parts
+        or ".." in windows_path.parts
+    ):
+        return False
+    return value == posix_path.as_posix()
 
 
 def _worktree_status(root: Path) -> list[str]:
@@ -188,6 +207,8 @@ def run_verification(
     root = root.resolve()
     if not argv:
         raise ValueError("verification command must not be empty")
+    if not is_canonical_repository_relative_path(cwd):
+        raise ValueError("verification cwd must use one canonical repository-relative POSIX spelling")
     if not check_id or not plan_digest or not subject_digest:
         raise ValueError("check_id, plan_digest, and subject_digest are required")
     command_root = (root / cwd).resolve()
@@ -227,7 +248,7 @@ def run_verification(
         "plan_digest": plan_digest,
         "subject_digest": subject_digest,
         "argv": list(argv),
-        "cwd": relative_path(root, command_root),
+        "cwd": relative_path(command_root, root),
         "exit_code": completed.returncode,
         "command_outcome": "passed" if completed.returncode == 0 else "failed",
         "integrity_status": "stable" if valid else "invalid",

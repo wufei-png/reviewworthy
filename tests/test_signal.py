@@ -64,6 +64,51 @@ class SignalTests(unittest.TestCase):
         self.assertIn("stale_signal_verification", codes)
         self.assertIn("signal_verification_record_mismatch", codes)
 
+    def test_external_verification_requires_complete_canonical_identity(self) -> None:
+        signal = skeleton_signal("pull_request", "accepted_proposal", "https://github.com/example/project/pull/12")
+        signal["verification"] = {
+            "status": "verified",
+            "provider": "github",
+            "record_type": "pull_request",
+            "reference": signal["reference"],
+            "verified_at": "2026-08-10T00:00:00Z",
+            "host": "github.com",
+            "repository": "EXAMPLE/PROJECT",
+            "repository_id": 101,
+            "number": 12,
+            "url": signal["reference"],
+            "visibility": "public",
+        }
+
+        self.assertTrue(validate_signal(signal)["valid"])
+
+        signal["verification"]["number"] = 13
+        result = validate_signal(signal)
+        self.assertIn("signal_verification_identity_mismatch", {error["code"] for error in result["errors"]})
+
+    def test_external_verification_is_bound_to_packet_repository(self) -> None:
+        signal = skeleton_signal("discussion", "accepted_proposal", "https://github.com/example/project/discussions/7")
+        signal["verification"] = {
+            "status": "verified",
+            "provider": "github",
+            "record_type": "discussion",
+            "reference": signal["reference"],
+            "verified_at": "2026-08-10T00:00:00Z",
+            "host": "github.com",
+            "repository": "example/project",
+            "repository_id": 101,
+            "number": 7,
+            "url": signal["reference"],
+            "visibility": "public",
+        }
+        packet_repository = {"owner": "other", "name": "project", "repository_id": 202}
+
+        result = validate_signal(signal, repository=packet_repository)
+        codes = {error["code"] for error in result["errors"]}
+
+        self.assertIn("signal_packet_repository_mismatch", codes)
+        self.assertIn("signal_packet_repository_id_mismatch", codes)
+
     def test_discovery_evidence_requires_local_reproducible_shape(self) -> None:
         signal = skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/2")
         basis = {

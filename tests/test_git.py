@@ -51,6 +51,40 @@ class GitEvidenceTests(unittest.TestCase):
             self.assertEqual(receipt["provenance"], "contributor_local")
             self.assertNotEqual(receipt["stdout_sha256"], receipt["stderr_sha256"])
 
+    def test_verification_records_nested_cwd_as_repository_relative(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            (root / "nested").mkdir()
+            (root / "nested" / "example.txt").write_text("base\n", encoding="utf-8")
+            self._git(root, "add", "nested/example.txt")
+            self._git(root, "commit", "-qm", "base")
+
+            receipt = self._verify(
+                root,
+                current_head(root),
+                [sys.executable, "-c", "from pathlib import Path; assert Path('example.txt').is_file()"],
+                cwd="nested",
+            )
+
+            self.assertEqual(receipt["cwd"], "nested")
+
+    def test_verification_rejects_noncanonical_cwd_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            (root / "nested").mkdir()
+            (root / "example.txt").write_text("base\n", encoding="utf-8")
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-qm", "base")
+
+            with self.assertRaises(ValueError):
+                self._verify(root, current_head(root), [sys.executable, "-c", "print('should not run')"], cwd="./nested")
+
     def test_capture_pr_diff_attributes_only_changes_since_merge_base(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

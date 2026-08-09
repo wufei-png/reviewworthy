@@ -11,7 +11,7 @@ For a local checkout, the regression commands are:
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests
 PYTHONPATH=src python -m reviewworthy eval run --json
-PYTHONPATH=src python -m reviewworthy action check --mode report --changed-files-unavailable
+PYTHONPATH=src python -m reviewworthy action check --mode report
 ```
 
 External contributions must be prepared and submitted through a Reviewworthy PR. The final PR Body must include the supporting Issue URL, and the one-line PR URL note is written back to that Issue only after the PR is created. The remote operation ID shown by `remote plan` must be explicitly confirmed.

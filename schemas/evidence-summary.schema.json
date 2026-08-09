@@ -36,9 +36,37 @@
       "type": "object",
       "required": ["verification", "ownership", "ai_disclosure"],
       "properties": {
-        "verification": { "type": "object" },
-        "ownership": { "type": "object" },
-        "ai_disclosure": { "type": "object" }
+        "verification": {
+          "type": "object",
+          "required": ["claimed_outcome", "receipt_count"],
+          "properties": {
+            "claimed_outcome": { "enum": ["passed", "not_recorded"] },
+            "receipt_count": { "type": "integer", "minimum": 0 }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "claimed_outcome": { "const": "passed" } }, "required": ["claimed_outcome"] },
+              "then": { "properties": { "receipt_count": { "minimum": 1 } } },
+              "else": { "properties": { "receipt_count": { "const": 0 } } }
+            }
+          ],
+          "additionalProperties": false
+        },
+        "ownership": {
+          "type": "object",
+          "required": ["profile", "claimed_status"],
+          "properties": {
+            "profile": { "enum": ["standard", "heightened", "learning"] },
+            "claimed_status": { "enum": ["passed", "failed", "blocked", "unknown", "not_run", "not_recorded"] }
+          },
+          "additionalProperties": false
+        },
+        "ai_disclosure": {
+          "type": "object",
+          "required": ["claimed_present"],
+          "properties": { "claimed_present": { "type": "boolean" } },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     }

@@ -77,20 +77,23 @@ class GitHubOperationTests(unittest.TestCase):
 
     def test_signal_publication_operation_is_issue_write_and_stable_after_publication(self) -> None:
         signal = {"record_type": "issue", "claim_type": "maintainer_request", "reference": ""}
-        first = build_signal_operation(signal, "example/project", "Request", "Body")
+        first = build_signal_operation(signal, "example/project", "Request", "Body", 101)
         signal["reference"] = "https://github.com/example/project/issues/7"
         signal["publication_subject_id"] = first.subject_id
-        second = build_signal_operation(signal, "example/project", "Request", "Body")
+        second = build_signal_operation(signal, "example/project", "Request", "Body", 101)
 
         self.assertEqual(first.operation_id, second.operation_id)
         self.assertEqual(first.kind, "issue")
         self.assertEqual(first.permissions, ("issues:write",))
         self.assertEqual(first.purpose, "signal_publication")
 
+        changed_repository = build_signal_operation(signal, "example/project", "Request", "Body", 202)
+        self.assertNotEqual(changed_repository.operation_id, first.operation_id)
+
     def test_current_signal_receipt_shape_round_trips(self) -> None:
         operation = build_signal_operation(
             {"record_type": "issue", "claim_type": "maintainer_request", "reference": ""},
-            "example/project", "Request", "Body",
+            "example/project", "Request", "Body", 101,
         )
         current_operation = operation.as_dict()
         self.assertNotIn("base_sha", current_operation)
@@ -116,7 +119,7 @@ class GitHubOperationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_signal_operation(
                 {"record_type": "discussion", "claim_type": "accepted_proposal", "reference": ""},
-                "example/project", "Request", "Body",
+                "example/project", "Request", "Body", 101,
             )
 
     def test_policy_required_draft_is_part_of_operation_and_gh_command(self) -> None:
@@ -169,6 +172,21 @@ class GitHubOperationTests(unittest.TestCase):
             ["gh", "api", "repos/example/project", "--method", "GET"],
             ["gh", "api", "repos/example/project/issues/2", "--method", "GET"],
         ])
+
+    def test_remote_write_repository_identity_requires_live_numeric_match(self) -> None:
+        def fake_runner(argv, **kwargs):
+            return CompletedProcess(
+                argv,
+                0,
+                json.dumps({"id": 101, "full_name": "Example/Project", "visibility": "public"}),
+                "",
+            )
+
+        identity = GhClient(fake_runner).verify_repository_identity("example/project", 101)
+        self.assertEqual(identity["repository_id"], 101)
+
+        with self.assertRaises(GhError):
+            GhClient(fake_runner).verify_repository_identity("example/project", 202)
 
     def test_verify_discussion_uses_graphql_and_normalizes_current_record(self) -> None:
         calls = []
@@ -302,29 +320,33 @@ class GitHubOperationTests(unittest.TestCase):
 
         def fake_runner(argv, **kwargs):
             calls.append(argv)
-            pages = [
-                [{"number": 1, "html_url": "https://github.com/example/project/issues/1", "title": "Other", "body": "", "state": "open"}],
-                [
+            if "page=1" in argv:
+                page = [
+                    {"number": number, "html_url": f"https://github.com/example/project/issues/{number}", "title": "Other", "body": "", "state": "open"}
+                    for number in range(1, 101)
+                ]
+            else:
+                page = [
                     {"number": 2, "html_url": "https://github.com/example/project/issues/2", "title": "Existing", "body": operation.marker, "state": "open"},
                     {"number": 3, "html_url": "https://github.com/example/project/pull/3", "title": "PR", "body": operation.marker, "state": "open", "pull_request": {}},
-                ],
-            ]
-            return CompletedProcess(argv, 0, json.dumps(pages), "")
+                ]
+            return CompletedProcess(argv, 0, json.dumps(page), "")
 
         matches = GhClient(fake_runner).find_existing(operation)
 
         self.assertEqual([match["number"] for match in matches], [2])
-        self.assertIn("--paginate", calls[0])
-        self.assertIn("--slurp", calls[0])
+        self.assertEqual(len(calls), 2)
+        self.assertIn("page=1", calls[0])
+        self.assertIn("page=2", calls[1])
 
     def test_multiple_current_marker_matches_require_reconciliation(self) -> None:
         operation = build_operation(valid_packet(), "example/project", "issue", "Fix input", "Body")
 
         def fake_runner(argv, **kwargs):
-            records = [[
+            records = [
                 {"number": 2, "html_url": "https://github.com/example/project/issues/2", "body": operation.marker},
                 {"number": 3, "html_url": "https://github.com/example/project/issues/3", "body": operation.marker},
-            ]]
+            ]
             return CompletedProcess(argv, 0, json.dumps(records), "")
 
         with self.assertRaisesRegex(GhError, "Multiple remote records"):

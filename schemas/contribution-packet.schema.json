@@ -52,20 +52,25 @@
         "signal": { "$ref": "contribution-signal.schema.json" },
         "verification": {
           "type": "object",
-          "required": ["status", "provider", "reference", "verified_at"],
+          "required": ["status", "provider", "reference", "verified_at", "host", "repository", "repository_id", "record_type", "number", "url", "visibility"],
           "properties": {
             "status": { "const": "verified" },
             "provider": { "const": "github" },
             "reference": { "type": "string", "minLength": 1 },
             "verified_at": { "type": "string", "minLength": 1 },
+            "host": { "const": "github.com" },
             "repository": { "type": "string", "minLength": 1 },
             "repository_id": { "type": "integer", "exclusiveMinimum": 0 },
             "record_type": { "const": "issue" },
             "number": { "type": "integer", "minimum": 1 },
-            "state_reason": { "type": "string" },
-            "locked": { "type": "boolean" }
+            "url": { "type": "string", "minLength": 1 },
+            "visibility": { "const": "public" },
+            "state": { "type": ["string", "null"] },
+            "state_reason": { "type": ["string", "null"] },
+            "locked": { "type": ["boolean", "null"] },
+            "labels": { "type": "array", "items": { "type": "string" } }
           },
-          "additionalProperties": true
+          "additionalProperties": false
         }
       },
       "additionalProperties": true
@@ -181,12 +186,12 @@
     "understanding": { "$ref": "understanding.schema.json" },
     "candidate_selection": {
       "type": "object",
-      "required": ["candidate_id", "repository", "menu_snapshot", "confirmed"],
+      "required": ["candidate_id", "repository", "menu_snapshot", "recommendation", "confirmed"],
       "properties": {
         "candidate_id": { "type": "string", "minLength": 1 },
         "repository": { "type": "string", "minLength": 1 },
         "menu_snapshot": { "type": "string", "minLength": 1 },
-        "recommendation": { "type": "string" },
+        "recommendation": { "enum": ["plan_directly", "seek_maintainer_signal", "issue_only", "do_not_contribute"] },
         "duplicate_disposition": { "enum": ["exact_duplicate", "potential_duplicate", "related", "not_duplicate", "stale", "superseded"] },
         "transition": {
           "type": "object",
@@ -205,24 +210,15 @@
     },
     "narrative": {
       "type": "object",
+      "required": ["title", "body", "final_preview_confirmed", "human_expression_required", "human_expression"],
       "properties": {
-        "ai_disclosure": {
-          "oneOf": [
-            { "type": "string" },
-            {
-              "type": "object",
-              "required": ["text", "locations", "human_confirmed"],
-              "properties": {
-                "text": { "type": "string" },
-                "locations": { "type": "array" },
-                "human_confirmed": { "type": "boolean" }
-              },
-              "additionalProperties": true
-            }
-          ]
-        }
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "final_preview_confirmed": { "type": "boolean" },
+        "human_expression_required": { "type": "boolean" },
+        "human_expression": { "type": "string" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     }
   },
   "allOf": [

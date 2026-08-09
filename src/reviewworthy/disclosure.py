@@ -20,12 +20,6 @@ ASSISTANCE_LEVELS = {"assisted", "generated", "reviewed"}
 _VERIFICATION_CLAIM_RE = re.compile(r"\b(reviewed|verified|validated|confirmed)\b", re.IGNORECASE)
 
 
-def _as_disclosure_record(value: Any) -> dict[str, Any]:
-    if isinstance(value, str):
-        return {"text": value, "locations": ["pr_body"], "human_confirmed": bool(value.strip())}
-    return value if isinstance(value, dict) else {}
-
-
 def disclosure_requirements(policy: dict[str, Any]) -> dict[str, Any]:
     claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
     if not isinstance(claims, dict):
@@ -49,9 +43,7 @@ def disclosure_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
         return []
     if not requirements["required"]:
         return []
-    narrative = packet.get("narrative", {})
-    raw_record = assistance.get("disclosure") if isinstance(assistance, dict) and "disclosure" in assistance else narrative.get("ai_disclosure") if isinstance(narrative, dict) else None
-    record = _as_disclosure_record(raw_record)
+    record = assistance.get("disclosure") if isinstance(assistance, dict) and isinstance(assistance.get("disclosure"), dict) else {}
     errors: list[dict[str, str]] = []
     text = record.get("text")
     if not isinstance(text, str) or not text.strip():
@@ -106,9 +98,9 @@ def render_disclosure(packet: dict[str, Any], location: str | None = None) -> di
             "required_stages": requirements["stages"],
             "text": "",
         }
-    narrative = packet.get("narrative", {})
-    raw_record = assistance.get("disclosure") if isinstance(assistance, dict) and "disclosure" in assistance else narrative.get("ai_disclosure") if isinstance(narrative, dict) else None
-    record = _as_disclosure_record(raw_record)
+    if not isinstance(assistance, dict) or not isinstance(assistance.get("disclosure"), dict):
+        raise ValueError("Packet 0.3 disclosure must be recorded at ai_assistance.disclosure")
+    record = assistance.get("disclosure") if isinstance(assistance, dict) and isinstance(assistance.get("disclosure"), dict) else {}
     stages = assistance.get("stages", []) if isinstance(assistance, dict) else []
     if location is not None and location not in requirements["locations"]:
         raise ValueError(f"Disclosure location is not allowed by policy: {location}")

@@ -10,12 +10,13 @@ import os
 from pathlib import Path
 from subprocess import CompletedProcess
 import tempfile
+import time
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .evidence import append_evidence_summary, build_evidence_summary
 from .git import PR_DIFF_FIELDS
-from .repository import canonical_repository_slug, parse_public_record, repository_slugs_match
+from .repository import canonical_repository_slug, parse_public_record, parse_repository_slug, repository_slugs_match
 from .util import (
     CommandOutputLimitError,
     CommandTimeoutError,
@@ -198,6 +199,7 @@ def build_signal_operation(
     repo: str,
     title: str,
     body: str,
+    repository_id: int,
 ) -> RemoteOperation:
     """Build an explicit Issue publication operation for a Contribution Signal."""
 
@@ -209,6 +211,8 @@ def build_signal_operation(
     if not isinstance(reference, str):
         raise ValueError("signal.reference must be a string")
     canonical_repo = canonical_repository_slug(repo)
+    if not isinstance(repository_id, int) or isinstance(repository_id, bool) or repository_id <= 0:
+        raise ValueError("Signal publication repository_id must be a positive integer")
     subject_id = signal.get("publication_subject_id") or f"{record_type}:{claim_type}:{reference}"
     payload = {
         "purpose": "signal_publication",
@@ -223,6 +227,7 @@ def build_signal_operation(
         "base": None,
         "head": None,
         "draft": False,
+        "repository_id": repository_id,
     }
     digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
     operation_id = f"rw-{digest}"
@@ -238,6 +243,7 @@ def build_signal_operation(
         permissions=("issues:write",),
         purpose=payload["purpose"],
         subject_id=payload["subject_id"],
+        repository_id=repository_id,
     )
 
 
@@ -390,11 +396,11 @@ class GhClient:
     def __init__(self, runner: Callable[..., CompletedProcess[str]] = run_bounded):
         self._runner = runner
 
-    def _invoke(self, args: list[str]) -> str:
+    def _invoke(self, args: list[str], *, timeout_seconds: float = 60) -> str:
         try:
             completed = self._runner(
                 ["gh", *args],
-                timeout_seconds=60,
+                timeout_seconds=timeout_seconds,
                 max_capture_bytes=8 * 1024 * 1024,
                 text=True,
             )
@@ -405,19 +411,23 @@ class GhClient:
             raise GhError(detail)
         return completed.stdout or ""
 
-    def _json(self, args: list[str]) -> Any:
-        output = self._invoke(args)
+    def _json(self, args: list[str], *, timeout_seconds: float = 60) -> Any:
+        output = self._invoke(args, timeout_seconds=timeout_seconds)
         try:
             return json.loads(output)
         except json.JSONDecodeError as exc:
             raise GhError(f"gh returned invalid JSON: {exc}") from exc
 
     def find_existing(self, operation: RemoteOperation) -> list[dict[str, Any]]:
-        pages = self._json(
-            [
+        deadline = time.monotonic() + 60
+        page_number = 1
+        items: list[dict[str, Any]] = []
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise GhError("GitHub marker reconciliation timed out after 60s")
+            page = self._json([
                 "api",
-                "--paginate",
-                "--slurp",
                 "--method",
                 "GET",
                 f"repos/{operation.repo}/issues",
@@ -425,14 +435,11 @@ class GhClient:
                 "state=all",
                 "-f",
                 "per_page=100",
-            ]
-        )
-        if not isinstance(pages, list):
-            raise GhError("gh paginated issue response was not a list")
-        items: list[dict[str, Any]] = []
-        for page in pages:
+                "-f",
+                f"page={page_number}",
+            ], timeout_seconds=remaining)
             if not isinstance(page, list):
-                raise GhError("gh paginated issue response contained a non-list page")
+                raise GhError("gh issue response page was not a list")
             for item in page:
                 if not isinstance(item, dict):
                     continue
@@ -450,6 +457,9 @@ class GhClient:
                 }
                 if operation.marker in str(normalized["body"]):
                     items.append(normalized)
+            if len(page) < 100:
+                break
+            page_number += 1
         if len(items) > 1:
             raise GhError(
                 f"Multiple remote records contain the current operation marker; reconcile before retrying: {operation.operation_id}"
@@ -504,6 +514,29 @@ class GhClient:
                 if isinstance(item, dict):
                     matches.append({"kind": "pull_request" if current_kind == "pr" else "issue", **item})
         return matches
+
+    def verify_repository_identity(self, repo: str, expected_repository_id: int) -> dict[str, Any]:
+        """Resolve the live public repository and require its immutable numeric identity."""
+
+        owner, name = parse_repository_slug(repo)
+        record = self._json(["api", f"repos/{owner}/{name}", "--method", "GET"])
+        if not isinstance(record, dict):
+            raise GhError("GitHub repository response was not an object")
+        live_id = record.get("id")
+        if not isinstance(live_id, int) or isinstance(live_id, bool) or live_id <= 0:
+            raise GhError("GitHub repository response did not include a valid numeric id")
+        if record.get("visibility") != "public":
+            raise GhError("Remote writes require a public target repository")
+        full_name = record.get("full_name")
+        if full_name is not None and not repository_slugs_match(full_name, repo):
+            raise GhError("GitHub repository response does not match the requested slug")
+        if (
+            not isinstance(expected_repository_id, int)
+            or isinstance(expected_repository_id, bool)
+            or live_id != expected_repository_id
+        ):
+            raise GhError("Live repository_id does not match the confirmed remote operation")
+        return {"repository": f"{owner}/{name}", "repository_id": live_id, "visibility": "public"}
 
     def verify_public_reference(self, reference: str) -> dict[str, Any]:
         """Verify that a supported public GitHub record exists without inferring intent."""

@@ -15,8 +15,8 @@ After a signal-backed or Discovery candidate is selected, its Contribution Packe
 
 ```bash
 reviewworthy candidate transition \
-  --packet .reviewworthy/contribution.json \
-  --from issue_only --to plan_directly \
+  --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json \
+  --to plan_directly \
   --reason "The verified public Issue now bounds the change." --confirm
 ```
 
@@ -29,7 +29,7 @@ reviewworthy candidate select .reviewworthy/candidates.json \
   --candidate-id candidate-001 --confirm
 reviewworthy candidate bind \
   --menu .reviewworthy/candidates.json \
-  --packet .reviewworthy/contribution.json
+  --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json
 ```
 
 Binding copies the selected basis and records the menu snapshot, candidate ID, repository, recommendation, and duplicate disposition in the Packet. It does not approve the Contribution Contract. Only a `do_not_contribute` recommendation prevents binding; `issue_only` and `seek_maintainer_signal` remain valid planning choices until their explicit transition and later Issue/Signal gates are satisfied. Packet `0.3` does not accept or migrate older bound-candidate records.

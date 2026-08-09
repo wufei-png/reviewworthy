@@ -13,7 +13,7 @@ class EvalContractTests(unittest.TestCase):
         result = run_evals(Path(__file__).parents[1] / "evals" / "fixtures")
 
         self.assertEqual(result["result"], "passed")
-        self.assertEqual(result["total"], 10)
+        self.assertEqual(result["total"], 11)
         self.assertEqual(result["failed"], 0)
 
     def test_packet_eval_requires_exact_blocker_set_and_result(self) -> None:

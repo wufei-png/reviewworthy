@@ -10,7 +10,7 @@
     "result": "blocked",
     "blocker_codes": [
       "assessment_requires_current_orientation",
-      "issue_verification_required",
+      "issue_verification_identity_mismatch",
       "semantic_snapshot_mismatch",
       "stale_assessment",
       "stale_orientation"

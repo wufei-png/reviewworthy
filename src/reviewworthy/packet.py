@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path, PureWindowsPath
 import re
 from typing import Any
 
 from .candidate import DUPLICATE_BLOCKING_DISPOSITIONS, DUPLICATE_DISPOSITIONS, RECOMMENDATIONS
 from .contract import CONTRACT_FIELDS, CONTRACT_VERSION, contract_snapshot
 from .disclosure import ASSISTANCE_LEVELS, DISCLOSURE_STAGES, disclosure_errors
-from .git import FINGERPRINT_ALGORITHM, PR_DIFF_FIELDS, VERIFICATION_PLAN_VERSION, VERIFICATION_RECEIPT_VERSION, verification_plan_digest
+from .git import FINGERPRINT_ALGORITHM, PR_DIFF_FIELDS, VERIFICATION_PLAN_VERSION, VERIFICATION_RECEIPT_VERSION, is_canonical_repository_relative_path, verification_plan_digest
 from .repository import parse_public_record, parse_repository_slug, repository_slugs_match, validate_repository_identity
 from .signal import SIGNAL_VERSION, signal_readiness_blockers, skeleton_signal, validate_basis_signal
 from .understanding import validate_understanding
@@ -74,21 +73,6 @@ def require_current_packet(packet: Any) -> dict[str, Any]:
             f"older formats are not read or migrated ({errors[0]['path']})"
         )
     return packet
-
-
-def _is_repository_relative_path(value: str) -> bool:
-    """Return whether a public path is relative under POSIX and Windows rules."""
-
-    posix_path = Path(value)
-    windows_path = PureWindowsPath(value)
-    return not (
-        posix_path.is_absolute()
-        or windows_path.is_absolute()
-        or windows_path.drive
-        or windows_path.root
-        or ".." in posix_path.parts
-        or ".." in windows_path.parts
-    )
 
 
 def require_contribution_id(value: Any) -> str:
@@ -306,7 +290,13 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
     elif basis.get("kind") == "issue" and not basis.get("references") and not basis.get("evidence"):
         _error(errors, "empty_basis", "A contribution basis needs references or reproducible evidence", "basis")
     if isinstance(basis, dict):
-        errors.extend(validate_basis_signal(basis, entry.get("mode") if isinstance(entry, dict) else ""))
+        errors.extend(validate_basis_signal(
+            basis,
+            entry.get("mode") if isinstance(entry, dict) else "",
+            packet.get("repository"),
+        ))
+        if basis.get("kind") == "issue":
+            errors.extend(issue_verification_errors(packet))
 
     contract = packet.get("contract", {})
     if not isinstance(contract, dict):
@@ -458,8 +448,8 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(check.get("argv"), list) or not check.get("argv") or not all(isinstance(item, str) and item for item in check.get("argv", [])):
                     _error(errors, "invalid_verification_command", "A verification check needs a non-empty argv list", f"{path}.argv")
                 cwd = check.get("cwd")
-                if not isinstance(cwd, str) or not cwd.strip() or not _is_repository_relative_path(cwd):
-                    _error(errors, "invalid_verification_cwd", "A verification check cwd must be repository-relative", f"{path}.cwd")
+                if not is_canonical_repository_relative_path(cwd):
+                    _error(errors, "invalid_verification_cwd", "A verification check cwd must use one canonical repository-relative POSIX spelling", f"{path}.cwd")
                 if not isinstance(check.get("required"), bool):
                     _error(errors, "invalid_verification_required", "A verification check required flag must be boolean", f"{path}.required")
         expected_plan_digest = verification_plan_digest(plan) if isinstance(plan, dict) else ""
@@ -500,7 +490,7 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
                     _error(errors, "invalid_verification_command", "A verification receipt needs a non-empty argv list", f"{path}.argv")
                 if not isinstance(receipt.get("cwd"), str) or not receipt.get("cwd", "").strip():
                     _error(errors, "invalid_verification_cwd", "A verification receipt needs cwd", f"{path}.cwd")
-                elif not _is_repository_relative_path(receipt["cwd"]):
+                elif not is_canonical_repository_relative_path(receipt["cwd"]):
                     _error(errors, "absolute_verification_cwd", "A verification receipt cwd must be repository-relative", f"{path}.cwd")
                 if isinstance(check, dict) and (receipt.get("argv") != check.get("argv") or receipt.get("cwd") != check.get("cwd")):
                     _error(errors, "verification_check_mismatch", "Receipt command and cwd must match its planned check", path)
@@ -590,6 +580,9 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(narrative, dict):
         _error(errors, "invalid_narrative", "narrative must be an object", "narrative")
     else:
+        allowed_narrative = {"title", "body", "final_preview_confirmed", "human_expression_required", "human_expression"}
+        for key in sorted(set(narrative) - allowed_narrative):
+            _error(errors, "unknown_narrative_field", f"narrative.{key} is not part of Packet {PACKET_VERSION}", f"narrative.{key}")
         if not isinstance(narrative.get("title"), str) or not narrative.get("title", "").strip():
             _error(errors, "missing_pr_title", "Final PR title is required", "narrative.title")
         if not isinstance(narrative.get("body"), str) or not narrative.get("body", "").strip():
@@ -608,8 +601,8 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
             if disposition not in DUPLICATE_DISPOSITIONS:
                 _error(errors, "invalid_duplicate_disposition", "candidate_selection.duplicate_disposition is required", "candidate_selection.duplicate_disposition")
             recommendation = candidate_selection.get("recommendation")
-            if recommendation is not None and recommendation not in RECOMMENDATIONS:
-                _error(errors, "invalid_candidate_recommendation", "candidate_selection.recommendation must be a recognized recommendation when present", "candidate_selection.recommendation")
+            if recommendation not in RECOMMENDATIONS:
+                _error(errors, "invalid_candidate_recommendation", "candidate_selection.recommendation is required and must be recognized", "candidate_selection.recommendation")
             transition = candidate_selection.get("transition")
             if transition is not None:
                 if not isinstance(transition, dict):
@@ -738,6 +731,79 @@ def issue_reference(packet: dict[str, Any]) -> str | None:
     return None
 
 
+def issue_verification_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
+    """Require a complete canonical GitHub identity for a plain Issue basis."""
+
+    basis = packet.get("basis", {})
+    if not isinstance(basis, dict) or basis.get("kind") != "issue":
+        return []
+    reference = issue_reference(packet)
+    if not reference:
+        return [{"code": "issue_reference_required", "message": "Issue-backed work needs a canonical GitHub Issue URL.", "path": "basis.references"}]
+    parsed = parse_public_record(reference)
+    repository = packet.get("repository", {})
+    if not parsed or not isinstance(repository, dict):
+        return [{"code": "issue_repository_mismatch", "message": "The Issue reference must belong to packet.repository.", "path": "basis.references"}]
+    verification = basis.get("verification")
+    if not isinstance(verification, dict):
+        return [{"code": "issue_verification_required", "message": "The Issue reference needs a complete GitHub verification.", "path": "basis.verification"}]
+    errors: list[dict[str, str]] = []
+    required_values = {
+        "status": "verified",
+        "provider": "github",
+        "reference": reference,
+        "record_type": "issue",
+        "host": "github.com",
+        "number": parsed["number"],
+        "url": reference,
+        "visibility": "public",
+    }
+    for field, expected in required_values.items():
+        actual = verification.get(field)
+        if actual != expected or (field == "number" and isinstance(actual, bool)):
+            errors.append({
+                "code": "issue_verification_identity_mismatch",
+                "message": f"basis.verification.{field} must match the canonical public Issue identity.",
+                "path": f"basis.verification.{field}",
+            })
+    if not isinstance(verification.get("verified_at"), str) or not verification.get("verified_at", "").strip():
+        errors.append({
+            "code": "issue_verification_time_required",
+            "message": "basis.verification.verified_at is required.",
+            "path": "basis.verification.verified_at",
+        })
+    expected_slug = f"{repository.get('owner', '')}/{repository.get('name', '')}"
+    parsed_slug = f"{parsed['owner']}/{parsed['name']}"
+    if (
+        not repository_slugs_match(parsed_slug, expected_slug)
+        or not repository_slugs_match(verification.get("repository"), parsed_slug)
+    ):
+        errors.append({
+            "code": "issue_verification_repository_mismatch",
+            "message": "The Issue reference and verification must match packet.repository.",
+            "path": "basis.verification.repository",
+        })
+    verification_repository_id = verification.get("repository_id")
+    if (
+        not isinstance(verification_repository_id, int)
+        or isinstance(verification_repository_id, bool)
+        or verification_repository_id <= 0
+    ):
+        errors.append({
+            "code": "issue_verification_identity_missing",
+            "message": "The Issue verification needs a positive repository_id.",
+            "path": "basis.verification.repository_id",
+        })
+    packet_repository_id = repository.get("repository_id")
+    if packet_repository_id is not None and verification_repository_id != packet_repository_id:
+        errors.append({
+            "code": "issue_verification_identity_mismatch",
+            "message": "The Issue verification repository_id must match packet.repository_id.",
+            "path": "basis.verification.repository_id",
+        })
+    return errors
+
+
 def issue_basis_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
     """Check the local Issue evidence without making a provider call."""
 
@@ -748,6 +814,9 @@ def issue_basis_blockers(packet: dict[str, Any]) -> list[dict[str, str]]:
         signal = basis.get("signal")
         if isinstance(signal, dict) and signal.get("record_type") != "issue":
             return []
+    identity_errors = issue_verification_errors(packet) if basis.get("kind") == "issue" else []
+    if identity_errors:
+        return identity_errors
     reference = issue_reference(packet)
     if not reference:
         return [{"code": "issue_reference_required", "message": "Issue-backed work needs a canonical GitHub Issue URL.", "path": "basis.references"}]
@@ -1033,7 +1102,11 @@ def _readiness_blockers_object(packet: dict[str, Any]) -> list[dict[str, str]]:
 
     if isinstance(basis, dict):
         blockers.extend(issue_basis_blockers(packet))
-        blockers.extend(signal_readiness_blockers(basis, entry.get("mode") if isinstance(entry, dict) else ""))
+        blockers.extend(signal_readiness_blockers(
+            basis,
+            entry.get("mode") if isinstance(entry, dict) else "",
+            packet.get("repository"),
+        ))
         if basis.get("kind") == "discovery-evidence":
             claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
             if not isinstance(claims, dict):

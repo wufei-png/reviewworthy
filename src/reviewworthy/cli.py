@@ -81,6 +81,14 @@ def _load_current_packet(path: Path) -> dict[str, Any]:
     return require_current_packet(_load_object(path))
 
 
+def _private_packet_output(root: Path, output: Path | None, contribution_id: str) -> Path:
+    private_root = local_state_path(root, "reviewworthy/v0.3/contributions").resolve()
+    target = (output or (private_root / contribution_id / "packet.json")).resolve()
+    if not target.is_relative_to(private_root):
+        raise ValueError("Packet 0.3 output must stay in Git-private reviewworthy/v0.3/contributions state")
+    return target
+
+
 def _write_json(path: Path, value: dict[str, Any], force: bool = False) -> None:
     if path.exists() and not force:
         raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
@@ -186,6 +194,7 @@ def _build_parser() -> argparse.ArgumentParser:
         command = signal_publish_commands.add_parser(name)
         command.add_argument("path", type=Path)
         command.add_argument("--repo", required=True, help="owner/name")
+        command.add_argument("--repository-id", type=int, required=True, help="Immutable GitHub numeric repository ID")
         command.add_argument("--title", required=True)
         command.add_argument("--body-file", type=Path, required=True)
         command.add_argument("--output", type=Path, help="Updated signal path for create; defaults to the input path")
@@ -248,8 +257,6 @@ def _build_parser() -> argparse.ArgumentParser:
     candidate_bind.add_argument("--menu", type=Path, required=True)
     candidate_bind.add_argument("--packet", type=Path, required=True)
     candidate_bind.add_argument("--candidate-id")
-    candidate_bind.add_argument("--output", type=Path)
-    candidate_bind.add_argument("--force", action="store_true")
     _common_json(candidate_bind)
     candidate_transition = candidate_commands.add_parser("transition", help="Record a human-confirmed recommendation transition")
     candidate_transition.add_argument("--packet", type=Path, required=True)
@@ -336,6 +343,10 @@ def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any, di
     packet = _load_current_packet(args.packet)
     if not repository_matches(packet.get("repository"), args.repo):
         raise ValueError("Remote target repository must exactly match packet.repository")
+    repository = packet.get("repository")
+    repository_id = repository.get("repository_id") if isinstance(repository, dict) else None
+    if not isinstance(repository_id, int) or isinstance(repository_id, bool) or repository_id <= 0:
+        raise ValueError("Remote operations require packet.repository.repository_id to be a positive immutable GitHub ID")
     body = args.body_file.read_text(encoding="utf-8")
     narrative = packet.get("narrative", {})
     if not isinstance(narrative, dict) or args.title.strip() != str(narrative.get("title", "")).strip():
@@ -424,6 +435,9 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
             basis["signal"]["verification"] = verification
         else:
             raise ValueError("Packet basis does not contain an Issue verification target")
+        repository = packet.get("repository")
+        if isinstance(repository, dict) and repository.get("repository_id") is None:
+            repository["repository_id"] = remote.get("repository_id")
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
         _replace_json(path, packet)
         result["recorded"] = str(path)
@@ -631,6 +645,25 @@ def main(argv: list[str] | None = None) -> int:
                     errors = list(local["errors"])
                     if signal_value.get("lifecycle") in {"rejected", "expired"}:
                         errors.append({"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.lifecycle"})
+                    prospective_signal = dict(signal_value)
+                    verification = {
+                        "status": "verified",
+                        "provider": remote.get("provider", "github"),
+                        "reference": signal_value["reference"],
+                        "verified_at": utc_now(),
+                    }
+                    for key in ("host", "repository", "repository_id", "record_type", "number", "url", "visibility", "state", "state_reason", "locked", "labels"):
+                        if remote.get(key) is not None:
+                            verification[key] = remote[key]
+                    prospective_signal["verification"] = verification
+                    if remote.get("verified"):
+                        errors.extend(validate_signal(prospective_signal)["errors"])
+                    else:
+                        errors.append({
+                            "code": "signal_verification_failed",
+                            "message": str(remote.get("error", "The public Signal record could not be verified.")),
+                            "path": "signal.reference",
+                        })
                     result = {
                         "valid": bool(remote.get("verified")) and not errors,
                         "verification": "github_public_reference",
@@ -648,16 +681,7 @@ def main(argv: list[str] | None = None) -> int:
                             "verified_at": utc_now(),
                         }
                     else:
-                        remote = result["remote"]
-                        verification = {
-                            "status": "verified",
-                            "provider": remote.get("provider", "github"),
-                            "reference": signal_value["reference"],
-                            "verified_at": utc_now(),
-                        }
-                        for key in ("host", "repository", "repository_id", "record_type", "number", "url", "visibility", "state", "state_reason", "locked", "labels"):
-                            if remote.get(key) is not None:
-                                verification[key] = remote[key]
+                        verification = prospective_signal["verification"]
                     updated_signal["verification"] = verification
                     _replace_json(args.path, updated_signal)
                     result["recorded"] = str(args.path)
@@ -680,7 +704,7 @@ def main(argv: list[str] | None = None) -> int:
                     or publication.get("body") != body
                 ):
                     raise ValueError("Published signal publication inputs differ from the recorded operation")
-            operation = build_signal_operation(signal_value, args.repo, args.title, body)
+            operation = build_signal_operation(signal_value, args.repo, args.title, body, args.repository_id)
             payload = operation.as_dict()
             if isinstance(publication, dict) and publication.get("operation_id") != operation.operation_id:
                 raise ValueError("Published signal operation identity differs from the rendered operation; reconcile before publishing again")
@@ -720,6 +744,7 @@ def main(argv: list[str] | None = None) -> int:
                     payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
                 else:
                     client = GhClient()
+                    client.verify_repository_identity(operation.repo, operation.repository_id)
                     existing = client.find_existing(operation)
                     if existing:
                         remote = existing[0].get("url") or existing[0].get("html_url") or ""
@@ -742,10 +767,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "packet":
             if args.packet_command == "init":
                 require_contribution_id(args.contribution_id)
-                output = args.output or local_state_path(
-                    args.root,
-                    f"reviewworthy/v0.3/contributions/{args.contribution_id}/packet.json",
-                )
+                output = _private_packet_output(args.root, args.output, args.contribution_id)
                 if output.exists() and not args.force:
                     raise ValueError(f"Refusing to overwrite existing file: {output}; use --force to replace it")
                 packet = skeleton_packet(args.contribution_id, args.mode, args.repository)
@@ -806,11 +828,8 @@ def main(argv: list[str] | None = None) -> int:
                         record = understanding.get(phase)
                         if isinstance(record, dict) and record.get("status") == "not_run":
                             record["semantic_snapshot"] = snapshot
-                target = args.output or args.packet
-                if target != args.packet:
-                    _write_json(target, updated, args.force)
-                else:
-                    _replace_json(target, updated)
+                target = args.packet
+                _replace_json(target, updated)
                 _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "semantic_snapshot": snapshot}, args.as_json)
                 return 0
             if args.candidate_command == "transition":
@@ -966,6 +985,7 @@ def main(argv: list[str] | None = None) -> int:
                         return 1
 
                     client = GhClient()
+                    client.verify_repository_identity(operation.repo, operation.repository_id)
                     if operation.issue_url:
                         live_issue = client.verify_public_reference(operation.issue_url)
                         live_errors = _issue_revalidation_errors(packet, live_issue)
@@ -1010,6 +1030,7 @@ def main(argv: list[str] | None = None) -> int:
                         payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": receipt["remote"]})
                     else:
                         client = GhClient()
+                        client.verify_repository_identity(operation.repo, operation.repository_id)
                         existing = client.find_existing(operation)
                         if existing:
                             remote = existing[0].get("url") or existing[0].get("html_url") or ""

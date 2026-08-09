@@ -41,9 +41,9 @@ Issue publication remains a separate explicit operation. A pre-publication Issue
 
 ```bash
 reviewworthy signal publish plan .reviewworthy/contribution-signal.json \
-  --repo OWNER/REPO --title "Candidate request" --body-file signal.md
+  --repo OWNER/REPO --repository-id REPOSITORY_ID --title "Candidate request" --body-file signal.md
 reviewworthy signal publish create .reviewworthy/contribution-signal.json \
-  --repo OWNER/REPO --title "Candidate request" --body-file signal.md \
+  --repo OWNER/REPO --repository-id REPOSITORY_ID --title "Candidate request" --body-file signal.md \
   --confirm-operation-id rw-...
 ```
 

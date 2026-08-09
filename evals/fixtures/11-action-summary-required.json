@@ -1,0 +1,20 @@
+{
+  "id": "action-summary-required",
+  "kind": "action",
+  "mode": "evidence-enforce",
+  "body": "Plain pull-request body without a Reviewworthy Evidence Summary.",
+  "event": {
+    "name": "pull_request",
+    "repository": "example/project",
+    "repository_id": 101,
+    "base_sha": "base",
+    "head_sha": "head"
+  },
+  "assert": {
+    "violation_codes": [
+      "evidence_summary_required"
+    ],
+    "conclusion": "failure",
+    "result": "failed"
+  }
+}
