@@ -19,6 +19,7 @@ from reviewworthy.evidence import (
     validate_evidence_summary,
 )
 from reviewworthy.git import GitError, PR_DIFF_FIELDS, capture_pr_diff
+from reviewworthy.policy import PolicyTreeError
 
 from helpers import valid_packet
 
@@ -252,6 +253,95 @@ class ActionEvidenceTests(unittest.TestCase):
 
         self.assertIn("base_policy_ai_prohibited", {item["code"] for item in result["violations"]})
         self.assertEqual(result["base_policy"]["machine_authority"], {})
+
+    def test_base_policy_conflict_blocks_enforcement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._policy_repository(
+                Path(directory),
+                "AI assistance is prohibited.\n",
+                "[ai]\nallowed = true\n",
+            )
+
+            result = check_evidence(
+                self._body(diff),
+                root=repository,
+                event_name="pull_request",
+                event_repository="example/project",
+                event_repository_id=101,
+                event_base_sha=diff["base_tip_sha"],
+                event_head_sha=diff["head_sha"],
+                mode="evidence-enforce",
+            )
+
+        self.assertEqual(result["conclusion"], "failure")
+        self.assertIn("base_policy_conflict", {item["code"] for item in result["violations"]})
+
+    def test_base_policy_ambiguity_blocks_enforcement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._policy_repository(
+                Path(directory),
+                "AI assistance is allowed.\nAI assistance is prohibited.\n",
+            )
+
+            result = check_evidence(
+                self._body(diff),
+                root=repository,
+                event_name="pull_request",
+                event_repository="example/project",
+                event_repository_id=101,
+                event_base_sha=diff["base_tip_sha"],
+                event_head_sha=diff["head_sha"],
+                mode="evidence-enforce",
+            )
+
+        self.assertEqual(result["conclusion"], "failure")
+        self.assertIn("base_policy_ambiguity", {item["code"] for item in result["violations"]})
+
+    def test_unavailable_base_policy_blocks_enforcement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._repository(Path(directory))
+            with patch(
+                "reviewworthy.action.inspect_policy_at_commit",
+                side_effect=PolicyTreeError("base policy could not be read"),
+            ):
+                result = check_evidence(
+                    self._body(diff),
+                    root=repository,
+                    event_name="pull_request",
+                    event_repository="example/project",
+                    event_repository_id=101,
+                    event_base_sha=diff["base_tip_sha"],
+                    event_head_sha=diff["head_sha"],
+                    mode="evidence-enforce",
+                )
+
+        self.assertEqual(result["conclusion"], "failure")
+        self.assertIn("base_policy_unavailable", {item["code"] for item in result["violations"]})
+
+    def test_required_base_policy_disclosure_blocks_missing_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._policy_repository(
+                Path(directory),
+                "AI assistance is allowed.\n",
+                "[ai]\nallowed = true\ndisclosure_required = true\n",
+            )
+            packet = valid_packet()
+            packet["ai_assistance"]["disclosure"]["text"] = ""
+            body = append_evidence_summary("Body", build_evidence_summary(packet, diff))
+
+            result = check_evidence(
+                body,
+                root=repository,
+                event_name="pull_request",
+                event_repository="example/project",
+                event_repository_id=101,
+                event_base_sha=diff["base_tip_sha"],
+                event_head_sha=diff["head_sha"],
+                mode="evidence-enforce",
+            )
+
+        self.assertEqual(result["conclusion"], "failure")
+        self.assertIn("base_policy_disclosure_required", {item["code"] for item in result["violations"]})
 
     def test_each_public_diff_identity_field_is_recomputed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
