@@ -512,6 +512,21 @@ def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_
     return "linked", "created_exact_note"
 
 
+def _refresh_candidate_snapshot(packet: dict[str, Any]) -> str:
+    snapshot = semantic_snapshot(packet)
+    snapshots = packet.setdefault("snapshots", {})
+    if not isinstance(snapshots, dict):
+        raise ValueError("packet.snapshots must be an object")
+    snapshots["semantic"] = snapshot
+    understanding = packet.get("understanding", {})
+    if isinstance(understanding, dict):
+        for phase in ("orientation", "assessment"):
+            record = understanding.get(phase)
+            if isinstance(record, dict) and record.get("status") == "not_run":
+                record["semantic_snapshot"] = snapshot
+    return snapshot
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -814,17 +829,7 @@ def main(argv: list[str] | None = None) -> int:
                 menu = _load_object(args.menu)
                 packet = _load_current_packet(args.packet)
                 updated = bind_candidate(menu, packet, args.candidate_id)
-                snapshot = semantic_snapshot(updated)
-                snapshots = updated.setdefault("snapshots", {})
-                if not isinstance(snapshots, dict):
-                    raise ValueError("packet.snapshots must be an object")
-                snapshots["semantic"] = snapshot
-                understanding = updated.get("understanding", {})
-                if isinstance(understanding, dict):
-                    for phase in ("orientation", "assessment"):
-                        record = understanding.get(phase)
-                        if isinstance(record, dict) and record.get("status") == "not_run":
-                            record["semantic_snapshot"] = snapshot
+                snapshot = _refresh_candidate_snapshot(updated)
                 target = args.packet
                 _replace_json(target, updated)
                 _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "semantic_snapshot": snapshot}, args.as_json)
@@ -832,17 +837,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.candidate_command == "transition":
                 packet = _load_current_packet(args.packet)
                 updated = transition_candidate(packet, to=args.to, reason=args.reason, human_confirmed=args.confirm)
-                snapshot = semantic_snapshot(updated)
-                snapshots = updated.setdefault("snapshots", {})
-                if not isinstance(snapshots, dict):
-                    raise ValueError("packet.snapshots must be an object")
-                snapshots["semantic"] = snapshot
-                understanding = updated.get("understanding", {})
-                if isinstance(understanding, dict):
-                    for phase in ("orientation", "assessment"):
-                        record = understanding.get(phase)
-                        if isinstance(record, dict) and record.get("status") == "not_run":
-                            record["semantic_snapshot"] = snapshot
+                snapshot = _refresh_candidate_snapshot(updated)
                 _replace_json(args.packet, updated)
                 _print({"updated": str(args.packet), "to": args.to, "semantic_snapshot": snapshot}, args.as_json)
                 return 0
