@@ -1,56 +1,42 @@
 # Reviewworthy
 
-Reviewworthy is a contributor-first workflow for human-owned, AI-assisted open-source contributions.
+Reviewworthy is a contributor-side workflow for proving that an AI-assisted contribution is needed, bounded, understood, and ready for maintainer review.
 
 It does not optimize for the number of generated pull requests. It records why a contribution is wanted, checks repository policy, keeps a bounded contribution contract, preserves verification evidence, tests contributor understanding, and makes remote writes explicit and idempotent.
 
 Reviewworthy's mandatory gates target External Contributions. Maintainer-authorized changes remain governed by the repository and may use direct push without a forced Reviewworthy PR; ordinary tests, CI, release evidence, and security handling still apply. Repository workflows decide when to invoke enforcement, and the core Action does not infer maintainer status.
 
-The project brand is **Reviewworthy**. The portable Agent Skill is **`maintainer-first-contribution`**.
+The project brand is **Reviewworthy**. The portable Agent Skill is **`maintainer-first-contribution`**. Maintainer-friendly output is a projection of contributor evidence, not a separate maintainer-side workflow.
 
-## Current slice
+## Start with the Skill
 
-The repository currently provides an alpha, standard-library-only Python CLI with these deterministic primitives:
+The normal entry is an existing repository Issue. Ask an Agent with the installed `maintainer-first-contribution` Skill to prepare the contribution from that Issue. The Skill owns the conversation; the CLI preserves deterministic evidence and tells the Skill what is unresolved.
 
-```text
+```bash
 reviewworthy packet init --root . --contribution-id contribution-001
-reviewworthy status --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --json
-reviewworthy next --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --json
-reviewworthy policy inspect [REPOSITORY]
-reviewworthy brief create --output .reviewworthy/project-brief.json --focus src/relevant_file.py
-reviewworthy brief validate .reviewworthy/project-brief.json --root .
-reviewworthy brief render .reviewworthy/project-brief.json --output project-brief.md
-reviewworthy candidate search --repo OWNER/REPO --query "keyword"
-reviewworthy candidate init --repository OWNER/REPO
-reviewworthy diff capture --root . --base BASE --head HEAD
-reviewworthy verify run --root . --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --check-id unit --json
-reviewworthy candidate validate .reviewworthy/candidates.json
-reviewworthy signal init --record-type issue --claim-type maintainer_request --reference https://github.com/OWNER/REPO/issues/123
-reviewworthy signal validate .reviewworthy/contribution-signal.json
-reviewworthy signal verify .reviewworthy/contribution-signal.json
-reviewworthy signal publish plan .reviewworthy/contribution-signal.json --repo OWNER/REPO --repository-id REPOSITORY_ID --title "Candidate request" --body-file signal.md
-reviewworthy candidate select .reviewworthy/candidates.json --candidate-id candidate-001 --confirm
-reviewworthy candidate bind --menu .reviewworthy/candidates.json --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json
-reviewworthy candidate transition --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --to plan_directly --reason "Human-confirmed reason" --confirm
-reviewworthy contract init --output .reviewworthy/contribution-contract.json
-reviewworthy risk assess MANIFEST.json
-reviewworthy packet validate .git/reviewworthy/v0.3/contributions/contribution-001/packet.json
-reviewworthy issue verify --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --record
-reviewworthy understanding record .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --phase orientation --status passed --summary "..." --rubric behavior="..." --rubric invariant="..." --rubric test="..." --topic contract --topic diff --topic verification --topic policy
-reviewworthy understanding validate .git/reviewworthy/v0.3/contributions/contribution-001/packet.json
-reviewworthy action check --mode report
-reviewworthy action check --mode evidence-enforce --root .  # in a pull_request Action context
-reviewworthy disclosure render --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json
-reviewworthy eval run
-reviewworthy remote plan ...
-reviewworthy remote create ... --confirm-operation-id rw-...
+PACKET=.git/reviewworthy/v0.3/contributions/contribution-001/packet.json
+reviewworthy status --packet "$PACKET" --json
+reviewworthy next --packet "$PACKET" --json
 ```
 
-The CLI and Skill form one contributor-first product. The full Contribution Packet stays in Git-private local state; a minimal Evidence Summary is published in the PR Body for the optional repository-side Action. `status` derives the current stage and blockers; `next` returns one deterministic next action so the Skill does not have to reconstruct the state machine. Packets bind evidence to a GitHub repository identity. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
+From there, follow `next`: inspect repository policy, record and verify the Issue-backed contribution basis, agree the bounded Contract, implement only after approval, bind the finished Diff, run the Packet's verification plan, demonstrate ownership, and review the exact PR narrative before any confirmed remote write. Re-run `status` or `next` after each transition instead of reconstructing progress from prose.
+
+After implementation, bind the exact clean current HEAD and merge-base Diff before verification:
+
+```bash
+reviewworthy diff bind --root . --packet "$PACKET" --base main --head HEAD --json
+reviewworthy next --packet "$PACKET" --json
+```
+
+`diff bind` is intentionally separate from generic `diff capture`: it checks the Packet's approved scope and Diff budget, records the implementation result, updates the semantic snapshot, and deterministically routes the workflow into verification. It does not create another persisted readiness field.
+
+Discovery is an advanced entry when no suitable Issue exists and repository policy permits it. Use the candidate and Contribution Signal commands to establish a defensible basis before the same Contract, implementation, Diff-binding, and verification path. Discovery recommendations are evidence, never authorization.
+
+The CLI and Skill form one contributor-side product. The full Contribution Packet stays in Git-private local state. A PR Body receives a human-readable contribution-evidence overview plus the existing machine-readable Evidence Summary for the optional read-only repository Action. `status` derives the current stage and blockers; `next` returns one deterministic next action. Packets bind evidence to a GitHub repository identity. The remote adapter uses the user's authenticated `gh` CLI and refuses to write unless the current rendered operation ID is explicitly confirmed.
 
 ## Workflow contract
 
-The conceptual progression is shared by both entry paths. `status` reports the earliest unresolved stage from current Packet evidence; it is not a separately stored workflow state.
+The conceptual progression is shared by both entry paths. `status` reports the earliest unresolved stage from current Packet evidence; it is not a separately stored workflow state. The `implementation` stage is likewise derived from the Packet's existing implementation result and deterministic Diff binding. Independent hard-stops take priority over ordinary progress routing.
 
 ```mermaid
 flowchart TB
@@ -84,7 +70,7 @@ Candidate recommendations are evidence-backed guidance, not authorization. `do_n
 
 Every node records a result. Review profile is `standard`, `heightened`, or `learning`; risk signals raise Standard to Heightened. Standard requires a light Ownership Check covering the problem, scope, verification, and risks. Heightened and Learning additionally require Orientation and Assessment with the full behavior, invariant, test, flow, tradeoff, failure, and regression rubric. Security issues, policy conflicts, irreversible changes, and unverifiable results remain independent hard-stops.
 
-The contract must be explicitly approved before remote readiness. Verification is defined by a versioned Packet plan whose checks have stable IDs, argv, repository-relative cwd, and a required flag. `verify run` executes a named check with bounded time and captured output, then records a receipt `0.3` bound to the exact plan digest, canonical `subject_digest`, stable HEAD, and clean worktree. A required check is ready only with `command_outcome=passed`, `integrity_status=stable`, and `provenance=contributor_local`. Timestamps and output hashes are audit-only. For Heightened and Learning, Orientation must pass before Assessment and both bind to the semantic snapshot; changing contribution decisions, the subject, plan, or semantic outcome invalidates them.
+The contract must be explicitly approved before implementation. Once the implementation is coherent, `diff bind` requires the selected head to be the current clean HEAD, recomputes the merge-base Diff, enforces the approved scope and Diff budget, and updates the existing implementation result. Verification is defined by a versioned Packet plan whose checks have stable IDs, argv, repository-relative cwd, and a required flag. `verify run` executes a named check with bounded time and captured output, then records a receipt `0.3` bound to the exact plan digest, canonical `subject_digest`, stable HEAD, and clean worktree. A required check is ready only with `command_outcome=passed`, `integrity_status=stable`, and `provenance=contributor_local`. Timestamps and output hashes are audit-only. For Heightened and Learning, Orientation must pass before Assessment and both bind to the semantic snapshot; changing contribution decisions, the subject, plan, or semantic outcome invalidates them.
 
 ## Local development
 
@@ -126,7 +112,7 @@ For a policy-required Draft PR, the draft state is included in the operation ID 
 
 The first release does not create review comments or Discussions, close PRs, merge changes, or use an LLM as an Action gatekeeper. It can verify a referenced Discussion read-only through GraphQL; it does not publish Discussions or interpret maintainer responses.
 
-The repository also ships a read-only composite Action in [`action.yml`](./action.yml). It reads only the current versioned Evidence Summary from the pull-request Body and recomputes repository- and diff-owned facts. Contributor-local verification, ownership, and AI disclosure remain explicitly labeled claims. Default `report` mode is non-blocking; `evidence-enforce` requires a valid current Summary and exact recomputed diff identity. The Action never reads a Packet from the checkout, fetches missing objects, publishes, comments, or infers maintainer approval. Consumers that enable `evidence-enforce` should check out with `fetch-depth: 0`.
+The repository also ships a read-only composite Action in [`action.yml`](./action.yml). The pull-request Body shows maintainers a human-readable overview, followed by the current versioned machine-readable Evidence Summary. The overview labels contributor-local verification, ownership, and AI disclosure as claims; “ready for maintainer review” describes completion of the contributor workflow, not maintainer approval or a quality score. The Action parses the machine block and recomputes repository- and diff-owned facts. Default `report` mode is non-blocking; `evidence-enforce` requires a valid current Summary and exact recomputed diff identity. The Action never reads a Packet from the checkout, fetches missing objects, publishes, comments, or infers maintainer approval. Consumers that enable `evidence-enforce` should check out with `fetch-depth: 0`.
 
 The runtime has no third-party dependencies. Schema validation is a test/CI-only concern: `requirements-dev.txt` installs `jsonschema`, and CI validates the portable schemas and generated test artifacts without adding it to the package runtime dependencies. Fixture evals assert exact blocker/violation sets and conclusion/result outcomes rather than whole response snapshots.
 

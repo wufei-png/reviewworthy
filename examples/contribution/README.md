@@ -10,7 +10,7 @@ Suppose a maintainer-owned Issue reports that an input boundary accepts an inval
 2. Record `not_duplicate` (or another human/Skill-owned disposition) in the Candidate Menu.
 3. Create a Brief with the repository identity and only explicitly selected focus-file hashes.
 4. Bind the Issue basis to a Packet and approve a narrow Contract.
-5. Capture the real diff and run verification at the same `head_sha`.
+5. Bind the real current Diff into the Packet and run verification at the same `head_sha`.
 6. Complete the Standard Ownership Check for problem, scope, verification, and risks.
 7. Preview the exact PR Body, including the Issue URL and required AI disclosure, then confirm the operation ID.
 
@@ -18,10 +18,11 @@ Representative commands:
 
 ```bash
 PYTHONPATH=src python -m reviewworthy brief create --root . --focus src/reviewworthy/action.py
-PYTHONPATH=src python -m reviewworthy diff capture --root . --base BASE_SHA --head HEAD_SHA
-PYTHONPATH=src python -m reviewworthy verify run --root . --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --check-id unit --json
-PYTHONPATH=src python -m reviewworthy status --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --json
-PYTHONPATH=src python -m reviewworthy next --packet .git/reviewworthy/v0.3/contributions/contribution-001/packet.json --json
+PACKET=.git/reviewworthy/v0.3/contributions/contribution-001/packet.json
+PYTHONPATH=src python -m reviewworthy diff bind --root . --packet "$PACKET" --base BASE_REF --head HEAD --json
+PYTHONPATH=src python -m reviewworthy verify run --root . --packet "$PACKET" --check-id unit --json
+PYTHONPATH=src python -m reviewworthy status --packet "$PACKET" --json
+PYTHONPATH=src python -m reviewworthy next --packet "$PACKET" --json
 ```
 
 The example does not authorize a remote write. A real contribution still needs current policy, a fresh semantic snapshot, contributor-owned answers where its profile requires them, and an explicitly confirmed remote plan.

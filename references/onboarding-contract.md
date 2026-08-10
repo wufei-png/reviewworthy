@@ -10,7 +10,7 @@ The Skill renders the JSON with `reviewworthy brief render` and fills the human 
 - constraints and testing approach;
 - unwanted change patterns.
 
-The brief supports contributor orientation but does not replace human ownership of the selected change. Capture the implementation Diff with `reviewworthy diff capture` and run named Packet-plan checks with `reviewworthy verify run --packet ... --check-id ...`; the canonical subject and plan digest bind evidence to the contribution. For Heightened and Learning, a material semantic change to the contract, Diff, verification outcome, or policy invalidates Orientation and Assessment as defined by `references/understanding-gate.md`.
+The brief supports contributor orientation but does not replace human ownership of the selected change. After the approved implementation is coherent, bind it with `reviewworthy diff bind --root . --packet ... --base BASE --head HEAD`; generic `diff capture` does not advance Packet routing. Binding checks the current clean HEAD, approved scope, and Diff budget, then updates the existing implementation result and semantic snapshot so `status/next` enters verification. Run named Packet-plan checks with `reviewworthy verify run --packet ... --check-id ...`; the canonical subject and plan digest bind evidence to the contribution. For Heightened and Learning, a material semantic change to the contract, Diff, verification outcome, or policy invalidates Orientation and Assessment as defined by `references/understanding-gate.md`.
 
 `brief validate path.json` checks the artifact structure and embedded hash. Use `brief validate path.json --root .` when freshness against the current repository must also be established.
 

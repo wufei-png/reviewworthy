@@ -1,6 +1,8 @@
 # Action, eval, and Schema CI
 
-The composite Action is read-only and never reads a private Contribution Packet from the checkout. It parses exactly one current Evidence Summary from the pull-request Body and recomputes repository- and diff-owned facts from runner event identity plus the checked-out Git objects.
+The composite Action is read-only and never reads a private Contribution Packet from the checkout. The pull-request Body contains a human-readable contribution-evidence overview followed by exactly one current machine-readable Evidence Summary. The Action parses only the machine block and recomputes repository- and diff-owned facts from runner event identity plus the checked-out Git objects. The overview is maintainer-friendly output from the contributor workflow, not a separate maintainer product.
+
+The overview's readiness label uses the same complete contributor-side blocker set as remote planning, including the canonical Issue link and exact current Diff binding. Verification, ownership, and disclosure remain explicitly labeled contributor claims. “Ready for maintainer review” is not maintainer approval, endorsement, or a quality score. Duplicate or unmatched overview markers are rejected when the Action extracts the machine summary.
 
 ```mermaid
 flowchart LR
