@@ -85,6 +85,14 @@ class ActionEvidenceTests(unittest.TestCase):
         self.assertNotIn("gh pr create", content)
         self.assertNotIn("git fetch", content)
 
+    def test_ci_smoke_tests_the_composite_action_wrapper(self) -> None:
+        workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "reviewworthy.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("uses: ./", workflow)
+        self.assertIn("mode: report", workflow)
+
     def test_event_context_includes_runner_owned_pr_body(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
