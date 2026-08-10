@@ -18,7 +18,7 @@ from reviewworthy.evidence import (
     render_evidence_summary,
     validate_evidence_summary,
 )
-from reviewworthy.git import PR_DIFF_FIELDS, capture_pr_diff
+from reviewworthy.git import GitError, PR_DIFF_FIELDS, capture_pr_diff
 
 from helpers import valid_packet
 
@@ -100,6 +100,53 @@ class ActionEvidenceTests(unittest.TestCase):
                     github_event_context(),
                     ("pull_request", "Example/Project", 101, "base", "head", "current body"),
                 )
+
+    def test_enforcement_rejects_incomplete_runner_context(self) -> None:
+        body = append_evidence_summary(
+            "Body",
+            build_evidence_summary(valid_packet(), valid_packet()["diff"]),
+        )
+
+        result = check_evidence(
+            body,
+            root=Path("."),
+            event_name="push",
+            event_repository=None,
+            event_repository_id=None,
+            event_base_sha=None,
+            event_head_sha=None,
+            mode="evidence-enforce",
+        )
+
+        self.assertEqual(result["conclusion"], "failure")
+        self.assertTrue(result["checked"])
+        self.assertEqual(
+            {item["code"] for item in result["violations"]},
+            {
+                "base_policy_unavailable",
+                "pull_request_context_required",
+                "repository_context_required",
+                "pull_request_commits_required",
+            },
+        )
+
+    def test_enforcement_rejects_unavailable_current_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, diff = self._repository(Path(directory))
+            with patch("reviewworthy.action.capture_pr_diff", side_effect=GitError("missing Git objects")):
+                result = check_evidence(
+                    self._body(diff),
+                    root=repository,
+                    event_name="pull_request",
+                    event_repository="example/project",
+                    event_repository_id=101,
+                    event_base_sha=diff["base_tip_sha"],
+                    event_head_sha=diff["head_sha"],
+                    mode="evidence-enforce",
+                )
+
+        self.assertEqual(result["conclusion"], "failure")
+        self.assertIn("current_diff_unavailable", {item["code"] for item in result["violations"]})
 
     def test_report_treats_missing_summary_as_unknown_but_enforcement_fails(self) -> None:
         report = check_evidence(
