@@ -186,6 +186,25 @@ def capture_pr_diff(root: Path, base: str, head: str) -> dict[str, Any]:
     }
 
 
+def capture_bindable_pr_diff(root: Path, base: str, head: str) -> dict[str, Any]:
+    """Capture a PR Diff only when the current worktree can be bound safely."""
+
+    root = root.resolve()
+    expected_head = resolve_ref(root, head)
+    head_before = current_head(root)
+    if head_before != expected_head:
+        raise GitError(f"Working tree HEAD moved: expected {expected_head}, found {head_before}")
+    if _worktree_status(root):
+        raise GitError("Diff binding requires a clean worktree")
+    diff = capture_pr_diff(root, base, expected_head)
+    head_after = current_head(root)
+    if head_after != expected_head:
+        raise GitError(f"Working tree HEAD moved during Diff binding: expected {expected_head}, found {head_after}")
+    if _worktree_status(root):
+        raise GitError("Diff binding requires a clean worktree")
+    return diff
+
+
 def verification_plan_digest(plan: Any) -> str:
     """Bind receipts to the exact current verification plan."""
 

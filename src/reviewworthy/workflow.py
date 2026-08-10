@@ -20,7 +20,10 @@ _STAGE_CODES = (
         "invalid_diff_receipt", "missing_diff_receipt", "scope_unverifiable", "out_of_scope_files",
         "diff_budget_exceeded", "diff_budget_unverifiable",
     }),
-    ("verification", {"missing_verification_plan", "missing_executed_verification", "required_verification_missing", "verification_head_mismatch"}),
+    ("verification", {
+        "missing_verification_plan", "missing_executed_verification", "required_verification_missing",
+        "stale_verification_plan", "stale_verification_subject", "verification_head_mismatch",
+    }),
     ("ownership", {"ownership_not_passed"}),
     ("understanding", {
         "orientation_not_passed", "assessment_not_passed", "stale_orientation", "stale_assessment",
@@ -139,7 +142,13 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
     if stage == "contract":
         return [{"kind": "decision", "command": "", "reason": "Resolve candidate disposition and explicitly approve the bounded Contribution Contract."}]
     if stage == "implementation":
-        return [{"kind": "decision", "command": "", "reason": "Complete the approved implementation, then bind its current merge-base Diff to this Packet."}]
+        repository = packet.get("repository") if isinstance(packet.get("repository"), dict) else {}
+        base = repository.get("default_branch") if isinstance(repository.get("default_branch"), str) and repository.get("default_branch") else "main"
+        command = (
+            f"reviewworthy diff bind --root . --packet {quoted_packet} "
+            f"--base {shlex.quote(base)} --head HEAD --json"
+        )
+        return [{"kind": "command", "command": command, "reason": "Bind the current clean merge-base Diff after completing the approved implementation."}]
     if stage == "verification":
         verification = packet.get("verification") if isinstance(packet.get("verification"), dict) else {}
         plan = verification.get("plan") if isinstance(verification.get("plan"), dict) else {}

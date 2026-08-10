@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 from pathlib import Path
 import sys
@@ -15,7 +16,7 @@ from .candidate import bind_candidate, render_candidate_menu, select_candidate, 
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evals import run_evals
-from .git import GitError, PR_DIFF_FIELDS, capture_pr_diff, local_state_path, run_verification, verification_plan_digest
+from .git import GitError, PR_DIFF_FIELDS, capture_bindable_pr_diff, capture_pr_diff, local_state_path, run_verification, verification_plan_digest
 from .github import (
     GhClient,
     GhError,
@@ -33,6 +34,7 @@ from .github import (
 )
 from .packet import (
     good_first_issue_policy_errors,
+    deterministic_evidence_checks,
     issue_link_blockers,
     issue_reference,
     readiness_blockers,
@@ -305,6 +307,12 @@ def _build_parser() -> argparse.ArgumentParser:
     diff_capture.add_argument("--output", type=Path, default=Path(".reviewworthy/diff.json"))
     diff_capture.add_argument("--force", action="store_true")
     _common_json(diff_capture)
+    diff_bind = diff_commands.add_parser("bind", help="Bind the current clean merge-base Diff to a Contribution Packet")
+    diff_bind.add_argument("--root", type=Path, default=Path("."))
+    diff_bind.add_argument("--packet", type=Path, required=True)
+    diff_bind.add_argument("--base", required=True)
+    diff_bind.add_argument("--head", default="HEAD")
+    _common_json(diff_bind)
 
     verify = commands.add_parser("verify", help="Execute one check from the Packet verification plan")
     verify_commands = verify.add_subparsers(dest="verify_command", required=True)
@@ -897,9 +905,45 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["result"] == "passed" else 1
 
         if args.command == "diff":
-            diff_value = capture_pr_diff(args.root, args.base, args.head)
-            _write_json(args.output, diff_value, args.force)
-            _print({"captured": str(args.output), **diff_value}, args.as_json)
+            if args.diff_command == "capture":
+                diff_value = capture_pr_diff(args.root, args.base, args.head)
+                _write_json(args.output, diff_value, args.force)
+                _print({"captured": str(args.output), **diff_value}, args.as_json)
+                return 0
+
+            packet = _load_current_packet(args.packet)
+            current_status = workflow_status(packet, args.packet)
+            if current_status["current_stage"] in {"invalid", "blocked", "basis", "contract"}:
+                raise ValueError(
+                    "Diff binding requires a valid, unblocked Packet with an approved contribution basis and Contract"
+                )
+            captured = capture_bindable_pr_diff(args.root, args.base, args.head)
+            updated = deepcopy(packet)
+            updated["diff"] = {field: captured[field] for field in PR_DIFF_FIELDS}
+            violations, _unknowns = deterministic_evidence_checks(updated, strict=True)
+            if violations:
+                _print({"updated": False, "binding_blockers": violations, "diff": updated["diff"]}, args.as_json)
+                return 1
+            results = updated.get("results", [])
+            implementation = next(
+                (result for result in results if isinstance(result, dict) and result.get("node") == "implementation"),
+                None,
+            )
+            if not isinstance(implementation, dict):
+                raise ValueError("Packet is missing the implementation result record")
+            implementation.update({
+                "status": "passed",
+                "evidence": [
+                    f"Bound merge-base Diff {captured['subject_digest']} at head {captured['head_sha']}."
+                ],
+            })
+            snapshots = updated.get("snapshots")
+            if not isinstance(snapshots, dict):
+                raise ValueError("packet.snapshots must be an object")
+            snapshots["semantic"] = semantic_snapshot(updated)
+            _replace_json(args.packet, updated)
+            result = workflow_status(updated, args.packet)
+            _print({"updated": str(args.packet), "diff": updated["diff"], "status": result}, args.as_json)
             return 0
 
         if args.command == "verify":

@@ -12,8 +12,9 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.cli import _issue_revalidation_errors, main
+from reviewworthy.contract import contract_snapshot
 from reviewworthy.evidence import append_evidence_summary, build_evidence_summary
-from reviewworthy.git import capture_pr_diff, verification_plan_digest
+from reviewworthy.git import PR_DIFF_FIELDS, capture_pr_diff, verification_plan_digest
 from reviewworthy.github import GhError
 from reviewworthy.packet import semantic_snapshot, readiness_blockers, skeleton_packet, validate_packet
 from reviewworthy.signal import skeleton_signal, validate_signal
@@ -592,6 +593,68 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertFalse(public_output.exists())
             self.assertIn("Git-private", json.loads(output.getvalue())["error"])
+
+    def test_diff_bind_atomically_records_current_subject_and_enters_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, actual_diff = self._pr_repository(root)
+            packet_path = root / "packet.json"
+            packet = valid_packet()
+            old_snapshot = packet["snapshots"]["semantic"]
+            old_orientation_snapshot = packet["understanding"]["orientation"]["semantic_snapshot"]
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            args = [
+                "diff", "bind", "--root", str(repository_root), "--packet", str(packet_path),
+                "--base", "main", "--head", "HEAD", "--json",
+            ]
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                first_code = main(args)
+
+            first_persisted = packet_path.read_text(encoding="utf-8")
+            bound = json.loads(first_persisted)
+            implementation = next(result for result in bound["results"] if result["node"] == "implementation")
+            self.assertEqual(first_code, 0)
+            self.assertEqual(bound["diff"], {field: actual_diff[field] for field in PR_DIFF_FIELDS})
+            self.assertNotIn("captured_at", bound["diff"])
+            self.assertEqual(implementation["status"], "passed")
+            self.assertIn(actual_diff["subject_digest"], implementation["evidence"][0])
+            self.assertNotEqual(bound["snapshots"]["semantic"], old_snapshot)
+            self.assertEqual(bound["understanding"]["orientation"]["semantic_snapshot"], old_orientation_snapshot)
+            self.assertEqual(json.loads(output.getvalue())["status"]["current_stage"], "verification")
+
+            with redirect_stdout(io.StringIO()):
+                second_code = main(args)
+
+            self.assertEqual(second_code, 0)
+            self.assertEqual(packet_path.read_text(encoding="utf-8"), first_persisted)
+
+    def test_diff_bind_scope_failure_does_not_modify_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository_root, _actual_diff = self._pr_repository(root)
+            packet_path = root / "packet.json"
+            packet = valid_packet()
+            packet["contract"]["scope"] = {"files": ["src/other.py"]}
+            packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
+            snapshot = semantic_snapshot(packet)
+            packet["snapshots"]["semantic"] = snapshot
+            packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
+            packet["understanding"]["assessment"]["semantic_snapshot"] = snapshot
+            original = json.dumps(packet, sort_keys=True)
+            packet_path.write_text(original, encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                code = main([
+                    "diff", "bind", "--root", str(repository_root), "--packet", str(packet_path),
+                    "--base", "main", "--head", "HEAD", "--json",
+                ])
+
+            self.assertEqual(code, 1)
+            self.assertIn("out_of_scope_files", {item["code"] for item in json.loads(output.getvalue())["binding_blockers"]})
+            self.assertEqual(packet_path.read_text(encoding="utf-8"), original)
 
     def test_verify_cli_persists_invalid_receipt_and_returns_failure_when_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

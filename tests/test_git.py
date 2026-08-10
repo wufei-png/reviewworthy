@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-from reviewworthy.git import GitError, capture_pr_diff, current_head, run_verification
+from reviewworthy.git import GitError, capture_bindable_pr_diff, capture_pr_diff, current_head, run_verification
 
 
 class GitEvidenceTests(unittest.TestCase):
@@ -142,6 +142,31 @@ class GitEvidenceTests(unittest.TestCase):
 
             self.assertNotEqual(before["head_sha"], after["head_sha"])
             self.assertEqual(before["subject_digest"], after["subject_digest"])
+
+    def test_bindable_diff_requires_current_clean_head(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            self._git(root, "branch", "-M", "main")
+            (root / "example.txt").write_text("base\n", encoding="utf-8")
+            self._git(root, "add", "example.txt")
+            self._git(root, "commit", "-qm", "base")
+            self._git(root, "checkout", "-qb", "feature")
+            (root / "example.txt").write_text("base\nfeature\n", encoding="utf-8")
+            self._git(root, "commit", "-qam", "feature")
+
+            diff = capture_bindable_pr_diff(root, "main", "HEAD")
+            self.assertEqual(diff["head_sha"], current_head(root))
+
+            (root / "example.txt").write_text("dirty\n", encoding="utf-8")
+            with self.assertRaisesRegex(GitError, "clean worktree"):
+                capture_bindable_pr_diff(root, "main", "HEAD")
+            self._git(root, "checkout", "--", "example.txt")
+            self._git(root, "checkout", "-q", "main")
+            with self.assertRaisesRegex(GitError, "HEAD moved"):
+                capture_bindable_pr_diff(root, "main", "feature")
 
     def test_verification_refuses_when_worktree_head_moves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

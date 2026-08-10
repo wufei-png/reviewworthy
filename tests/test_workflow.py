@@ -53,8 +53,10 @@ class WorkflowStatusTests(unittest.TestCase):
 
         self.assertFalse(result["ready"])
         self.assertEqual(result["current_stage"], "implementation")
-        self.assertEqual(result["next"][0]["kind"], "decision")
-        self.assertIn("approved implementation", result["next"][0]["reason"])
+        self.assertEqual(result["next"][0]["kind"], "command")
+        self.assertIn("diff bind", result["next"][0]["command"])
+        self.assertIn("--packet packet.json", result["next"][0]["command"])
+        self.assertIn("--base main --head HEAD", result["next"][0]["command"])
 
     def test_explicit_hard_stop_takes_priority_over_earlier_incomplete_stage(self) -> None:
         packet = skeleton_packet("blocked-001", "issue-backed", "example/project")
