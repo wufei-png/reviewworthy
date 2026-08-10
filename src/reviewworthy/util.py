@@ -47,16 +47,13 @@ def run_bounded(
     if timeout_seconds <= 0 or max_capture_bytes <= 0:
         raise ValueError("subprocess bounds must be positive")
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
-        try:
-            process = subprocess.Popen(
-                argv,
-                cwd=cwd,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                start_new_session=os.name == "posix",
-            )
-        except OSError:
-            raise
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            start_new_session=os.name == "posix",
+        )
 
         def terminate() -> None:
             if process.poll() is not None:

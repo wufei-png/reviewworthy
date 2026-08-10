@@ -474,11 +474,6 @@ def inspect_policy_at_commit(root: Path, commit_sha: str) -> dict[str, Any]:
     return result
 
 
-def _nested(data: dict[str, Any], *paths: tuple[str, ...]) -> Any:
-    value, _path = _nested_with_path(data, *paths)
-    return value
-
-
 def _nested_with_path(data: dict[str, Any], *paths: tuple[str, ...]) -> tuple[Any, tuple[str, ...] | None]:
     for path in paths:
         current: Any = data
