@@ -198,9 +198,10 @@ def _base_packet() -> dict[str, Any]:
     }
     packet["contract"]["approval"] = {"status": "approved", "human_confirmed": True}
     packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
-    packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-    packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
-    packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
+    snapshot = semantic_snapshot(packet)
+    packet["snapshots"]["semantic"] = snapshot
+    packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
+    packet["understanding"]["assessment"]["semantic_snapshot"] = snapshot
     return packet
 
 

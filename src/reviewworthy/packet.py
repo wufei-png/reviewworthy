@@ -234,9 +234,10 @@ def skeleton_packet(contribution_id: str, mode: str, repository: str | None = No
     if mode == "discovery":
         packet["basis"]["signal"] = skeleton_signal("local_evidence", "reproducible_evidence", "local:unpublished")
     packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
-    packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-    packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
-    packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
+    snapshot = semantic_snapshot(packet)
+    packet["snapshots"]["semantic"] = snapshot
+    packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
+    packet["understanding"]["assessment"]["semantic_snapshot"] = snapshot
     return packet
 
 
@@ -984,9 +985,11 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
     return violations
 
 
-def _readiness_blockers_object(packet: dict[str, Any]) -> list[dict[str, str]]:
-    validation = validate_packet(packet)
-    blockers = list(validation["errors"])
+def _readiness_blockers_object(
+    packet: dict[str, Any],
+    validation_errors: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    blockers = list(validation_errors)
 
     evidence_violations, _unknowns = deterministic_evidence_checks(packet, strict=True)
     blockers.extend(evidence_violations)
@@ -1145,7 +1148,7 @@ def readiness_blockers(packet: Any) -> list[dict[str, str]]:
     if packet_format_errors(packet):
         return list(validation["errors"])
     try:
-        return _readiness_blockers_object(packet)
+        return _readiness_blockers_object(packet, validation["errors"])
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         return [
             *validation["errors"],
