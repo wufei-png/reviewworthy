@@ -50,12 +50,32 @@ The CLI and Skill form one contributor-first product. The full Contribution Pack
 
 ## Workflow contract
 
-```text
-Issue-backed entry ─┐
-                    ├─ contribution basis → contract → implementation
-Discovery entry ────┘                                      ↓
-                         verification → Ownership Check → narrative preview → PR
-                                                └─ Heightened/Learning: Orientation → Assessment
+The conceptual progression is shared by both entry paths. `status` reports the earliest unresolved stage from current Packet evidence; it is not a separately stored workflow state.
+
+```mermaid
+flowchart TB
+    ISSUE["Issue-backed entry"] --> BASIS["Verified contribution basis"]
+    DISCOVERY["Discovery entry"] --> BASIS
+    POLICY["Repository policy"] -. "constrains" .-> BASIS
+
+    BASIS --> CONTRACT["Approved contribution contract"]
+    CONTRACT --> CHANGE["Implementation"]
+    CHANGE --> DIFF["Merge-base Diff identity"]
+    DIFF --> VERIFY["Plan-driven verification receipts"]
+    VERIFY --> OWNERSHIP["Ownership Check"]
+    OWNERSHIP --> PROFILE{"Review profile"}
+
+    PROFILE -->|standard| NARRATIVE["Human-confirmed narrative"]
+    PROFILE -->|heightened or learning| ORIENTATION["Orientation"]
+    ORIENTATION --> ASSESSMENT["Assessment"]
+    ASSESSMENT --> NARRATIVE
+
+    NARRATIVE --> PLAN["Remote plan"]
+    PLAN --> CONFIRM["Confirm exact operation ID"]
+    CONFIRM --> PR["Create or reconcile Pull Request"]
+
+    RISK["Risk signals"] -. "raise standard to heightened" .-> PROFILE
+    HARD["Independent hard-stops<br/>security, policy conflict,<br/>irreversible or unverifiable work"] -. "prevent remote readiness" .-> PLAN
 ```
 
 Discovery evidence may serve as the contribution basis when repository policy explicitly allows it. Signal `0.3` keeps record type, claim type, lifecycle, verification, and authority as independent axes. A selected Discovery or signal-backed contribution must record a valid Contribution Signal before implementation or remote readiness; it does not need maintainer confirmation. External Issue, Pull Request, and Discussion records must use a matching public GitHub reference and successful verification record; local reproducible evidence uses `local_evidence` plus `reproducible_evidence`. `signal verify` is read-only by default; `signal verify --record` persists the exact successful check for readiness. Discussion verification uses GitHub GraphQL. `signal publish` is an explicit, idempotent Issue write and never infers maintainer intent. A verified, pending Issue is sufficient for the Issue-backed path; normalized `not planned` blocks progression, while an exact normalized `duplicate` label is an independent blocker. `completed` and `reopened` do not block by themselves.

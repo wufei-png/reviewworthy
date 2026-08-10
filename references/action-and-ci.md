@@ -2,6 +2,48 @@
 
 The composite Action is read-only and never reads a private Contribution Packet from the checkout. It parses exactly one current Evidence Summary from the pull-request Body and recomputes repository- and diff-owned facts from runner event identity plus the checked-out Git objects.
 
+```mermaid
+flowchart LR
+    subgraph LOCAL["Contributor-local state"]
+        PACKET["Private Contribution Packet"]
+    end
+
+    subgraph PUBLIC["Public Pull Request"]
+        SUMMARY["Minimal Evidence Summary in PR Body"]
+    end
+
+    subgraph RUNNER["Runner-owned inputs"]
+        EVENT["Event repository ID<br/>base SHA and head SHA"]
+        GIT["Pre-fetched base and head Git objects"]
+        BASEPOLICY["Policy from immutable base commit"]
+    end
+
+    subgraph ACTION["Read-only Reviewworthy Action"]
+        PARSE["Parse exactly one current Summary"]
+        CLAIMS["Keep verification, ownership,<br/>and disclosure as contributor claims"]
+        RECOMPUTE["Recompute repository and Diff facts"]
+        POLICY["Evaluate base-policy authority"]
+        CONCLUSION{"Action mode"}
+        REPORT["report<br/>non-blocking findings"]
+        ENFORCE["evidence-enforce<br/>pass or deterministic failure"]
+    end
+
+    PACKET -->|"minimal projection during PR publication"| SUMMARY
+    PACKET -. "never read by the Action" .-> PARSE
+    SUMMARY --> PARSE
+    PARSE --> CLAIMS
+    PARSE --> RECOMPUTE
+    EVENT --> RECOMPUTE
+    GIT --> RECOMPUTE
+    GIT --> BASEPOLICY
+    BASEPOLICY --> POLICY
+    RECOMPUTE --> CONCLUSION
+    CLAIMS --> CONCLUSION
+    POLICY --> CONCLUSION
+    CONCLUSION -->|report| REPORT
+    CONCLUSION -->|evidence-enforce| ENFORCE
+```
+
 Default `report` mode keeps missing or uncertain evidence non-blocking. `evidence-enforce` requires:
 
 - one valid current Evidence Summary;
