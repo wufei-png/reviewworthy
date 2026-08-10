@@ -27,10 +27,13 @@ from helpers import valid_packet
 class GitHubOperationTests(unittest.TestCase):
     def test_operation_marker_and_id_are_stable_for_same_rendered_request(self) -> None:
         packet = valid_packet()
-        first = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", packet["diff"])
-        second = build_operation(packet, "example/project", "pull_request", "Fix input", "Body", "main", "fix/input", packet["diff"])
+        body = "Body\n\nhttps://github.com/example/project/issues/1"
+        first = build_operation(packet, "example/project", "pull_request", "Fix input", body, "main", "fix/input", packet["diff"])
+        second = build_operation(packet, "example/project", "pull_request", "Fix input", body, "main", "fix/input", packet["diff"])
         self.assertEqual(first.operation_id, second.operation_id)
         self.assertIn(first.marker, first.body)
+        self.assertIn("**Contributor workflow:** Ready for maintainer review", first.body)
+        self.assertIn("remain contributor claims", first.body)
         self.assertEqual(first.permissions, ("contents:read", "pull-requests:write", "issues:write"))
 
     def test_repository_casing_does_not_change_operation_identity(self) -> None:
@@ -41,6 +44,42 @@ class GitHubOperationTests(unittest.TestCase):
         self.assertEqual(lower.operation_id, mixed.operation_id)
         self.assertEqual(lower.marker, mixed.marker)
         self.assertEqual(mixed.repo, "owner/repo")
+
+    def test_pull_request_overview_is_not_ready_when_issue_link_is_missing(self) -> None:
+        packet = valid_packet()
+        packet["basis"]["kind"] = "issue"
+        packet["basis"]["references"] = ["https://github.com/example/project/issues/7"]
+
+        operation = build_operation(
+            packet,
+            "example/project",
+            "pull_request",
+            "Fix input",
+            "Body without the supporting link",
+            "main",
+            "fix/input",
+            packet["diff"],
+        )
+
+        self.assertIn("**Contributor workflow:** Not yet ready for maintainer review", operation.body)
+
+    def test_pull_request_overview_is_not_ready_when_current_diff_mismatches(self) -> None:
+        packet = valid_packet()
+        current_diff = dict(packet["diff"])
+        current_diff["head_sha"] = "current-head"
+
+        operation = build_operation(
+            packet,
+            "example/project",
+            "pull_request",
+            "Fix input",
+            "Body",
+            "main",
+            "fix/input",
+            current_diff,
+        )
+
+        self.assertIn("**Contributor workflow:** Not yet ready for maintainer review", operation.body)
 
     def test_packet_03_issue_operation_uses_only_current_identity(self) -> None:
         packet = valid_packet()

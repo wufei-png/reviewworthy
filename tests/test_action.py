@@ -9,7 +9,15 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.action import check_evidence, github_event_context
-from reviewworthy.evidence import append_evidence_summary, build_evidence_summary, render_evidence_summary, validate_evidence_summary
+from reviewworthy.evidence import (
+    OVERVIEW_END,
+    OVERVIEW_START,
+    append_evidence_summary,
+    build_evidence_summary,
+    extract_evidence_summary,
+    render_evidence_summary,
+    validate_evidence_summary,
+)
 from reviewworthy.git import PR_DIFF_FIELDS, capture_pr_diff
 
 from helpers import valid_packet
@@ -242,6 +250,55 @@ class ActionEvidenceTests(unittest.TestCase):
                 event_head_sha=diff["head_sha"],
                 mode="evidence-enforce",
             )
+        self.assertEqual({item["code"] for item in result["violations"]}, {"evidence_summary_required"})
+
+    def test_human_overview_preserves_machine_summary_and_labels_claims(self) -> None:
+        packet = valid_packet()
+        summary = build_evidence_summary(packet, packet["diff"])
+
+        body = append_evidence_summary("## Change\nA bounded change.", summary, workflow_ready=True)
+
+        self.assertIn(OVERVIEW_START, body)
+        self.assertIn(OVERVIEW_END, body)
+        self.assertIn("**Contributor workflow:** Ready for maintainer review", body)
+        self.assertIn("**Scope:** 1 changed file, +3 / -1 lines", body)
+        self.assertIn("Contributor claims 1 current verification receipt passed.", body)
+        self.assertIn("remain contributor claims", body)
+        self.assertEqual(extract_evidence_summary(body), summary)
+
+    def test_human_overview_does_not_claim_readiness_when_not_established(self) -> None:
+        packet = valid_packet()
+        summary = build_evidence_summary(packet, packet["diff"])
+
+        body = append_evidence_summary("Body", summary, workflow_ready=False)
+
+        self.assertIn("**Contributor workflow:** Not yet ready for maintainer review", body)
+
+    def test_existing_human_overview_marker_is_rejected(self) -> None:
+        packet = valid_packet()
+        summary = build_evidence_summary(packet, packet["diff"])
+
+        with self.assertRaisesRegex(ValueError, "already contains"):
+            append_evidence_summary(f"Body\n{OVERVIEW_START}", summary, workflow_ready=True)
+
+    def test_action_rejects_duplicate_human_overviews(self) -> None:
+        packet = valid_packet()
+        summary = build_evidence_summary(packet, packet["diff"])
+        body = append_evidence_summary("Body", summary, workflow_ready=True)
+        duplicated = body.replace(OVERVIEW_END, f"{OVERVIEW_END}\n{OVERVIEW_START}\nConflicting overview\n{OVERVIEW_END}")
+
+        result = check_evidence(
+            duplicated,
+            root=Path("."),
+            event_name="pull_request",
+            event_repository="example/project",
+            event_repository_id=101,
+            event_base_sha="base",
+            event_head_sha="head",
+            mode="evidence-enforce",
+        )
+
+        self.assertEqual(result["conclusion"], "failure")
         self.assertEqual({item["code"] for item in result["violations"]}, {"evidence_summary_required"})
 
     def test_summary_with_missing_claim_contract_is_rejected(self) -> None:

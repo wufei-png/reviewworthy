@@ -25,6 +25,7 @@ from .github import (
     load_operation_receipt,
     operation_lock,
     operation_receipt_path,
+    pull_request_readiness_blockers,
     save_operation_link_attempted,
     save_operation_linked,
     save_operation_needs_reconciliation,
@@ -35,7 +36,6 @@ from .github import (
 from .packet import (
     good_first_issue_policy_errors,
     deterministic_evidence_checks,
-    issue_link_blockers,
     issue_reference,
     readiness_blockers,
     require_contribution_id,
@@ -457,21 +457,6 @@ def _canonical_remote_url(value: Any, expected_type: str, repo: str) -> str:
     if not parsed or parsed.get("record_type") != expected_type or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", repo):
         raise GhError(f"GitHub returned a non-canonical {expected_type} URL for {repo}")
     return str(parsed["url"])
-
-
-def _operation_diff_blockers(packet: dict[str, Any], operation: Any, actual_diff: dict[str, Any] | None) -> list[dict[str, str]]:
-    diff = packet.get("diff", {})
-    if not isinstance(diff, dict) or not isinstance(actual_diff, dict):
-        return [{"code": "remote_diff_unavailable", "message": "The current pull-request Diff could not be recomputed from its base/head commits; recapture evidence.", "path": "diff"}]
-    blockers: list[dict[str, str]] = []
-    for key in PR_DIFF_FIELDS:
-        if diff.get(key) != actual_diff.get(key):
-            blockers.append({
-                "code": f"remote_{key}_mismatch",
-                "message": f"The current PR Diff {key} differs from packet.diff.{key}; recapture evidence.",
-                "path": f"diff.{key}",
-            })
-    return blockers
 
 
 def _remote_pr_head_reconciliation(
@@ -996,8 +981,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.remote_command == "plan":
                 blockers = readiness_blockers(packet)
                 if operation.kind == "pull_request":
-                    blockers.extend(issue_link_blockers(packet, operation.body))
-                    blockers.extend(_operation_diff_blockers(packet, operation, actual_diff))
+                    blockers = pull_request_readiness_blockers(packet, operation.body, actual_diff)
                 payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)
                 return 0
@@ -1006,8 +990,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("Confirmation operation ID does not match the current rendered operation")
             blockers = readiness_blockers(packet)
             if operation.kind == "pull_request":
-                blockers.extend(issue_link_blockers(packet, operation.body))
-                blockers.extend(_operation_diff_blockers(packet, operation, actual_diff))
+                blockers = pull_request_readiness_blockers(packet, operation.body, actual_diff)
             if blockers:
                 payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)

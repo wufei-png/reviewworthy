@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from .evidence import append_evidence_summary, build_evidence_summary
 from .git import PR_DIFF_FIELDS
+from .packet import issue_link_blockers, readiness_blockers
 from .repository import canonical_repository_slug, parse_public_record, parse_repository_slug, repository_slugs_match
 from .util import (
     CommandOutputLimitError,
@@ -34,6 +35,33 @@ OPERATION_STATE_VERSION = "0.3"
 
 class GhError(RuntimeError):
     """The gh CLI could not complete a requested operation."""
+
+
+def pull_request_readiness_blockers(
+    packet: dict[str, Any],
+    body: str,
+    actual_diff: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    """Return the complete contributor-side blocker set for rendering a PR."""
+
+    blockers = readiness_blockers(packet)
+    blockers.extend(issue_link_blockers(packet, body))
+    packet_diff = packet.get("diff")
+    if not isinstance(packet_diff, dict) or not isinstance(actual_diff, dict):
+        blockers.append({
+            "code": "remote_diff_unavailable",
+            "message": "The current pull-request Diff could not be recomputed from its base/head commits; recapture evidence.",
+            "path": "diff",
+        })
+        return blockers
+    for key in PR_DIFF_FIELDS:
+        if packet_diff.get(key) != actual_diff.get(key):
+            blockers.append({
+                "code": f"remote_{key}_mismatch",
+                "message": f"The current PR Diff {key} differs from packet.diff.{key}; recapture evidence.",
+                "path": f"diff.{key}",
+            })
+    return blockers
 
 
 @dataclass(frozen=True)
@@ -128,7 +156,12 @@ def build_operation(
     link_note_template = "{pr_url}" if kind == "pull_request" and issue_url else None
     operation_body = body
     if kind == "pull_request":
-        operation_body = append_evidence_summary(body, build_evidence_summary(packet, diff))
+        blockers = pull_request_readiness_blockers(packet, body, diff)
+        operation_body = append_evidence_summary(
+            body,
+            build_evidence_summary(packet, diff),
+            workflow_ready=not blockers,
+        )
     payload: dict[str, Any] = {
         "purpose": "contribution",
         "subject_id": str(packet.get("contribution_id", "")),

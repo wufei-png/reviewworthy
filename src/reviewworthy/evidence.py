@@ -16,6 +16,8 @@ SUMMARY_PROFILES = {"standard", "heightened", "learning"}
 SUMMARY_OWNERSHIP_STATUSES = {"passed", "failed", "blocked", "unknown", "not_run", "not_recorded"}
 SUMMARY_START = f"<!-- reviewworthy:evidence-summary:start:v{SUMMARY_VERSION} -->"
 SUMMARY_END = f"<!-- reviewworthy:evidence-summary:end:v{SUMMARY_VERSION} -->"
+OVERVIEW_START = f"<!-- reviewworthy:evidence-overview:start:v{SUMMARY_VERSION} -->"
+OVERVIEW_END = f"<!-- reviewworthy:evidence-overview:end:v{SUMMARY_VERSION} -->"
 _CONTRIBUTION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SUMMARY_PATTERN = re.compile(
     re.escape(SUMMARY_START) + r"\s*```json\s*(.*?)\s*```\s*" + re.escape(SUMMARY_END),
@@ -212,15 +214,76 @@ def render_evidence_summary(summary: dict[str, Any]) -> str:
     return f"{SUMMARY_START}\n```json\n{rendered}\n```\n{SUMMARY_END}"
 
 
-def append_evidence_summary(body: str, summary: dict[str, Any]) -> str:
-    if SUMMARY_START in body or SUMMARY_END in body:
-        raise EvidenceSummaryError("PR Body already contains a Reviewworthy Evidence Summary marker")
-    return body.rstrip() + "\n\n" + render_evidence_summary(summary)
+def render_evidence_overview(summary: dict[str, Any], *, workflow_ready: bool | None = None) -> str:
+    """Render a human-readable projection without upgrading contributor claims."""
+
+    validation = validate_evidence_summary(summary)
+    if not validation["valid"]:
+        raise EvidenceSummaryError(f"Cannot render invalid Evidence Summary: {validation['errors']}")
+    diff = summary["diff"]
+    claims = summary["claims"]
+    verification = claims["verification"]
+    ownership = claims["ownership"]
+    disclosure = claims["ai_disclosure"]
+    if workflow_ready is True:
+        readiness = "Ready for maintainer review"
+    elif workflow_ready is False:
+        readiness = "Not yet ready for maintainer review"
+    else:
+        readiness = "Readiness not evaluated by this projection"
+    file_count = len(diff["changed_files"])
+    file_label = "file" if file_count == 1 else "files"
+    verification_text = (
+        f"Contributor claims {verification['receipt_count']} current verification "
+        f"{'receipt' if verification['receipt_count'] == 1 else 'receipts'} passed."
+        if verification["claimed_outcome"] == "passed"
+        else "Contributor has not recorded a current passing verification receipt."
+    )
+    ownership_text = (
+        f"Contributor claims `{ownership['claimed_status']}` under the `{ownership['profile']}` review profile."
+    )
+    disclosure_text = (
+        "Contributor claims an AI-assistance disclosure is present."
+        if disclosure["claimed_present"]
+        else "Contributor does not claim that an AI-assistance disclosure is present."
+    )
+    return "\n".join([
+        OVERVIEW_START,
+        "## Reviewworthy contribution evidence",
+        "",
+        f"**Contributor workflow:** {readiness}",
+        "",
+        f"- **Contribution:** `{summary['contribution_id']}`",
+        f"- **Scope:** {file_count} changed {file_label}, +{diff['additions']} / -{diff['deletions']} lines",
+        f"- **Verification:** {verification_text}",
+        f"- **Ownership:** {ownership_text}",
+        f"- **AI assistance:** {disclosure_text}",
+        "",
+        "The read-only Action recomputes repository and Diff facts from the machine-readable block below. "
+        "Verification, ownership, and disclosure remain contributor claims.",
+        OVERVIEW_END,
+    ])
+
+
+def append_evidence_summary(
+    body: str,
+    summary: dict[str, Any],
+    *,
+    workflow_ready: bool | None = None,
+) -> str:
+    markers = (SUMMARY_START, SUMMARY_END, OVERVIEW_START, OVERVIEW_END)
+    if any(marker in body for marker in markers):
+        raise EvidenceSummaryError("PR Body already contains a Reviewworthy evidence marker")
+    overview = render_evidence_overview(summary, workflow_ready=workflow_ready)
+    return body.rstrip() + "\n\n" + overview + "\n\n" + render_evidence_summary(summary)
 
 
 def extract_evidence_summary(body: str) -> dict[str, Any]:
     if not isinstance(body, str):
         raise EvidenceSummaryError("PR Body must be text")
+    overview_counts = (body.count(OVERVIEW_START), body.count(OVERVIEW_END))
+    if overview_counts not in {(0, 0), (1, 1)}:
+        raise EvidenceSummaryError("PR Body contains unmatched or duplicate evidence overview markers")
     matches = list(_SUMMARY_PATTERN.finditer(body))
     if len(matches) != 1:
         raise EvidenceSummaryError("PR Body must contain exactly one current Reviewworthy Evidence Summary")
