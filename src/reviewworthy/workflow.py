@@ -16,18 +16,45 @@ _STAGE_CODES = (
         "signal_verification_required", "discovery_signal_required",
     }),
     ("contract", {"empty_scope", "contract_not_approved", "candidate_transition_required", "duplicate_work_unresolved"}),
-    ("diff", {"invalid_diff_receipt", "missing_diff_receipt", "scope_unverifiable"}),
+    ("implementation", {
+        "invalid_diff_receipt", "missing_diff_receipt", "scope_unverifiable", "out_of_scope_files",
+        "diff_budget_exceeded", "diff_budget_unverifiable",
+    }),
     ("verification", {"missing_verification_plan", "missing_executed_verification", "required_verification_missing", "verification_head_mismatch"}),
     ("ownership", {"ownership_not_passed"}),
-    ("understanding", {"orientation_not_passed", "assessment_not_passed", "stale_orientation", "stale_assessment"}),
+    ("understanding", {
+        "orientation_not_passed", "assessment_not_passed", "stale_orientation", "stale_assessment",
+        "assessment_requires_orientation", "assessment_requires_current_orientation",
+    }),
     ("narrative", {
         "missing_pr_title", "missing_pr_body", "narrative_not_confirmed", "missing_ai_disclosure",
         "missing_disclosure_location", "disclosure_not_human_confirmed", "missing_human_expression",
-        "missing_result_evidence", "node_not_passed",
     }),
 )
 
-_EXPECTED_INCOMPLETE_CODES = set().union(*(codes for _, codes in _STAGE_CODES))
+_RESULT_STAGE_NODES = {
+    "basis": {"policy_check", "contribution_basis"},
+    "contract": {"contribution_contract"},
+    "implementation": {"implementation"},
+    "verification": {"verification"},
+    "ownership": {"ownership"},
+    "narrative": {"narrative"},
+}
+
+_HARD_STOP_CODES = {
+    "hard_stop",
+    "candidate_do_not_contribute",
+    "policy_conflict",
+    "policy_ambiguity",
+    "ai_assistance_prohibited",
+    "good_first_issue_ai_disallowed",
+}
+
+_EXPECTED_INCOMPLETE_CODES = {
+    *set().union(*(codes for _, codes in _STAGE_CODES)),
+    "missing_result_evidence",
+    "node_not_passed",
+}
 
 
 def _deduplicated(items: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -39,6 +66,36 @@ def _deduplicated(items: list[dict[str, str]]) -> list[dict[str, str]]:
             seen.add(key)
             unique.append(item)
     return unique
+
+
+def _incomplete_result_nodes(packet: dict[str, Any]) -> set[str]:
+    results = packet.get("results", [])
+    if not isinstance(results, list):
+        return set()
+    return {
+        str(result.get("node"))
+        for result in results
+        if isinstance(result, dict)
+        and isinstance(result.get("node"), str)
+        and (result.get("status") != "passed" or not result.get("evidence"))
+    }
+
+
+def _has_hard_stop(packet: dict[str, Any], blockers: list[dict[str, str]]) -> bool:
+    review = packet.get("review") if isinstance(packet.get("review"), dict) else {}
+    hard_stops = review.get("hard_stops", [])
+    if isinstance(hard_stops, list) and hard_stops:
+        return True
+    return bool({item.get("code") for item in blockers} & _HARD_STOP_CODES)
+
+
+def _derived_stage(packet: dict[str, Any], blockers: list[dict[str, str]]) -> str:
+    codes = {item.get("code") for item in blockers}
+    incomplete_nodes = _incomplete_result_nodes(packet)
+    for stage, stage_codes in _STAGE_CODES:
+        if codes & stage_codes or incomplete_nodes & _RESULT_STAGE_NODES.get(stage, set()):
+            return stage
+    return "blocked"
 
 
 def _current_receipt_ids(packet: dict[str, Any]) -> set[str]:
@@ -81,8 +138,8 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
         return [{"kind": "decision", "command": "", "reason": "Create or repair the required Signal 0.3 contribution basis and bind it to this Packet."}]
     if stage == "contract":
         return [{"kind": "decision", "command": "", "reason": "Resolve candidate disposition and explicitly approve the bounded Contribution Contract."}]
-    if stage == "diff":
-        return [{"kind": "command", "command": "reviewworthy diff capture --root . --base BASE --head HEAD --json", "reason": "Capture the canonical merge-base contribution subject, then bind it to the Packet."}]
+    if stage == "implementation":
+        return [{"kind": "decision", "command": "", "reason": "Complete the approved implementation, then bind its current merge-base Diff to this Packet."}]
     if stage == "verification":
         verification = packet.get("verification") if isinstance(packet.get("verification"), dict) else {}
         plan = verification.get("plan") if isinstance(verification.get("plan"), dict) else {}
@@ -126,9 +183,10 @@ def workflow_status(packet: Any, packet_path: Path) -> dict[str, Any]:
         stage = "invalid"
     elif not blockers:
         stage = "ready"
+    elif _has_hard_stop(packet, blockers):
+        stage = "blocked"
     else:
-        codes = {item.get("code") for item in blockers}
-        stage = next((name for name, stage_codes in _STAGE_CODES if codes & stage_codes), "blocked")
+        stage = _derived_stage(packet, blockers)
     return {
         "status_version": "0.3",
         "packet": str(packet_path),
