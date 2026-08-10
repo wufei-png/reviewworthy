@@ -286,6 +286,17 @@ def operation_receipt_path(packet_path: Path, operation_id: str) -> Path:
     return packet_path.parent / "local" / "v0.3" / "operations" / f"{operation_id}.json"
 
 
+def _canonical_operation_remote(operation: RemoteOperation, remote: Any) -> str:
+    parsed = parse_public_record(remote)
+    if (
+        not parsed
+        or parsed.get("record_type") != operation.kind
+        or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", operation.repo)
+    ):
+        raise GhError(f"Remote write returned a non-canonical {operation.kind} URL for {operation.repo}")
+    return str(parsed["url"])
+
+
 @contextmanager
 def operation_lock(path: Path):
     """Claim one operation locally so concurrent invocations reconcile first."""
@@ -340,8 +351,8 @@ def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, 
             raise GhError(f"Pull-request receipt has an invalid issue_url; reconcile before retrying: {path}")
     elif status != "succeeded":
         raise GhError(f"Operation receipt has an unsupported status; reconcile before retrying: {path}")
-    if status == "succeeded" and (not isinstance(receipt.get("remote"), str) or not receipt["remote"].strip()):
-        raise GhError(f"Operation receipt has no valid remote result; reconcile before retrying: {path}")
+    if status == "succeeded":
+        _canonical_operation_remote(operation, receipt.get("remote"))
     if not isinstance(receipt.get("recorded_at"), str) or not receipt["recorded_at"].strip():
         raise GhError(f"Operation receipt has no valid timestamp; reconcile before retrying: {path}")
     return receipt
@@ -371,8 +382,7 @@ def save_operation_pending(path: Path, operation: RemoteOperation) -> None:
 
 
 def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str) -> None:
-    if not isinstance(remote, str) or not remote.strip():
-        raise GhError("Remote write returned an empty remote result; reconcile before retrying")
+    remote = _canonical_operation_remote(operation, remote)
     receipt = {
         "state_version": OPERATION_STATE_VERSION,
         "operation_id": operation.operation_id,

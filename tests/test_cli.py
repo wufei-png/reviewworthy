@@ -212,6 +212,47 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(fake_client.create.call_count, 1)
             fake_client.verify_repository_identity.assert_called_once_with("example/project", 101)
 
+    def test_signal_publish_rejects_noncanonical_create_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            signal_path = root / "signal.json"
+            signal_path.write_text(json.dumps({
+                "signal_version": "0.3",
+                "record_type": "issue",
+                "claim_type": "maintainer_request",
+                "reference": "",
+                "lifecycle": "pending",
+                "evidence": [],
+                "authority": {"kind": "contributor", "actor": "", "asserted_at": ""},
+            }), encoding="utf-8")
+            original = signal_path.read_text(encoding="utf-8")
+            body_path = root / "body.md"
+            body_path.write_text("Please review this candidate.\n", encoding="utf-8")
+            common = [
+                str(signal_path), "--repo", "example/project", "--repository-id", "101",
+                "--title", "Candidate request", "--body-file", str(body_path),
+            ]
+            plan_output = io.StringIO()
+            with redirect_stdout(plan_output):
+                self.assertEqual(main(["signal", "publish", "plan", *common, "--json"]), 0)
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            fake_client = unittest.mock.MagicMock()
+            fake_client.find_existing.return_value = []
+            fake_client.create.return_value = "https://github.com/example/project/pull/9"
+            output = io.StringIO()
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
+                code = main([
+                    "signal", "publish", "create", *common,
+                    "--confirm-operation-id", operation_id, "--json",
+                ])
+
+            receipt_path = root / "local" / "v0.3" / "operations" / f"{operation_id}.json"
+            self.assertEqual(code, 2)
+            self.assertIn("non-canonical issue URL", json.loads(output.getvalue())["error"])
+            self.assertEqual(signal_path.read_text(encoding="utf-8"), original)
+            self.assertEqual(json.loads(receipt_path.read_text(encoding="utf-8"))["status"], "pending")
+
     def test_signal_verify_checks_github_reference_without_mutating_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             signal_path = Path(directory) / "signal.json"
@@ -972,6 +1013,38 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(first_code, 0)
             self.assertEqual(second_code, 0)
             self.assertEqual(fake_client.create.call_count, 1)
+
+    def test_issue_create_rejects_noncanonical_create_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packet_path = root / "packet.json"
+            body_path = root / "body.md"
+            packet = valid_packet()
+            packet_path.write_text(json.dumps(packet), encoding="utf-8")
+            body_path.write_text(packet["narrative"]["body"], encoding="utf-8")
+            common = [
+                "--packet", str(packet_path), "--repo", "example/project", "--kind", "issue",
+                "--title", packet["narrative"]["title"], "--body-file", str(body_path),
+            ]
+            plan_output = io.StringIO()
+            with redirect_stdout(plan_output):
+                self.assertEqual(main(["remote", "plan", *common, "--json"]), 0)
+            operation_id = json.loads(plan_output.getvalue())["operation_id"]
+            fake_client = unittest.mock.MagicMock()
+            fake_client.find_existing.return_value = []
+            fake_client.create.return_value = "https://github.com/other/project/issues/7"
+            output = io.StringIO()
+
+            with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
+                code = main([
+                    "remote", "create", *common,
+                    "--confirm-operation-id", operation_id, "--json",
+                ])
+
+            receipt_path = root / "local" / "v0.3" / "operations" / f"{operation_id}.json"
+            self.assertEqual(code, 2)
+            self.assertIn("non-canonical issue URL", json.loads(output.getvalue())["error"])
+            self.assertEqual(json.loads(receipt_path.read_text(encoding="utf-8"))["status"], "pending")
 
     def test_remote_create_rejects_live_repository_id_mismatch_before_reconciliation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

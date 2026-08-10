@@ -733,19 +733,23 @@ def main(argv: list[str] | None = None) -> int:
             with operation_lock(receipt_path):
                 receipt = load_operation_receipt(receipt_path, operation)
                 if receipt:
-                    remote = receipt["remote"]
+                    remote = _canonical_remote_url(receipt["remote"], "issue", operation.repo)
                     payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
                 else:
                     client = GhClient()
                     client.verify_repository_identity(operation.repo, operation.repository_id)
                     existing = client.find_existing(operation)
                     if existing:
-                        remote = existing[0].get("url") or existing[0].get("html_url") or ""
+                        remote = _canonical_remote_url(
+                            existing[0].get("url") or existing[0].get("html_url"),
+                            "issue",
+                            operation.repo,
+                        )
                         save_operation_receipt(receipt_path, operation, remote)
                         payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
                     else:
                         save_operation_pending(receipt_path, operation)
-                        remote = client.create(operation)
+                        remote = _canonical_remote_url(client.create(operation), "issue", operation.repo)
                         save_operation_receipt(receipt_path, operation, remote)
                         payload.update({"outcome": "created", "remote": remote})
             updated_signal = dict(signal_value)
@@ -1054,18 +1058,23 @@ def main(argv: list[str] | None = None) -> int:
                     payload["outcome"] = "created" if source == "created" else "already_exists"
                 else:
                     if receipt:
-                        payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": receipt["remote"]})
+                        remote = _canonical_remote_url(receipt["remote"], "issue", operation.repo)
+                        payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
                     else:
                         client = GhClient()
                         client.verify_repository_identity(operation.repo, operation.repository_id)
                         existing = client.find_existing(operation)
                         if existing:
-                            remote = existing[0].get("url") or existing[0].get("html_url") or ""
+                            remote = _canonical_remote_url(
+                                existing[0].get("url") or existing[0].get("html_url"),
+                                "issue",
+                                operation.repo,
+                            )
                             save_operation_receipt(receipt_path, operation, remote)
                             payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
                         else:
                             save_operation_pending(receipt_path, operation)
-                            remote = client.create(operation)
+                            remote = _canonical_remote_url(client.create(operation), "issue", operation.repo)
                             save_operation_receipt(receipt_path, operation, remote)
                             payload.update({"outcome": "created", "remote": remote})
             _print(payload, args.as_json)
