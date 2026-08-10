@@ -293,7 +293,12 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_evals(path: Path) -> dict[str, Any]:
-    paths = [path] if path.is_file() else sorted(path.glob("*.json")) if path.is_dir() else []
+    if path.is_file():
+        paths = [path]
+    elif path.is_dir():
+        paths = sorted(path.glob("*.json"))
+    else:
+        paths = []
     if not paths:
         return {"result": "failed", "total": 0, "passed": 0, "failed": 0, "cases": [], "error": f"No eval fixtures found at {path}"}
     cases: list[dict[str, Any]] = []

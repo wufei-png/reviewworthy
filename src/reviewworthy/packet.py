@@ -1114,17 +1114,15 @@ def _readiness_blockers_object(
             claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
             if not isinstance(claims, dict):
                 claims = {}
-            if claims.get("discovery_evidence_allowed") is not True:
-                if claims.get("discovery_evidence_allowed") is False:
-                    pass
-                else:
-                    blockers.append(
-                        {
-                            "code": "discovery_evidence_policy_unknown",
-                            "message": "Reproducible Discovery evidence needs an explicit policy allowance before remote readiness.",
-                            "path": "policy.authoritative_claims.discovery_evidence_allowed",
-                        }
-                    )
+            discovery_allowed = claims.get("discovery_evidence_allowed")
+            if discovery_allowed is not True and discovery_allowed is not False:
+                blockers.append(
+                    {
+                        "code": "discovery_evidence_policy_unknown",
+                        "message": "Reproducible Discovery evidence needs an explicit policy allowance before remote readiness.",
+                        "path": "policy.authoritative_claims.discovery_evidence_allowed",
+                    }
+                )
 
     if isinstance(review, dict) and review.get("profile") in {"heightened", "learning"}:
         understanding = packet.get("understanding", {}) if isinstance(packet.get("understanding", {}), dict) else {}

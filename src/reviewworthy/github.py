@@ -596,11 +596,16 @@ class GhClient:
         repository_record = self._json(["api", f"repos/{owner}/{repository}", "--method", "GET"])
         if not isinstance(repository_record, dict):
             raise GhError("GitHub repository response was not an object")
+        normalized_record_type = {
+            "issues": "issue",
+            "pull": "pull_request",
+            "discussions": "discussion",
+        }[record_type]
         base_result = {
             "provider": "github",
             "host": "github.com",
             "reference": reference,
-            "record_type": "pull_request" if record_type == "pull" else record_type[:-1] if record_type.endswith("s") else record_type,
+            "record_type": normalized_record_type,
             "repository": f"{owner}/{repository}",
             "repository_id": repository_record.get("id"),
             "number": int(number),

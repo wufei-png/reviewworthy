@@ -96,7 +96,12 @@ def assess_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         _add_hard_stop(hard_stops, "invalid_risk_manifest", "diff must be an object when present.")
 
     user_escalated = bool(manifest.get("user_escalated"))
-    profile = requested if requested == "learning" else ("heightened" if requested == "heightened" or user_escalated or signals else "standard")
+    if requested == "learning":
+        profile = "learning"
+    elif requested == "heightened" or user_escalated or signals:
+        profile = "heightened"
+    else:
+        profile = "standard"
     return {
         "review_profile": profile,
         "signals": signals,
