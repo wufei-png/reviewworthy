@@ -112,7 +112,7 @@ def _common_json(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="reviewworthy", description="Evidence-first, maintainer-first contribution checks")
+    parser = argparse.ArgumentParser(prog="reviewworthy", description="Contributor-side evidence for reviewworthy AI-assisted contributions")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -298,7 +298,7 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_run.add_argument("path", type=Path, nargs="?", default=Path("evals/fixtures"))
     _common_json(eval_run)
 
-    diff = commands.add_parser("diff", help="Capture a read-only Git diff receipt")
+    diff = commands.add_parser("diff", help="Capture or bind deterministic Git Diff evidence")
     diff_commands = diff.add_subparsers(dest="diff_command", required=True)
     diff_capture = diff_commands.add_parser("capture")
     diff_capture.add_argument("--root", type=Path, default=Path("."))

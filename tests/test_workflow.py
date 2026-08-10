@@ -87,6 +87,21 @@ class WorkflowStatusTests(unittest.TestCase):
 
         self.assertEqual(result["current_stage"], "ownership")
 
+    def test_risk_signal_requiring_deeper_review_routes_to_profile_decision(self) -> None:
+        packet = valid_packet()
+        packet["review"]["signals"] = [{"kind": "public_api", "reason": "Changes a public contract."}]
+        snapshot = semantic_snapshot(packet)
+        packet["snapshots"]["semantic"] = snapshot
+        packet["understanding"]["orientation"].update({"status": "not_run", "semantic_snapshot": snapshot})
+        packet["understanding"]["assessment"].update({"status": "not_run", "semantic_snapshot": snapshot})
+
+        result = workflow_status(packet, Path("packet.json"))
+
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["current_stage"], "profile")
+        self.assertEqual(result["next"][0]["kind"], "decision")
+        self.assertIn("heightened or learning", result["next"][0]["reason"])
+
     def test_missing_current_receipt_points_to_exact_required_check(self) -> None:
         packet = valid_packet()
         packet["verification"]["receipts"] = []

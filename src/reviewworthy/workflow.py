@@ -16,6 +16,7 @@ _STAGE_CODES = (
         "signal_verification_required", "discovery_signal_required",
     }),
     ("contract", {"empty_scope", "contract_not_approved", "candidate_transition_required", "duplicate_work_unresolved"}),
+    ("profile", {"review_profile_too_low"}),
     ("implementation", {
         "invalid_diff_receipt", "missing_diff_receipt", "scope_unverifiable", "out_of_scope_files",
         "diff_budget_exceeded", "diff_budget_unverifiable",
@@ -141,6 +142,8 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
         return [{"kind": "decision", "command": "", "reason": "Create or repair the required Signal 0.3 contribution basis and bind it to this Packet."}]
     if stage == "contract":
         return [{"kind": "decision", "command": "", "reason": "Resolve candidate disposition and explicitly approve the bounded Contribution Contract."}]
+    if stage == "profile":
+        return [{"kind": "decision", "command": "", "reason": "Raise the review profile to heightened or learning because recorded risk signals require full review depth."}]
     if stage == "implementation":
         repository = packet.get("repository") if isinstance(packet.get("repository"), dict) else {}
         base = repository.get("default_branch") if isinstance(repository.get("default_branch"), str) and repository.get("default_branch") else "main"

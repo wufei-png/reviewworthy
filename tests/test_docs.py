@@ -28,10 +28,12 @@ class ActiveDocumentationTests(unittest.TestCase):
         root = Path(__file__).parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
         action_reference = (root / "references" / "action-and-ci.md").read_text(encoding="utf-8")
+        package_metadata = (root / "pyproject.toml").read_text(encoding="utf-8")
 
         self.assertIn("not a separate maintainer-side workflow", readme)
         self.assertIn("not maintainer approval or a quality score", readme)
         self.assertIn("not a separate maintainer product", action_reference)
+        self.assertIn("Contributor-side evidence", package_metadata)
 
     def test_live_guidance_uses_only_current_packet_paths_and_cli_flags(self) -> None:
         root = Path(__file__).parents[1]

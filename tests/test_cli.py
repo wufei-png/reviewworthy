@@ -23,6 +23,17 @@ from helpers import valid_packet
 
 
 class CliBoundaryTests(unittest.TestCase):
+    def test_top_level_help_describes_the_contributor_side_product(self) -> None:
+        output = io.StringIO()
+
+        with self.assertRaises(SystemExit) as stopped, redirect_stdout(output):
+            main(["--help"])
+
+        self.assertEqual(stopped.exception.code, 0)
+        self.assertIn("Contributor-side evidence", output.getvalue())
+        self.assertIn("Capture or bind deterministic Git Diff evidence", output.getvalue())
+        self.assertNotIn("maintainer-first", output.getvalue())
+
     def _git(self, root: Path, *args: str) -> str:
         completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
         return completed.stdout.strip()
