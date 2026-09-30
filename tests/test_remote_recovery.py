@@ -137,3 +137,84 @@ class RemoteRecoveryTests(unittest.TestCase):
         self.client.verify_repository_identity.side_effect = GhError("identity mismatch")
         self.assertEqual(self.run_cli()[0], 2)
         self.client.find_existing.assert_not_called()
+
+
+class SignalRecoveryTests(unittest.TestCase):
+    def test_signal_artifact_write_failure_is_recovered_and_edited_targets_are_preserved(self) -> None:
+        from reviewworthy.signal import skeleton_signal
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            signal = skeleton_signal()
+            source = root / "signal.json"
+            source.write_text(json.dumps(signal))
+            body = root / "body.md"
+            body.write_text("Publish this evidence  \n")
+            common = [str(source), "--repo", "example/project", "--repository-id", "101", "--title", "Bug", "--body-file", str(body)]
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["signal", "publish", "plan", *common, "--json"]), 0)
+            plan = json.loads(output.getvalue())
+            client = MagicMock(spec=GhClient)
+            url = "https://github.com/example/project/issues/9"
+            client.create.return_value = url
+            client.find_existing.return_value = []
+            with patch("reviewworthy.cli.GhClient", return_value=client), patch("reviewworthy.cli._replace_json", side_effect=OSError("artifact failure")), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["signal", "publish", "create", *common, "--confirm-operation-id", plan["operation_id"], "--json"]), 2)
+            state = root / "local/v0.3/operations" / (plan["operation_id"] + ".json")
+            self.assertEqual(json.loads(state.read_text())["status"], "succeeded")
+            client.find_existing.return_value = [{"url": url}]
+            client.read_operation_object.return_value = {"title": plan["title"], "body": plan["body"]}
+            reconcile = ["signal", "publish", "reconcile", str(source), "--state", str(state), "--json"]
+            edited = {**signal, "evidence": ["new unrelated evidence"]}
+            source.write_text(json.dumps(edited))
+            with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(reconcile), 2)
+            self.assertEqual(json.loads(source.read_text()), edited)
+            source.write_text(json.dumps(signal))
+            with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(reconcile), 0)
+                self.assertEqual(main(reconcile), 0)
+            updated = json.loads(source.read_text())
+            self.assertEqual(updated["reference"], url)
+            self.assertEqual(updated["publication"]["body"], body.read_text())
+            self.assertEqual(updated["lifecycle"], "pending")
+            self.assertEqual(updated["authority"], signal["authority"])
+            self.assertEqual(client.create.call_count, 1)
+            client.add_issue_note.assert_not_called()
+            wrong = root / "wrong.json"
+            wrong.write_text(json.dumps(signal))
+            with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["signal", "publish", "reconcile", str(wrong), "--state", str(state), "--json"]), 2)
+
+    def test_original_current_record_without_snapshot_can_recover_matching_subject(self) -> None:
+        from reviewworthy.github import build_signal_operation
+        from reviewworthy.signal import skeleton_signal
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "signal.json"
+            signal = skeleton_signal(reference="local-draft-1")
+            source.write_text(json.dumps(signal))
+            operation = build_signal_operation(signal, "example/project", "Bug", "Body  ", 101)
+            state = root / "state.json"
+            save_operation_pending(state, operation)
+            client = MagicMock(spec=GhClient)
+            client.find_existing.return_value = [{"url": "https://github.com/example/project/issues/9"}]
+            client.read_operation_object.return_value = {"title": operation.title, "body": operation.body}
+            args = ["signal", "publish", "reconcile", str(source), "--state", str(state), "--json"]
+            # Legacy current state has no original full Signal snapshot; only the
+            # stable subject and recorded publication inputs can be compared.
+            signal["reference"] = "different-draft"
+            source.write_text(json.dumps(signal))
+            with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(args), 2)
+            signal["reference"] = "local-draft-1"
+            source.write_text(json.dumps(signal))
+            # A pre-publication Issue draft must have no public reference.
+            # Use a valid empty-reference subject for this existing state case.
+            signal["reference"] = ""
+            source.write_text(json.dumps(signal))
+            operation = build_signal_operation(signal, "example/project", "Bug", "Body  ", 101)
+            save_operation_pending(state, operation)
+            client.read_operation_object.return_value = {"title": operation.title, "body": operation.body}
+            with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(args), 0)

@@ -103,3 +103,20 @@ That permits at most one exact one-line Issue note after commentability and orig
 PR head rechecks. An existing note is not posted again. Incomplete live inspection
 or a wrong confirmation cannot authorize this write. A cached create response with
 `source=local_receipt` is historical evidence; reconcile performs the current check.
+
+Recover Signal publication (including a later artifact-write interruption) with:
+
+```bash
+reviewworthy signal publish reconcile SIGNAL_PATH --state STATE --json
+```
+
+The command uses the same read-only remote inspection and repairs only the matching
+Signal target's reference, stable publication subject and publication fields. It
+preserves pending lifecycle and human authority. New publication records retain the
+original Signal input, exact original Body and target path; materially edited or
+unrelated targets are refused, and a missing original output can be restored.
+Pre-existing current `0.3` records lack that snapshot: recovery can compare their
+stable subject, claim, pending lifecycle and recorded publication inputs, but cannot
+prove that unrecorded original evidence/authority fields were unchanged or recover
+original trailing Body whitespace. These local records are unsigned implementation
+state, so preserve and inspect the original artifact during recovery.

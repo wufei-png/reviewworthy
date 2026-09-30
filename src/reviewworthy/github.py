@@ -444,7 +444,7 @@ def _write_operation_record(path: Path, record: dict[str, Any], failure_message:
         raise GhError(f"{failure_message}: {path}: {exc}") from exc
 
 
-def save_operation_pending(path: Path, operation: RemoteOperation) -> None:
+def save_operation_pending(path: Path, operation: RemoteOperation, *, signal_recovery: dict[str, Any] | None = None) -> None:
     record = {
         "state_version": OPERATION_STATE_VERSION,
         "operation_id": operation.operation_id,
@@ -457,10 +457,12 @@ def save_operation_pending(path: Path, operation: RemoteOperation) -> None:
         "issue_url": operation.issue_url or "",
         "recorded_at": utc_now(),
     }
+    if signal_recovery is not None:
+        record["signal_recovery"] = signal_recovery
     _write_operation_record(path, record, "Could not persist pending remote-write state")
 
 
-def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str) -> None:
+def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str, *, signal_recovery: dict[str, Any] | None = None) -> None:
     remote = _canonical_operation_remote(operation, remote)
     receipt = {
         "state_version": OPERATION_STATE_VERSION,
@@ -473,6 +475,8 @@ def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str) 
         "remote": remote,
         "recorded_at": utc_now(),
     }
+    if signal_recovery is not None:
+        receipt["signal_recovery"] = signal_recovery
     _write_operation_record(path, receipt, "Remote write succeeded but operation receipt could not be saved; reconcile before retrying")
 
 

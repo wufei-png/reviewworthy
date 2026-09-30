@@ -207,6 +207,11 @@ def _build_parser() -> argparse.ArgumentParser:
             command.add_argument("--confirm-operation-id", required=True)
         _common_json(command)
 
+    signal_reconcile = signal_publish_commands.add_parser("reconcile", help="Recover a saved Signal publication")
+    signal_reconcile.add_argument("path", type=Path)
+    signal_reconcile.add_argument("--state", type=Path, required=True)
+    _common_json(signal_reconcile)
+
     packet = commands.add_parser("packet", help="Validate a Contribution Packet")
     packet_commands = packet.add_subparsers(dest="packet_command", required=True)
     packet_init = packet_commands.add_parser("init", help="Create an incomplete Contribution Packet skeleton")
@@ -546,6 +551,63 @@ def _reconcile_saved_operation(args: argparse.Namespace) -> int:
         return 0 if result["outcome"] == "already_exists" else 1
 
 
+def _reconcile_signal_publication(args: argparse.Namespace) -> int:
+    with operation_lock(args.state):
+        operation, record = load_operation_state(args.state)
+        if operation.purpose != "signal_publication":
+            raise ValueError("State is not a Signal publication operation")
+        recovery = record.get("signal_recovery")
+        if recovery is not None:
+            if not isinstance(recovery, dict) or recovery.get("target") != str(args.path.resolve()):
+                raise ValueError("Signal recovery target differs from the original publication target")
+            original = require_current_signal(recovery.get("input"))
+            body = recovery.get("body")
+            if not isinstance(body, str) or body.rstrip() + "\n\n" + operation.marker != operation.body:
+                raise ValueError("Signal recovery Body differs from the stored operation")
+            rebuilt = build_signal_operation(original, operation.repo, operation.title, body, operation.repository_id)
+            if rebuilt != operation:
+                raise ValueError("Signal recovery input differs from the original operation")
+        else:
+            original = require_current_signal(_load_object(args.path))
+            body = operation.body.removesuffix("\n\n" + operation.marker)
+        current = require_current_signal(_load_object(args.path)) if args.path.exists() else original
+        subject = current.get("publication_subject_id") or f"{current.get('record_type')}:{current.get('claim_type')}:{current.get('reference')}"
+        if subject != operation.subject_id or current.get("record_type") != "issue":
+            raise ValueError("Signal subject differs from the original publication")
+        if current.get("lifecycle") != "pending" or not operation.subject_id.startswith(f"issue:{current.get('claim_type')}:"):
+            raise ValueError("Signal lifecycle or claim differs from the original pending publication")
+        expected = dict(original)
+        remote = record.get("remote") or record.get("known_remote")
+        publication = {"operation_id": operation.operation_id, "repo": operation.repo, "title": operation.title, "body": body}
+        if current.get("publication") is not None:
+            actual = current["publication"]
+            if not isinstance(actual, dict) or any(actual.get(key) != publication[key] for key in ("operation_id", "repo", "title")) or not isinstance(actual.get("body"), str) or actual["body"].rstrip() != body.rstrip():
+                raise ValueError("Signal publication fields differ from the original operation")
+            if remote and current.get("reference") != remote:
+                raise ValueError("Signal reference differs from the original publication URL")
+            expected.update({"reference": current["reference"], "publication_subject_id": operation.subject_id, "publication": actual})
+        if recovery is not None and current != expected:
+            raise ValueError("Signal target was materially edited after publication planning; preserve it and inspect manually")
+        errors = [error for error in validate_signal(current)["errors"] if error["code"] != "missing_signal_reference"]
+        if errors:
+            raise ValueError(f"Signal target is invalid: {errors}")
+        client = GhClient()
+        result = inspect_operation(client, operation, record)
+        record_inspection(args.state, record, result)
+        result.update({"operation_id": operation.operation_id, "receipt_path": str(args.state)})
+        if result["outcome"] == "already_exists":
+            remote = result["remote"]
+            if current.get("publication") is not None and current.get("reference") != remote:
+                raise ValueError("Published Signal reference differs from the recovered object")
+            save_operation_receipt(args.state, operation, remote, signal_recovery=recovery)
+            updated = dict(current)
+            updated.update({"reference": remote, "publication_subject_id": operation.subject_id, "publication": publication})
+            _replace_json(args.path, updated)
+            result.update({"signal": str(args.path), "published": True})
+        _print(result, args.as_json)
+        return 0 if result["outcome"] == "already_exists" else 1
+
+
 def _refresh_candidate_snapshot(packet: dict[str, Any]) -> str:
     snapshot = semantic_snapshot(packet)
     snapshots = packet.setdefault("snapshots", {})
@@ -729,6 +791,8 @@ def main(argv: list[str] | None = None) -> int:
                     result["recorded"] = str(args.path)
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
+            if args.signal_publish_command == "reconcile":
+                return _reconcile_signal_publication(args)
             signal_value = require_current_signal(_load_object(args.path))
             body = args.body_file.read_text(encoding="utf-8")
             if not args.title.strip() or not body.strip():
@@ -779,6 +843,7 @@ def main(argv: list[str] | None = None) -> int:
 
             receipt_path = operation_receipt_path(target, operation.operation_id)
             payload["receipt_path"] = str(receipt_path)
+            recovery = {"target": str(target.resolve()), "input": signal_value, "body": body}
             with operation_lock(receipt_path):
                 receipt = load_operation_receipt(receipt_path, operation)
                 if receipt:
@@ -794,12 +859,12 @@ def main(argv: list[str] | None = None) -> int:
                             "issue",
                             operation.repo,
                         )
-                        save_operation_receipt(receipt_path, operation, remote)
+                        save_operation_receipt(receipt_path, operation, remote, signal_recovery=recovery)
                         payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
                     else:
-                        save_operation_pending(receipt_path, operation)
+                        save_operation_pending(receipt_path, operation, signal_recovery=recovery)
                         remote = _canonical_remote_url(client.create(operation), "issue", operation.repo)
-                        save_operation_receipt(receipt_path, operation, remote)
+                        save_operation_receipt(receipt_path, operation, remote, signal_recovery=recovery)
                         payload.update({"outcome": "created", "remote": remote})
             updated_signal = dict(signal_value)
             updated_signal["reference"] = remote
