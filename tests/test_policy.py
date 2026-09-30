@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
 
+from reviewworthy.brief import build_project_brief
 from reviewworthy.policy import inspect_policy
 
 
@@ -380,5 +382,86 @@ class PolicyInspectionTests(unittest.TestCase):
             result = inspect_policy(root)
             provenance = result["claim_records"]["issue_required"]["provenance"][0]
 
-            self.assertEqual(result["authoritative_claims"]["issue_required"], True)
+            self.assertIsNone(result["authoritative_claims"]["issue_required"])
+            self.assertEqual(result["diagnostics"][0]["path"], ".reviewworthy/policy.toml:other")
             self.assertEqual(provenance["line_start"], 4)
+
+    def test_defaults_ignore_release_and_tutorial_text_but_keep_templates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            for name in ("docs/tutorial.md", ".github/release.md", ".github/workflows/test.yml"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("AI assistance is prohibited.\n", encoding="utf-8")
+            for name in (".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/bug.yml", ".github/pull_request_template/feature.md"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("Contributors must disclose AI use.\n", encoding="utf-8")
+            result = inspect_policy(root)
+            self.assertEqual(result["result"], "passed")
+            self.assertEqual(len(result["sources"]), 4)
+            brief = build_project_brief(root)
+            tutorial = next(source for source in brief["sources"] if source["path"] == "docs/tutorial.md")
+            self.assertEqual(tutorial["kind"], "project_document")
+
+    def test_explicit_documents_are_additive_authority_and_missing_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            (root / "docs").mkdir()
+            (root / "docs/contributing.md").write_text("AI assistance is prohibited.\n", encoding="utf-8")
+            (root / ".reviewworthy").mkdir()
+            config = root / ".reviewworthy/policy.toml"
+            config.write_text('[discovery]\nauthoritative_documents = ["docs/contributing.md"]\n', encoding="utf-8")
+            result = inspect_policy(root)
+            self.assertIn("policy_conflict", {item["code"] for item in result["hard_stops"]})
+            self.assertEqual({source["path"] for source in result["sources"]}, {"README.md", "docs/contributing.md", ".reviewworthy/policy.toml"})
+            (root / "docs/contributing.md").unlink()
+            result = inspect_policy(root)
+            self.assertEqual(result["result"], "blocked")
+            self.assertEqual(result["diagnostics"][0]["path"], "docs/contributing.md")
+            self.assertIsNone(result["authoritative_claims"]["ai_assistance"])
+
+    def test_invalid_configuration_has_path_bearing_diagnostics(self) -> None:
+        cases = (
+            ('[ai]\nallowd = true', ":ai.allowd"),
+            ('[ai]\nallowed = 1', ":ai.allowed"),
+            ('[ai]\ndisclosure_required = "yes"', ":ai.disclosure_required"),
+            ('[ai]\ndisclosure_locations = ["bogus"]', ":ai.disclosure_locations"),
+            ('[pr]\ndraft_required = []', ":pr.draft_required"),
+            ('ai = true', ":ai"),
+            ('[discovery]\nauthoritative_documents = "docs/policy.md"', ":discovery.authoritative_documents"),
+        )
+        for content, suffix in cases:
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".reviewworthy").mkdir()
+                (root / ".reviewworthy/policy.toml").write_text(content, encoding="utf-8")
+                result = inspect_policy(root)
+                self.assertEqual(result["result"], "blocked")
+                self.assertEqual(result["diagnostics"][0]["path"], ".reviewworthy/policy.toml" + suffix)
+
+    def test_explicit_paths_require_exact_canonical_file_names(self) -> None:
+        for name in ("../policy.md", "/policy.md", "./policy.md", "docs//policy.md", "docs/*.md", ".", "docs/", "C:policy.md", " "):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".reviewworthy").mkdir()
+                (root / ".reviewworthy/policy.toml").write_text('[discovery]\nauthoritative_documents = [' + json.dumps(name) + ']\n', encoding="utf-8")
+                self.assertEqual(inspect_policy(root)["diagnostics"][0]["code"], "policy_invalid_configuration")
+
+    def test_accepted_aliases_are_normalized_before_validation(self) -> None:
+        cases = (
+            ('[ai]\nassistance_allowed = "allowed"\n[ai.disclosure]\nlocations = ["commit_trailer"]\nstages = ["verification"]', {"ai_assistance": "allowed", "disclosure_locations": ["commit_trailer"], "disclosure_stages": ["verification"]}),
+            ('[contribution.ai]\nallowed = "prohibited"', {"ai_assistance": "prohibited"}),
+            ('issue_required = false\ndisclosure_required = true\nhuman_pr_narrative_required = true\nsecurity_private_reporting = false\ndraft_pr_required = true\ndiscovery_evidence_allowed = true\ngood_first_issue_ai_allowed = false', {"issue_required": False, "disclosure_required": True, "human_pr_narrative_required": True, "security_private_reporting": False, "draft_pr_required": True, "discovery_evidence_allowed": True, "good_first_issue_ai_allowed": False}),
+        )
+        for content, expected in cases:
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".reviewworthy").mkdir()
+                (root / ".reviewworthy/policy.toml").write_text(content, encoding="utf-8")
+                result = inspect_policy(root)
+                self.assertEqual(result["diagnostics"], [])
+                for key, value in expected.items():
+                    self.assertEqual(result["authoritative_claims"][key], value)

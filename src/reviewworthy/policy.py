@@ -17,6 +17,7 @@ import tempfile
 import tomllib
 from typing import Any, Iterable
 
+from .git import is_canonical_repository_relative_path
 from .util import CommandOutputLimitError, CommandTimeoutError, relative_path, run_bounded
 
 
@@ -383,57 +384,103 @@ def _claims_from_document(
     return claims, matches, ambiguities
 
 
-def _candidate_document_paths(root: Path) -> list[Path]:
-    candidates: list[Path] = []
-    for name in ("README.md", "README", "CONTRIBUTING.md", "CONTRIBUTING", "AGENTS.md", "SECURITY.md"):
-        path = root / name
-        if path.is_file():
-            candidates.append(path)
+DEFAULT_DOCUMENTS = ("README.md", "README", "CONTRIBUTING.md", "CONTRIBUTING", "AGENTS.md", "SECURITY.md")
+STRUCTURED_PATH = ".reviewworthy/policy.toml"
+DISCLOSURE_LOCATIONS = {"pr_body", "commit_message", "commit_trailer", "issue_body", "checklist", "other"}
+DISCLOSURE_STAGES = {"repository_orientation", "candidate_triage", "design", "implementation", "verification", "narrative", "review_response"}
 
+
+def _diagnostic(code: str, path: str, message: str) -> dict[str, str]:
+    return {"code": code, "path": path, "message": message}
+
+
+def _is_default_document_path(path: str) -> bool:
+    if path in DEFAULT_DOCUMENTS:
+        return True
+    value = PurePosixPath(path)
+    if len(value.parts) < 2 or value.parts[0] != ".github":
+        return False
+    template = value.parts[1].lower()
+    return (
+        template in {"issue_template", "pull_request_template"}
+        or (len(value.parts) == 2 and value.stem.lower() in {"issue_template", "pull_request_template"})
+    ) and value.suffix.lower() in {".md", ".markdown", ".txt", ".yml", ".yaml"}
+
+
+def _candidate_document_paths(root: Path, explicit: list[str]) -> list[Path]:
+    candidates = {root / name for name in DEFAULT_DOCUMENTS if (root / name).exists() or (root / name).is_symlink()}
     github_dir = root / ".github"
     if github_dir.is_dir():
-        candidates.extend(
-            path
-            for path in github_dir.rglob("*")
-            if path.is_file() and path.suffix.lower() in {".md", ".markdown", ".txt", ".yml", ".yaml"}
-            and ".github/workflows/" not in path.as_posix()
-        )
-
-    docs_dir = root / "docs"
-    if docs_dir.is_dir():
-        candidates.extend(
-            path
-            for path in docs_dir.rglob("*")
-            if path.is_file()
-            and path.suffix.lower() in {".md", ".markdown"}
-            and "docs/adr/" not in path.as_posix()
-        )
-
-    unique: list[Path] = []
-    seen: set[Path] = set()
-    for path in candidates:
-        resolved = path.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(path)
-    return sorted(unique)
+        candidates.update(path for path in github_dir.rglob("*") if _is_default_document_path(path.relative_to(root).as_posix()))
+    candidates.update(root / name for name in explicit)
+    return sorted(candidates)
 
 
-def _is_policy_tree_path(path: str) -> bool:
-    value = PurePosixPath(path)
-    if value.is_absolute() or ".." in value.parts:
-        return False
-    if path == ".reviewworthy/policy.toml":
-        return True
-    if len(value.parts) == 1 and value.name in {
-        "README.md", "README", "CONTRIBUTING.md", "CONTRIBUTING", "AGENTS.md", "SECURITY.md",
-    }:
-        return True
-    if value.parts and value.parts[0] == ".github":
-        return "workflows" not in value.parts and value.suffix.lower() in {".md", ".markdown", ".txt", ".yml", ".yaml"}
-    if value.parts and value.parts[0] == "docs":
-        return not (len(value.parts) > 1 and value.parts[1] == "adr") and value.suffix.lower() in {".md", ".markdown"}
-    return False
+def _validated_structured(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Normalize accepted aliases before validating canonical field values."""
+
+    canonical: dict[str, Any] = {}
+    diagnostics: list[dict[str, str]] = []
+    aliases = {
+        ("contribution", "ai"): ("ai",),
+        ("ai", "assistance_allowed"): ("ai", "allowed"),
+        ("ai", "disclosure", "locations"): ("ai", "disclosure_locations"),
+        ("ai", "disclosure", "stages"): ("ai", "disclosure_stages"),
+        ("issue_required",): ("contribution", "issue_required"),
+        ("disclosure_required",): ("ai", "disclosure_required"),
+        ("human_pr_narrative_required",): ("pr", "human_narrative_required"),
+        ("security_private_reporting",): ("security", "private_reporting_required"),
+        ("draft_pr_required",): ("pr", "draft_required"),
+        ("discovery_evidence_allowed",): ("contribution", "discovery_evidence_allowed"),
+        ("good_first_issue_ai_allowed",): ("contribution", "good_first_issue_ai_allowed"),
+    }
+    fields = {
+        ("ai", "allowed"), ("ai", "disclosure_required"), ("ai", "disclosure_locations"), ("ai", "disclosure_stages"),
+        ("contribution", "issue_required"), ("contribution", "discovery_evidence_allowed"), ("contribution", "good_first_issue_ai_allowed"),
+        ("pr", "human_narrative_required"), ("pr", "draft_required"), ("security", "private_reporting_required"),
+        ("discovery", "authoritative_documents"),
+    }
+    tables = {path[:-1] for path in fields} | {("ai", "disclosure")}
+
+    def visit(value: Any, original: tuple[str, ...], normalized: tuple[str, ...]) -> None:
+        normalized = aliases.get(normalized, normalized)
+        location = STRUCTURED_PATH + ":" + ".".join(original)
+        if normalized in tables:
+            if not isinstance(value, dict):
+                diagnostics.append(_diagnostic("policy_invalid_configuration", location, "Policy table must be a TOML table."))
+                return
+            for key, child in sorted(value.items()):
+                visit(child, original + (key,), normalized + (key,))
+            return
+        if normalized not in fields:
+            diagnostics.append(_diagnostic("policy_invalid_configuration", location, "Unknown policy key."))
+            return
+        if normalized == ("ai", "allowed"):
+            if isinstance(value, str) and value in {"allowed", "prohibited"}:
+                value = value == "allowed"
+            valid = isinstance(value, bool) or value == "unknown"
+        elif normalized[-1] in {"disclosure_locations", "disclosure_stages", "authoritative_documents"}:
+            valid = isinstance(value, list) and all(isinstance(item, str) for item in value)
+            if valid:
+                if normalized[-1] == "authoritative_documents":
+                    valid = all(is_canonical_repository_relative_path(item) and item != "." and "\x00" not in item and not any(char in item for char in "*?[]") for item in value)
+                else:
+                    choices = DISCLOSURE_LOCATIONS if normalized[-1] == "disclosure_locations" else DISCLOSURE_STAGES
+                    valid = all(item in choices for item in value)
+        else:
+            valid = isinstance(value, bool)
+        if not valid:
+            diagnostics.append(_diagnostic("policy_invalid_configuration", location, "Invalid policy value."))
+            return
+        table = canonical.setdefault(normalized[0], {})
+        if normalized[1] in table and table[normalized[1]] != value:
+            diagnostics.append(_diagnostic("policy_invalid_configuration", location, "Opposed values for canonical policy field and alias."))
+        else:
+            table[normalized[1]] = value
+
+    for key, value in sorted(data.items()):
+        visit(value, (key,), (key,))
+    return canonical, diagnostics
 
 
 def inspect_policy_at_commit(root: Path, commit_sha: str) -> dict[str, Any]:
@@ -461,7 +508,14 @@ def inspect_policy_at_commit(root: Path, commit_sha: str) -> dict[str, Any]:
     if resolved.lower() != commit_sha.lower():
         raise PolicyTreeError("base commit identity did not resolve exactly")
     names = git("ls-tree", "-r", "--name-only", commit_sha).decode("utf-8", errors="surrogateescape").splitlines()
-    selected = [name for name in names if _is_policy_tree_path(name)]
+    explicit: list[str] = []
+    if STRUCTURED_PATH in names:
+        try:
+            normalized, _ = _validated_structured(tomllib.loads(git("show", f"{commit_sha}:{STRUCTURED_PATH}").decode("utf-8")))
+            explicit = normalized.get("discovery", {}).get("authoritative_documents", [])
+        except (UnicodeError, tomllib.TOMLDecodeError):
+            pass
+    selected = [name for name in names if name == STRUCTURED_PATH or _is_default_document_path(name) or name in explicit]
     with tempfile.TemporaryDirectory(prefix="reviewworthy-policy-") as directory:
         snapshot = Path(directory)
         for name in selected:
@@ -551,10 +605,30 @@ def _structured_match(text: str, path: tuple[str, ...]) -> re.Match[str] | None:
 
 def inspect_policy(root: Path) -> dict[str, Any]:
     root = root.resolve()
+    structured_path = root / STRUCTURED_PATH
+    structured_claims: dict[str, Any] = {}
+    structured_error: str | None = None
+    structured_provenance: dict[str, dict[str, Any]] = {}
+    diagnostics: list[dict[str, str]] = []
+    explicit: list[str] = []
+    if structured_path.exists():
+        try:
+            structured_text = structured_path.read_text(encoding="utf-8")
+            data = tomllib.loads(structured_text)
+            normalized, diagnostics = _validated_structured(data)
+            explicit = normalized.get("discovery", {}).get("authoritative_documents", [])
+            structured_claims, structured_paths = _structured_claims(data)
+            structured_provenance = {
+                key: _provenance(structured_path, root, structured_text, key, _structured_match(structured_text, structured_paths[key]))
+                for key in structured_claims
+            }
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+            structured_error = "Structured policy could not be read or parsed."
+            diagnostics.append(_diagnostic("policy_invalid_configuration", STRUCTURED_PATH, structured_error))
     document_sources: list[PolicySource] = []
     document_claims: dict[str, list[dict[str, Any]]] = {}
     document_ambiguities: list[dict[str, Any]] = []
-    for path in _candidate_document_paths(root):
+    for path in _candidate_document_paths(root, explicit):
         try:
             text = path.read_text(encoding="utf-8")
             claims, matches, ambiguities = _claims_from_document(text, path, root)
@@ -575,23 +649,10 @@ def inspect_policy(root: Path) -> dict[str, Any]:
             document_sources.append(PolicySource(relative_path(path, root), "repository_document", claims, provenance=provenance, ambiguities=source_ambiguities))
             for key, value in claims.items():
                 _claim(document_claims, key, value, path, root, text, matches.get(key))
-        except OSError as exc:
-            document_sources.append(PolicySource(relative_path(path, root), "repository_document", {}, str(exc)))
-
-    structured_path = root / ".reviewworthy" / "policy.toml"
-    structured_claims: dict[str, Any] = {}
-    structured_error: str | None = None
-    structured_provenance: dict[str, dict[str, Any]] = {}
-    if structured_path.is_file():
-        try:
-            structured_text = structured_path.read_text(encoding="utf-8")
-            structured_claims, structured_paths = _structured_claims(tomllib.loads(structured_text))
-            structured_provenance = {
-                key: _provenance(structured_path, root, structured_text, key, _structured_match(structured_text, structured_paths[key]))
-                for key in structured_claims
-            }
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            structured_error = str(exc)
+        except (OSError, UnicodeError):
+            name = path.relative_to(root).as_posix()
+            diagnostics.append(_diagnostic("policy_source_unreadable", name, "Policy source could not be read as UTF-8 text."))
+            document_sources.append(PolicySource(name, "repository_document", {}, "Policy source could not be read as UTF-8 text."))
 
     conflicts: list[dict[str, Any]] = []
     for key, values in document_claims.items():
@@ -672,7 +733,13 @@ def inspect_policy(root: Path) -> dict[str, Any]:
             }
         )
 
-    posture = "conservative" if unknown or conflicts or document_ambiguities else "explicit"
+    if diagnostics:
+        authoritative = {key: None for key in CLAIM_KEYS}
+        unknown = list(CLAIM_KEYS)
+        for record in claim_records.values():
+            record.update(value=None, state="unknown")
+    diagnostics.sort(key=lambda item: (item["path"], item["code"], item["message"]))
+    posture = "conservative" if unknown or conflicts or document_ambiguities or diagnostics else "explicit"
     disclosure_locations = authoritative.get("disclosure_locations")
     if not isinstance(disclosure_locations, list) or not disclosure_locations:
         disclosure_locations = ["pr_body"] if authoritative.get("disclosure_required") is True or posture == "conservative" else []
@@ -685,13 +752,15 @@ def inspect_policy(root: Path) -> dict[str, Any]:
         "sources": [source.__dict__ for source in document_sources]
         + ([{"path": ".reviewworthy/policy.toml", "kind": "structured_policy", "claims": structured_claims, "error": structured_error}] if structured_path.exists() else []),
         "authoritative_claims": authoritative,
-        "structured_claims": structured_claims,
+        "structured_claims": {} if diagnostics else structured_claims,
+        "diagnostics": diagnostics,
         "claim_records": claim_records,
         "unknown_claims": sorted(set(unknown)),
         "conflicts": conflicts,
         "ambiguities": document_ambiguities,
         "hard_stops": (
             ([{"code": "policy_conflict", "reason": "Policy sources contradict each other."}] if conflicts else [])
+            + [{"code": item["code"], "reason": item["message"], "path": item["path"]} for item in diagnostics]
             + ([{"code": "policy_ambiguity", "reason": "One policy source makes opposed explicit claims."}] if document_ambiguities else [])
         ),
         "posture": posture,
@@ -700,5 +769,5 @@ def inspect_policy(root: Path) -> dict[str, Any]:
             "locations": disclosure_locations,
             "stages": disclosure_stages,
         },
-        "result": "blocked" if conflicts or document_ambiguities else "passed",
+        "result": "blocked" if conflicts or document_ambiguities or diagnostics else "passed",
     }

@@ -120,3 +120,8 @@ class SchemaTests(unittest.TestCase):
         summary["claims"]["ai_disclosure"]["claimed_present"] = "yes"
 
         self._assert_invalid("evidence-summary.schema.json", summary)
+
+    def test_policy_schema_covers_canonical_discovery_and_supported_values(self) -> None:
+        self._assert_valid("contribution-policy.schema.json", {"ai": {"allowed": "unknown"}, "discovery": {"authoritative_documents": ["docs/contributing.md"]}})
+        for value in ({"ai": {"allowed": 1}}, {"ai": {"allowd": True}}, {"discovery": {"authoritative_documents": ["../policy.md"]}}, {"discovery": {"authoritative_documents": ["docs/*.md"]}}):
+            self._assert_invalid("contribution-policy.schema.json", value)

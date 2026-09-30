@@ -2,6 +2,8 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Narrow policy discovery to contributor documents and Issue/PR templates, support exact additional authoritative documents, and validate structured policy keys, values and accepted aliases.
+
 - Add saved-operation reconciliation for Issues, PR backlinks and Signal publication, explicit uncertain-creation retry, and bounded post-create duplicate inspection with preserved canonical results.
 
 - Break all artifact and operation compatibility with earlier Reviewworthy formats.

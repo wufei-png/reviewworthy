@@ -1,6 +1,6 @@
 # Policy discovery
 
-Repository-authored human-facing documents are the semantic authority. Reviewworthy inspects `README`, `CONTRIBUTING`, `SECURITY`, `AGENTS`, `.github` templates, and relevant Markdown under `docs/`.
+Repository-authored human-facing documents are the semantic authority. Default sources are root `README.md`, `README`, `CONTRIBUTING.md`, `CONTRIBUTING`, `AGENTS.md`, and `SECURITY.md`, plus Issue/PR template files and directories under `.github` (upper/lowercase template names are supported). Other `.github` files and `docs` are not automatically policy sources. Project Brief orientation still discovers project documents separately.
 
 `.reviewworthy/policy.toml` is an optional structured supplement. It helps automation consume rules that the repository has already stated or makes explicit where the documents are silent. It cannot silently override a human-facing rule.
 
@@ -33,3 +33,12 @@ draft_required = false
 [security]
 private_reporting_required = true
 ```
+
+Add exact repository-relative documents to the defaults with:
+
+```toml
+[discovery]
+authoritative_documents = ["docs/contributing.md"]
+```
+
+These paths must name readable UTF-8 regular files. Directory and glob expansion are unsupported; a missing explicit source blocks policy inspection. Unknown keys and invalid values produce ordered diagnostics with source/key paths. The portable schema describes canonical fields; the CLI also accepts existing boolean top-level aliases, `ai.assistance_allowed`, `contribution.ai`, nested `ai.disclosure.locations/stages`, and `allowed = "allowed"`/`"prohibited"` before validation. Opposed alias values are invalid. No policy version field is required.

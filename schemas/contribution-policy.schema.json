@@ -31,6 +31,20 @@
       },
       "additionalProperties": false
     },
+    "discovery": {
+      "type": "object",
+      "properties": {
+        "authoritative_documents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!\\s*$)(?!/)(?![A-Za-z]:)(?!.*[\\\\\\u0000*?\\[\\]])(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*\\/$)[\\s\\S]+$"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "security": {
       "type": "object",
       "properties": {

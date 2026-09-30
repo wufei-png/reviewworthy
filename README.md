@@ -91,7 +91,7 @@ reviewworthy policy inspect .
 
 ## Policy discovery
 
-Reviewworthy reads repository-authored policy documents first, including `README`, `CONTRIBUTING`, `SECURITY`, `AGENTS`, `.github` templates, and Markdown under `docs/`. An optional `.reviewworthy/policy.toml` supplies structured claims where documents are silent. Explicit negative statements become `false`; contradictions across sources produce `policy_conflict`, while opposed claims inside one source produce `policy_ambiguity`. Both are hard stops and are never silently overridden.
+Reviewworthy reads repository-authored policy documents first, including root `README`, `CONTRIBUTING`, `SECURITY`, `AGENTS` documents and `.github` Issue/PR templates. Other `.github` files and `docs` are excluded by default; `[discovery] authoritative_documents` in `.reviewworthy/policy.toml` adds exact authoritative documents. Project orientation discovery remains separate. An optional `.reviewworthy/policy.toml` supplies structured claims where documents are silent. Explicit negative statements become `false`; contradictions across sources produce `policy_conflict`, while opposed claims inside one source produce `policy_ambiguity`. Both are hard stops and are never silently overridden.
 
 Unknown policy, including an explicit `allowed = "unknown"` claim, enters Conservative mode. The CLI preserves human approval and disclosure requirements. The Action reads policy only from the runner-owned base commit: positive natural-language claims are advisory, positive machine authority comes only from base-tree `.reviewworthy/policy.toml`, and explicit prohibitions, conflicts, or ambiguities can block `evidence-enforce`.
 
