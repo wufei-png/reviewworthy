@@ -26,6 +26,13 @@ reviewworthy packet verification plan --packet "$PACKET" --input verification-pl
 The input has `plan_version: "0.1"` and `checks`, each with a unique `id`, nonempty
 `argv`, canonical repository-relative `cwd` (including `.`), and boolean `required`.
 The CLI computes `plan_digest`; argv stays an argument list with no shell expansion.
+Diff binding and `verify run` maintain the implementation/verification flow results.
+Partial required checks remain `not_run`, failed required checks are `failed`, and
+stale or unstable receipts are `blocked`; only exact current passing receipts
+complete verification. Re-running a check replaces its receipt. A semantic outcome
+change resets Ownership, understanding and final narrative confirmation; timestamps
+and output hashes alone preserve them. Ownership updates preserve executed receipts.
+
 Changing the plan resets receipts and downstream evidence; an identical plan
 preserves them. Neither input accepts arbitrary Packet records or supplied hashes.
 

@@ -9,7 +9,7 @@ from typing import Any
 from .contract import CONTRACT_FIELDS, contract_snapshot, validate_contract
 from .git import verification_plan_digest
 from .packet import (
-    issue_basis_blockers, policy_violations, require_current_packet,
+    current_verification_receipts, deterministic_evidence_checks, issue_basis_blockers, policy_violations, require_current_packet,
     readiness_blockers, result_record, semantic_snapshot, skeleton_packet, validate_packet,
 )
 from .policy import inspect_policy
@@ -38,6 +38,27 @@ def basis_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
     return errors
 
 
+def synchronize_verification_result(packet: dict[str, Any]) -> None:
+    """Derive the flow result from required checks and exact current receipts."""
+
+    verification = packet["verification"]
+    required = {check["id"] for check in verification["plan"].get("checks", [])
+                if isinstance(check, dict) and check.get("required") is True}
+    receipts = verification.get("receipts", [])
+    passing = {receipt["check_id"] for receipt in current_verification_receipts(packet)}
+    errors = [error for error in validate_packet(packet)["errors"] if error["path"].startswith("verification")]
+    if errors or any(receipt.get("integrity_status") != "stable" for receipt in receipts):
+        status = "blocked"
+    elif any(receipt.get("check_id") in required and receipt.get("command_outcome") == "failed" for receipt in receipts):
+        status = "failed"
+    elif required and required <= passing:
+        status = "passed"
+    else:
+        status = "not_run"
+    evidence = [f"packet.verification.receipts:{check_id}" for check_id in sorted(required & passing)]
+    _set_result(packet, "verification", status, evidence)
+
+
 def maintain_packet(previous: dict[str, Any], updated: dict[str, Any]) -> dict[str, Any]:
     """Maintain derived results and invalidate affected evidence on semantic changes.
 
@@ -53,30 +74,48 @@ def maintain_packet(previous: dict[str, Any], updated: dict[str, Any]) -> dict[s
     records = updated.get("results")
     if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
         raise ValueError("packet.results must be a list of result objects")
-    if semantic_snapshot(previous) != semantic_snapshot(updated):
-        basis_changed = any(previous.get(key) != updated.get(key) for key in ("entry", "candidate_selection"))
-        # The semantic projection excludes provider timestamps.
-        old_basis = deepcopy(updated)
-        old_basis["basis"] = previous.get("basis")
-        basis_changed = basis_changed or semantic_snapshot(old_basis) != semantic_snapshot(updated)
-        contract_changed = previous.get("contract") != updated.get("contract")
-        old_policy = deepcopy(updated)
-        old_policy["policy"] = previous.get("policy")
-        policy_changed = semantic_snapshot(old_policy) != semantic_snapshot(updated)
-        if basis_changed or policy_changed:
-            updated["contract"]["approval"] = {"status": "not_run", "human_confirmed": False}
-        if basis_changed or contract_changed or policy_changed:
-            updated["diff"] = skeleton_packet(updated["contribution_id"], "issue-backed")["diff"]
-            _set_result(updated, "implementation", "not_run")
+    def changed_section(name: str) -> bool:
+        old = deepcopy(updated)
+        old[name] = previous.get(name, {})
+        return semantic_snapshot(old) != semantic_snapshot(updated)
+
+    basis_changed = any(changed_section(key) for key in ("entry", "basis", "candidate_selection"))
+    policy_changed = changed_section("policy")
+    contract_changed = changed_section("contract")
+    if basis_changed or policy_changed:
+        updated["contract"]["approval"] = {"status": "not_run", "human_confirmed": False}
+    if basis_changed or policy_changed or contract_changed:
+        updated["diff"] = skeleton_packet(updated["contribution_id"], "issue-backed")["diff"]
+        _set_result(updated, "implementation", "not_run")
+    verification_inputs_changed = (
+        basis_changed or policy_changed or contract_changed
+        or changed_section("diff") or changed_section("review")
+        or previous["verification"].get("plan") != updated["verification"].get("plan")
+        or previous["verification"].get("plan_digest") != updated["verification"].get("plan_digest")
+    )
+    if verification_inputs_changed:
         updated["verification"]["receipts"] = []
+    if verification_inputs_changed or changed_section("verification"):
         updated["ownership"]["status"] = "not_run"
+        _set_result(updated, "ownership", "not_run")
+    if semantic_snapshot(previous) != semantic_snapshot(updated):
         updated["narrative"]["final_preview_confirmed"] = False
-        for node in ("verification", "ownership", "narrative"):
-            _set_result(updated, node, "not_run")
+        _set_result(updated, "narrative", "not_run")
         for phase in ("orientation", "assessment"):
             record = updated["understanding"].get(phase)
             if isinstance(record, dict):
                 record["status"] = "not_run"
+
+    diff = updated.get("diff", {})
+    diff_errors = [error for error in validate_packet(updated)["errors"] if error["path"].startswith("diff")]
+    violations, _ = deterministic_evidence_checks(updated, strict=True)
+    if diff.get("subject_digest") and diff.get("head_sha") and not diff_errors and not violations:
+        _set_result(updated, "implementation", "passed", [
+            f"Bound merge-base Diff {diff['subject_digest']} at head {diff['head_sha']}."
+        ])
+    else:
+        _set_result(updated, "implementation", "not_run")
+    synchronize_verification_result(updated)
     policy_errors = policy_violations(updated, enforce_disclosure=False)
     policy_errors = [error for error in policy_errors if not error["path"].startswith("narrative")]
     policy_passed = any(record.get("node") == "policy_check" and record.get("status") == "passed" and record.get("evidence") for record in records)

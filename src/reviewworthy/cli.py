@@ -1079,11 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"Bound merge-base Diff {captured['subject_digest']} at head {captured['head_sha']}."
                 ],
             })
-            snapshots = updated.get("snapshots")
-            if not isinstance(snapshots, dict):
-                raise ValueError("packet.snapshots must be an object")
-            snapshots["semantic"] = semantic_snapshot(updated)
-            _replace_json(args.packet, updated)
+            updated = replace_packet(args.packet, packet, updated)
             result = workflow_status(updated, args.packet)
             _print({"updated": str(args.packet), "diff": updated["diff"], "status": result}, args.as_json)
             return 0
@@ -1114,13 +1110,14 @@ def main(argv: list[str] | None = None) -> int:
                 subject_digest=actual_diff["subject_digest"],
                 cwd=check.get("cwd", "."),
             )
+            updated = deepcopy(packet)
+            verification = updated["verification"]
             receipts = verification.get("receipts")
             if not isinstance(receipts, list):
                 raise ValueError("packet.verification.receipts must be a list")
             verification["receipts"] = [item for item in receipts if not isinstance(item, dict) or item.get("check_id") != args.check_id]
             verification["receipts"].append(receipt)
-            packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-            _replace_json(args.packet, packet)
+            replace_packet(args.packet, packet, updated)
             _print({"recorded": str(args.packet), **receipt}, args.as_json)
             return 0 if receipt["command_outcome"] == "passed" and receipt["integrity_status"] == "stable" else 1
 

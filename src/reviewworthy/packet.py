@@ -102,7 +102,9 @@ def semantic_snapshot(packet: dict[str, Any]) -> str:
     semantic_receipts = sorted([
         {
             key: receipt.get(key)
-            for key in ("receipt_version", "check_id", "plan_digest", "subject_digest", "command_outcome", "integrity_status")
+            for key in ("receipt_version", "check_id", "plan_digest", "subject_digest", "command_outcome", "integrity_status",
+                        "exit_code", "argv", "cwd", "head_sha", "head_sha_before", "head_sha_after",
+                        "worktree_clean_before", "worktree_clean_after", "provenance")
         }
         for receipt in receipts
         if isinstance(receipt, dict)
@@ -495,6 +497,8 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
                     _error(errors, "absolute_verification_cwd", "A verification receipt cwd must be repository-relative", f"{path}.cwd")
                 if isinstance(check, dict) and (receipt.get("argv") != check.get("argv") or receipt.get("cwd") != check.get("cwd")):
                     _error(errors, "verification_check_mismatch", "Receipt command and cwd must match its planned check", path)
+                if receipt.get("head_sha") != diff.get("head_sha"):
+                    _error(errors, "verification_head_mismatch", "Receipt HEAD must match the current Diff", f"{path}.head_sha")
                 if not isinstance(receipt.get("head_sha"), str) or not receipt.get("head_sha", "").strip():
                     _error(errors, "invalid_verification_head", "A verification receipt needs head_sha", f"{path}.head_sha")
                 if not isinstance(receipt.get("exit_code"), int) or isinstance(receipt.get("exit_code"), bool):
@@ -989,6 +993,29 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
     return violations
 
 
+def current_verification_receipts(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return passing receipts with exact plan, subject, command and integrity proof."""
+
+    verification = packet.get("verification", {})
+    plan = verification.get("plan", {})
+    checks = {check.get("id"): check for check in plan.get("checks", []) if isinstance(check, dict)}
+    diff = packet.get("diff", {})
+    return [receipt for receipt in verification.get("receipts", []) if isinstance(receipt, dict)
+            and receipt.get("check_id") in checks
+            and receipt.get("receipt_version") == VERIFICATION_RECEIPT_VERSION
+            and receipt.get("plan_digest") == verification.get("plan_digest") == verification_plan_digest(plan)
+            and receipt.get("subject_digest") == diff.get("subject_digest")
+            and receipt.get("argv") == checks[receipt["check_id"]].get("argv")
+            and receipt.get("cwd") == checks[receipt["check_id"]].get("cwd")
+            and receipt.get("command_outcome") == "passed" and type(receipt.get("exit_code")) is int
+            and receipt.get("exit_code") == 0
+            and receipt.get("integrity_status") == "stable"
+            and receipt.get("provenance") == "contributor_local"
+            and bool(receipt.get("head_sha"))
+            and receipt.get("head_sha_before") == receipt.get("head_sha") == receipt.get("head_sha_after") == diff.get("head_sha")
+            and receipt.get("worktree_clean_before") is True and receipt.get("worktree_clean_after") is True]
+
+
 def _readiness_blockers_object(
     packet: dict[str, Any],
     validation_errors: list[dict[str, str]],
@@ -1068,26 +1095,7 @@ def _readiness_blockers_object(
     if not required_checks:
         blockers.append({"code": "missing_verification_plan", "message": "Remote readiness requires at least one required verification check.", "path": "verification.plan.checks"})
     receipts = verification.get("receipts", []) if isinstance(verification, dict) else []
-    usable_receipts = [
-        receipt for receipt in receipts
-        if isinstance(receipt, dict)
-        and receipt.get("receipt_version") == VERIFICATION_RECEIPT_VERSION
-        and receipt.get("provenance") == "contributor_local"
-        and receipt.get("command_outcome") == "passed"
-        and receipt.get("exit_code") == 0
-        and receipt.get("integrity_status") == "stable"
-        and receipt.get("plan_digest") == (verification.get("plan_digest") if isinstance(verification, dict) else None)
-        and receipt.get("subject_digest") == (packet.get("diff", {}).get("subject_digest") if isinstance(packet.get("diff"), dict) else None)
-        and isinstance(receipt.get("argv"), list)
-        and receipt.get("argv")
-        and isinstance(receipt.get("cwd"), str)
-        and receipt.get("cwd")
-        and isinstance(receipt.get("head_sha"), str)
-        and receipt.get("head_sha")
-        and receipt.get("head_sha_before") == receipt.get("head_sha") == receipt.get("head_sha_after")
-        and receipt.get("worktree_clean_before") is True
-        and receipt.get("worktree_clean_after") is True
-    ] if isinstance(receipts, list) else []
+    usable_receipts = current_verification_receipts(packet)
     if not usable_receipts:
         blockers.append({"code": "missing_executed_verification", "message": "Remote readiness needs a current contributor-local passing receipt.", "path": "verification.receipts"})
     passed_check_ids = {receipt.get("check_id") for receipt in usable_receipts}

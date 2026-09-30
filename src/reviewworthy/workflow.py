@@ -7,7 +7,7 @@ import shlex
 from typing import Any
 
 from .contract import validate_contract
-from .packet import issue_reference, readiness_blockers, validate_packet
+from .packet import current_verification_receipts, issue_reference, readiness_blockers, validate_packet
 
 
 _STAGE_CODES = (
@@ -114,29 +114,7 @@ def _derived_stage(packet: dict[str, Any], blockers: list[dict[str, str]]) -> st
 
 
 def _current_receipt_ids(packet: dict[str, Any]) -> set[str]:
-    verification = packet.get("verification") if isinstance(packet.get("verification"), dict) else {}
-    plan_digest = verification.get("plan_digest")
-    diff = packet.get("diff") if isinstance(packet.get("diff"), dict) else {}
-    subject_digest = diff.get("subject_digest")
-    receipts = verification.get("receipts", [])
-    if not isinstance(receipts, list):
-        return set()
-    return {
-        str(receipt.get("check_id"))
-        for receipt in receipts if isinstance(receipt, dict)
-        and receipt.get("receipt_version") == "0.3"
-        and receipt.get("plan_digest") == plan_digest
-        and receipt.get("subject_digest") == subject_digest
-        and receipt.get("command_outcome") == "passed"
-        and receipt.get("integrity_status") == "stable"
-        and receipt.get("provenance") == "contributor_local"
-        and receipt.get("head_sha") == diff.get("head_sha")
-        and receipt.get("head_sha_before") == receipt.get("head_sha") == receipt.get("head_sha_after")
-        and receipt.get("worktree_clean_before") is True
-        and receipt.get("worktree_clean_after") is True
-        and isinstance(receipt.get("argv"), list) and bool(receipt.get("argv"))
-        and isinstance(receipt.get("cwd"), str) and bool(receipt.get("cwd"))
-    }
+    return {str(receipt["check_id"]) for receipt in current_verification_receipts(packet)}
 
 
 def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list[dict[str, str]]:

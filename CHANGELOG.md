@@ -2,6 +2,8 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Synchronize Diff and verification flow results from current receipts, preserve audit-only reruns, and invalidate downstream human evidence on material updates.
+
 - Record review escalation and exact verification plans through typed Packet operations, preserving hard stops and resetting affected evidence on material updates.
 - Bind existing Contract fields into the Packet and approve the embedded boundary with explicit human confirmation and CLI-computed hashes.
 - Add typed Packet policy/basis operations with shared atomic replacement, derived node results and downstream evidence invalidation.
