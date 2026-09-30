@@ -235,6 +235,8 @@ def record_review(packet: dict[str, Any], review: dict[str, Any]) -> dict[str, A
         incoming = review.get(key, [])
         if not isinstance(incoming, list) or not all(isinstance(item, (str, dict)) for item in incoming):
             raise ValueError(f"review.{key} must be a list of existing risk records")
+        if key not in current and not incoming:
+            continue
         current.setdefault(key, [])
         if not isinstance(current[key], list):
             raise ValueError(f"packet.review.{key} must be a list")
@@ -242,7 +244,7 @@ def record_review(packet: dict[str, Any], review: dict[str, Any]) -> dict[str, A
             if item not in current[key]:
                 current[key].append(deepcopy(item))
     current["profile"] = max((current["profile"], profile), key=ranks.__getitem__)
-    if current["signals"] and current["profile"] == "standard":
+    if current.get("signals") and current["profile"] == "standard":
         current["profile"] = "heightened"
     return updated
 
