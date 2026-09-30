@@ -120,3 +120,13 @@ stable subject, claim, pending lifecycle and recorded publication inputs, but ca
 prove that unrecorded original evidence/authority fields were unchanged or recover
 original trailing Body whitespace. These local records are unsigned implementation
 state, so preserve and inspect the original artifact during recovery.
+
+An uncertain object creation may be retried only after manual remote inspection,
+with the original create inputs, original operation-ID confirmation and explicit
+`--retry-uncertain` on `remote create` or `signal publish create`. This opts into
+residual duplicate risk if a prior write is still invisible. It requires an existing
+valid pending record with no known object, normal current readiness/input checks,
+live immutable repository identity and a fresh complete zero-match search. One
+appearing match is reconciled; multiple or incomplete matches stop. Write-ahead
+state precedes exactly one create attempt. A created/linked PR or uncertain Issue
+note must use reconcile instead. Another failure preserves recoverable state.

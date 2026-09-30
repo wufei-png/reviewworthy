@@ -83,3 +83,42 @@ def record_inspection(path: Path, record: dict[str, Any], inspection: dict[str, 
         updated["known_remote"] = inspection["remote"]
     updated["inspection"] = {**inspection, "recorded_at": utc_now()}
     _write_operation_record(path, updated, "Could not persist remote inspection; preserve the known URL and reconcile again")
+
+
+def load_creation_receipt(
+    path: Path, operation: RemoteOperation, *, retry_uncertain: bool,
+    signal_recovery: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Allow an explicit retry only for the same unresolved object creation."""
+
+    from .github import load_operation_receipt, load_operation_state
+
+    if not retry_uncertain:
+        return load_operation_receipt(path, operation)
+    if not path.is_file():
+        raise GhError("--retry-uncertain requires an existing valid pending operation; inspect remote state manually first")
+    stored, record = load_operation_state(path)
+    if stored != operation or record["status"] != "pending" or record.get("known_remote"):
+        raise GhError("--retry-uncertain requires the same pending object creation with no known URL; use reconcile for created objects or Issue note failures")
+    if record.get("signal_recovery") is not None and record["signal_recovery"] != signal_recovery:
+        raise GhError("Signal retry input or target differs from the original publication; reconcile instead")
+    return None
+
+
+def find_creation_matches(
+    client: GhClient, operation: RemoteOperation, path: Path, *, retry_uncertain: bool,
+) -> list[dict[str, Any]]:
+    """Require a fresh complete zero-match inspection before an opt-in retry."""
+
+    from .github import load_operation_state
+
+    if not retry_uncertain:
+        return client.find_existing(operation)
+    _, record = load_operation_state(path)
+    result = inspect_operation(client, operation, record)
+    record_inspection(path, record, result)
+    if result["outcome"] == "already_exists":
+        return [{"url": result["remote"]}]
+    if result.get("matches") == [] and {item["code"] for item in result["diagnostics"]} == {"remote_marker_not_found"}:
+        return []
+    raise GhError(f"Uncertain retry inspection is incomplete or ambiguous; reconcile {path}: {result}")

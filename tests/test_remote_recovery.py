@@ -218,3 +218,97 @@ class SignalRecoveryTests(unittest.TestCase):
             client.read_operation_object.return_value = {"title": operation.title, "body": operation.body}
             with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
                 self.assertEqual(main(args), 0)
+
+
+class UncertainRetryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.packet = valid_packet()
+        self.packet_path = self.root / "packet.json"
+        self.packet_path.write_text(json.dumps(self.packet))
+        self.body = self.root / "body.md"
+        self.body.write_text(self.packet["narrative"]["body"])
+        self.operation = build_operation(self.packet, "example/project", "issue", self.packet["narrative"]["title"], self.body.read_text(), "main")
+        self.state = self.root / "local/v0.3/operations" / (self.operation.operation_id + ".json")
+        self.args = ["remote", "create", "--packet", str(self.packet_path), "--repo", "example/project", "--kind", "issue", "--title", self.operation.title, "--body-file", str(self.body), "--confirm-operation-id", self.operation.operation_id, "--json"]
+        self.url = "https://github.com/example/project/issues/7"
+        self.client = MagicMock(spec=GhClient)
+        self.client.find_existing.return_value = []
+        self.client.create.return_value = self.url
+        self.client.read_operation_object.return_value = {"title": self.operation.title, "body": self.operation.body}
+
+    def run_cli(self, retry: bool = True) -> tuple[int, dict]:
+        output = io.StringIO()
+        with patch("reviewworthy.cli.GhClient", return_value=self.client), redirect_stdout(output):
+            code = main(self.args + (["--retry-uncertain"] if retry else []))
+        return code, json.loads(output.getvalue())
+
+    def test_retry_requires_valid_pending_state_and_default_still_refuses(self) -> None:
+        self.assertEqual(self.run_cli()[0], 2)
+        save_operation_pending(self.state, self.operation)
+        self.assertEqual(self.run_cli(False)[0], 2)
+        self.client.create.assert_not_called()
+        code, result = self.run_cli()
+        self.assertEqual(code, 0)
+        self.assertIn("residual duplicate risk", result["retry_warning"])
+        self.client.create.assert_called_once_with(self.operation)
+        self.assertEqual(self.run_cli()[0], 2)
+        self.assertEqual(self.client.create.call_count, 1)
+
+    def test_appearing_match_is_reconciled_and_multiple_matches_block(self) -> None:
+        save_operation_pending(self.state, self.operation)
+        self.client.find_existing.return_value = [{"url": self.url}]
+        self.assertEqual(self.run_cli()[0], 0)
+        self.client.create.assert_not_called()
+        save_operation_pending(self.state, self.operation)
+        self.client.find_existing.return_value = [{"url": self.url}, {"url": self.url.replace("7", "8")}]
+        self.assertEqual(self.run_cli()[0], 2)
+        self.client.create.assert_not_called()
+
+    def test_another_uncertain_write_preserves_pending_and_known_or_invalid_state_never_retries(self) -> None:
+        save_operation_pending(self.state, self.operation)
+        self.client.create.side_effect = GhError("network result uncertain")
+        self.assertEqual(self.run_cli()[0], 2)
+        self.assertEqual(json.loads(self.state.read_text())["status"], "pending")
+        self.assertEqual(self.client.create.call_count, 1)
+        record = json.loads(self.state.read_text())
+        record["known_remote"] = self.url
+        self.state.write_text(json.dumps(record))
+        self.assertEqual(self.run_cli()[0], 2)
+        record["known_remote"] = "bad-url"
+        self.state.write_text(json.dumps(record))
+        self.assertEqual(self.run_cli()[0], 2)
+        self.assertEqual(self.client.create.call_count, 1)
+
+    def test_current_readiness_and_confirmation_cannot_be_bypassed(self) -> None:
+        save_operation_pending(self.state, self.operation)
+        self.args[self.args.index("--confirm-operation-id") + 1] = "wrong"
+        self.assertEqual(self.run_cli()[0], 2)
+        self.client.create.assert_not_called()
+        self.args[self.args.index("--confirm-operation-id") + 1] = self.operation.operation_id
+        self.packet["contract"]["approval"]["status"] = "pending"
+        self.packet_path.write_text(json.dumps(self.packet))
+        self.assertEqual(self.run_cli()[0], 1)
+        self.client.create.assert_not_called()
+
+    def test_signal_retry_preserves_original_inputs_and_attempts_only_once(self) -> None:
+        from reviewworthy.github import build_signal_operation
+        from reviewworthy.signal import skeleton_signal
+        signal = skeleton_signal()
+        source = self.root / "signal.json"
+        source.write_text(json.dumps(signal))
+        self.operation = build_signal_operation(signal, "example/project", "Bug", "Body", 101)
+        self.body.write_text("Body")
+        self.state = self.root / "local/v0.3/operations" / (self.operation.operation_id + ".json")
+        recovery = {"target": str(source.resolve()), "input": signal, "body": "Body"}
+        save_operation_pending(self.state, self.operation, signal_recovery=recovery)
+        self.args = ["signal", "publish", "create", str(source), "--repo", "example/project", "--repository-id", "101", "--title", "Bug", "--body-file", str(self.body), "--confirm-operation-id", self.operation.operation_id, "--json"]
+        edited = {**signal, "evidence": ["edited"]}
+        source.write_text(json.dumps(edited))
+        self.assertEqual(self.run_cli()[0], 2)
+        self.client.create.assert_not_called()
+        source.write_text(json.dumps(signal))
+        self.assertEqual(self.run_cli()[0], 0)
+        self.client.create.assert_called_once_with(self.operation)

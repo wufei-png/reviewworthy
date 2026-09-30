@@ -47,7 +47,7 @@ from .packet import (
 )
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
-from .remote import inspect_operation, record_inspection
+from .remote import find_creation_matches, inspect_operation, load_creation_receipt, record_inspection
 from .risk import assess_manifest
 from .signal import (
     SIGNAL_AUTHORITY_KINDS,
@@ -205,6 +205,7 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--force", action="store_true")
         if name == "create":
             command.add_argument("--confirm-operation-id", required=True)
+            command.add_argument("--retry-uncertain", action="store_true", help="After manual inspection, accept residual duplicate risk and retry one pending create")
         _common_json(command)
 
     signal_reconcile = signal_publish_commands.add_parser("reconcile", help="Recover a saved Signal publication")
@@ -350,6 +351,7 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--root", type=Path, default=Path("."), help="Git worktree used to resolve base/head SHAs")
         if name == "create":
             command.add_argument("--confirm-operation-id", required=True)
+            command.add_argument("--retry-uncertain", action="store_true", help="After manual inspection, accept residual duplicate risk and retry one pending create")
         _common_json(command)
     reconcile = remote_commands.add_parser("reconcile", help="Inspect and repair one saved current operation")
     reconcile.add_argument("--state", type=Path, required=True)
@@ -844,15 +846,17 @@ def main(argv: list[str] | None = None) -> int:
             receipt_path = operation_receipt_path(target, operation.operation_id)
             payload["receipt_path"] = str(receipt_path)
             recovery = {"target": str(target.resolve()), "input": signal_value, "body": body}
+            if args.retry_uncertain:
+                payload["retry_warning"] = "Manual inspection and opt-in retry accept residual duplicate risk; only one create is attempted."
             with operation_lock(receipt_path):
-                receipt = load_operation_receipt(receipt_path, operation)
+                receipt = load_creation_receipt(receipt_path, operation, retry_uncertain=args.retry_uncertain, signal_recovery=recovery)
                 if receipt:
                     remote = _canonical_remote_url(receipt["remote"], "issue", operation.repo)
                     payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
                 else:
                     client = GhClient()
                     client.verify_repository_identity(operation.repo, operation.repository_id)
-                    existing = client.find_existing(operation)
+                    existing = find_creation_matches(client, operation, receipt_path, retry_uncertain=args.retry_uncertain)
                     if existing:
                         remote = _canonical_remote_url(
                             existing[0].get("url") or existing[0].get("html_url"),
@@ -1098,8 +1102,10 @@ def main(argv: list[str] | None = None) -> int:
 
             receipt_path = operation_receipt_path(args.packet, operation.operation_id)
             payload["receipt_path"] = str(receipt_path)
+            if args.retry_uncertain:
+                payload["retry_warning"] = "Manual inspection and opt-in retry accept residual duplicate risk; only one create is attempted."
             with operation_lock(receipt_path):
-                receipt = load_operation_receipt(receipt_path, operation)
+                receipt = load_creation_receipt(receipt_path, operation, retry_uncertain=args.retry_uncertain)
                 if operation.kind == "pull_request":
                     if receipt:
                         status = receipt["status"]
@@ -1120,7 +1126,7 @@ def main(argv: list[str] | None = None) -> int:
                             payload["readiness_blockers"] = live_errors
                             _print(payload, args.as_json)
                             return 1
-                    existing = client.find_existing(operation)
+                    existing = find_creation_matches(client, operation, receipt_path, retry_uncertain=args.retry_uncertain)
                     if existing:
                         pr_url = _canonical_remote_url(existing[0].get("url") or existing[0].get("html_url"), "pull_request", operation.repo)
                         source = "remote_reconciliation"
@@ -1159,7 +1165,7 @@ def main(argv: list[str] | None = None) -> int:
                     else:
                         client = GhClient()
                         client.verify_repository_identity(operation.repo, operation.repository_id)
-                        existing = client.find_existing(operation)
+                        existing = find_creation_matches(client, operation, receipt_path, retry_uncertain=args.retry_uncertain)
                         if existing:
                             remote = _canonical_remote_url(
                                 existing[0].get("url") or existing[0].get("html_url"),
