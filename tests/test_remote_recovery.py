@@ -13,7 +13,7 @@ from reviewworthy.github import (
     GhClient, GhError, build_operation, save_operation_pending,
     save_operation_receipt, save_operation_pr_created,
 )
-from helpers import valid_packet
+from helpers import configure_created_object, valid_packet
 
 
 class RemoteRecoveryTests(unittest.TestCase):
@@ -219,6 +219,25 @@ class SignalRecoveryTests(unittest.TestCase):
             with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
                 self.assertEqual(main(args), 0)
 
+    def test_missing_original_signal_output_is_restored_from_saved_input(self) -> None:
+        from reviewworthy.github import build_signal_operation
+        from reviewworthy.signal import skeleton_signal
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "published.json"
+            signal = skeleton_signal()
+            operation = build_signal_operation(signal, "example/project", "Bug", "Body", 101)
+            state = root / "state.json"
+            recovery = {"target": str(target.resolve()), "input": signal, "body": "Body"}
+            save_operation_pending(state, operation, signal_recovery=recovery)
+            client = MagicMock(spec=GhClient)
+            client.find_existing.return_value = [{"url": "https://github.com/example/project/issues/9"}]
+            client.read_operation_object.return_value = {"title": operation.title, "body": operation.body}
+            with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["signal", "publish", "reconcile", str(target), "--state", str(state), "--json"]), 0)
+            self.assertEqual(json.loads(target.read_text())["reference"], "https://github.com/example/project/issues/9")
+            client.create.assert_not_called()
+
 
 class UncertainRetryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -237,7 +256,7 @@ class UncertainRetryTests(unittest.TestCase):
         self.client = MagicMock(spec=GhClient)
         self.client.find_existing.return_value = []
         self.client.create.return_value = self.url
-        self.client.read_operation_object.return_value = {"title": self.operation.title, "body": self.operation.body}
+        configure_created_object(self.client)
 
     def run_cli(self, retry: bool = True) -> tuple[int, dict]:
         output = io.StringIO()
@@ -259,6 +278,7 @@ class UncertainRetryTests(unittest.TestCase):
 
     def test_appearing_match_is_reconciled_and_multiple_matches_block(self) -> None:
         save_operation_pending(self.state, self.operation)
+        self.client.find_existing.side_effect = None
         self.client.find_existing.return_value = [{"url": self.url}]
         self.assertEqual(self.run_cli()[0], 0)
         self.client.create.assert_not_called()
@@ -312,3 +332,79 @@ class UncertainRetryTests(unittest.TestCase):
         source.write_text(json.dumps(signal))
         self.assertEqual(self.run_cli()[0], 0)
         self.client.create.assert_called_once_with(self.operation)
+
+    def test_post_create_zero_and_unavailable_lists_keep_known_success_for_historical_retry(self) -> None:
+        for post_result in ([], GhError("list unavailable")):
+            with self.subTest(post_result=post_result):
+                self.state.unlink(missing_ok=True)
+                save_operation_pending(self.state, self.operation)
+                self.client.create.reset_mock()
+                self.client.find_existing.side_effect = [[], post_result]
+                code, result = self.run_cli()
+                self.assertEqual(code, 1)
+                self.assertEqual(result["remote"], self.url)
+                self.assertEqual(result["inspection"]["outcome"], "needs_reconciliation")
+                record = json.loads(self.state.read_text())
+                self.assertEqual(record["status"], "succeeded")
+                self.assertEqual(record["known_remote"], self.url)
+                code, historical = self.run_cli(False)
+                self.assertEqual(code, 0)
+                self.assertEqual(historical["source"], "local_receipt")
+                self.assertEqual(self.client.create.call_count, 1)
+
+    def test_post_create_duplicate_race_reports_all_urls_and_never_creates_again(self) -> None:
+        save_operation_pending(self.state, self.operation)
+        duplicate = self.url.replace("7", "8")
+        self.client.find_existing.side_effect = [[], [{"url": self.url}, {"url": duplicate}]]
+        code, result = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(result["inspection"]["matches"], [self.url, duplicate])
+        self.assertEqual(self.client.find_existing.call_count, 2)
+        self.assertEqual(self.client.create.call_count, 1)
+        self.client.add_issue_note.assert_not_called()
+        self.assertEqual(json.loads(self.state.read_text())["remote"], self.url)
+
+    def test_post_create_receipt_failure_preserves_known_url_for_recovery(self) -> None:
+        save_operation_pending(self.state, self.operation)
+        with patch("reviewworthy.cli.save_operation_receipt", side_effect=GhError("disk unavailable")):
+            self.assertEqual(self.run_cli()[0], 2)
+        record = json.loads(self.state.read_text())
+        self.assertEqual(record["status"], "pending")
+        self.assertEqual(record["known_remote"], self.url)
+        self.client.find_existing.side_effect = None
+        self.client.find_existing.return_value = []
+        with patch("reviewworthy.cli.GhClient", return_value=self.client), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["remote", "reconcile", "--state", str(self.state), "--json"]), 0)
+        self.assertEqual(self.client.create.call_count, 1)
+
+    def test_post_create_pr_duplicate_or_drift_prevents_issue_note(self) -> None:
+        for mode in ("duplicates", "head", "body", "list"):
+            with self.subTest(mode=mode):
+                operation = build_operation(self.packet, "example/project", "pull_request", self.packet["narrative"]["title"], self.body.read_text(), "main", "fix", self.packet["diff"])
+                state = self.root / "local/v0.3/operations" / (operation.operation_id + ".json")
+                state.unlink(missing_ok=True)
+                save_operation_pending(state, operation)
+                client = MagicMock(spec=GhClient)
+                url = "https://github.com/example/project/pull/8"
+                client.create.return_value = url
+                configure_created_object(client)
+                if mode == "duplicates":
+                    client.find_existing.side_effect = [[], [{"url": url}, {"url": url.replace("8", "9")}]]
+                elif mode == "list":
+                    client.find_existing.side_effect = [[], GhError("offline")]
+                else:
+                    live = {"title": operation.title, "body": operation.body, "head": {"sha": operation.head_sha}, "base": {"ref": operation.base}, "draft": operation.draft}
+                    if mode == "head":
+                        live["head"]["sha"] = "moved"
+                    else:
+                        live["body"] = "edited"
+                    client.read_operation_object.side_effect = None
+                    client.read_operation_object.return_value = live
+                    client.find_existing.return_value = []
+                client.verify_public_reference.return_value = self.packet["basis"]["verification"] | {"verified": True}
+                args = ["remote", "create", "--packet", str(self.packet_path), "--repo", "example/project", "--kind", "pull_request", "--title", operation.title, "--body-file", str(self.body), "--head", "fix", "--confirm-operation-id", operation.operation_id, "--retry-uncertain", "--json"]
+                with patch("reviewworthy.cli.capture_pr_diff", return_value=self.packet["diff"]), patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(args), 1)
+                self.assertEqual(json.loads(state.read_text())["status"], "needs_reconciliation")
+                client.add_issue_note.assert_not_called()
+                self.assertEqual(client.create.call_count, 1)

@@ -19,7 +19,7 @@ from reviewworthy.github import GhError
 from reviewworthy.packet import semantic_snapshot, readiness_blockers, skeleton_packet, validate_packet
 from reviewworthy.signal import skeleton_signal, validate_signal
 
-from helpers import valid_packet
+from helpers import configure_created_object, valid_packet
 
 
 class CliBoundaryTests(unittest.TestCase):
@@ -188,6 +188,7 @@ class CliBoundaryTests(unittest.TestCase):
             fake_client = unittest.mock.MagicMock()
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/issues/9"
+            configure_created_object(fake_client)
             with patch("reviewworthy.cli.GhClient", return_value=fake_client):
                 with redirect_stdout(io.StringIO()):
                     first_code = main(create_args)
@@ -239,6 +240,7 @@ class CliBoundaryTests(unittest.TestCase):
             fake_client = unittest.mock.MagicMock()
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/pull/9"
+            configure_created_object(fake_client)
             output = io.StringIO()
 
             with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
@@ -1003,6 +1005,7 @@ class CliBoundaryTests(unittest.TestCase):
             fake_client = unittest.mock.MagicMock()
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/issues/7"
+            configure_created_object(fake_client)
 
             with patch("reviewworthy.cli.GhClient", return_value=fake_client):
                 with redirect_stdout(io.StringIO()):
@@ -1033,6 +1036,7 @@ class CliBoundaryTests(unittest.TestCase):
             fake_client = unittest.mock.MagicMock()
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/other/project/issues/7"
+            configure_created_object(fake_client)
             output = io.StringIO()
 
             with patch("reviewworthy.cli.GhClient", return_value=fake_client), redirect_stdout(output):
@@ -1093,6 +1097,7 @@ class CliBoundaryTests(unittest.TestCase):
             fake_client = unittest.mock.MagicMock()
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/issues/7"
+            configure_created_object(fake_client)
 
             with patch("reviewworthy.cli.GhClient", return_value=fake_client), patch(
                 "reviewworthy.cli.save_operation_receipt", side_effect=GhError("receipt failure")
@@ -1159,6 +1164,7 @@ class CliBoundaryTests(unittest.TestCase):
             }
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/pull/8"
+            configure_created_object(fake_client)
             fake_client.pull_request_head.return_value = actual_diff["head_sha"]
             fake_client.find_issue_link_note.return_value = []
             fake_client.issue_commentability.return_value = {"commentable": True}
@@ -1238,6 +1244,7 @@ class CliBoundaryTests(unittest.TestCase):
                     else []
                 )
                 fake_client.create.return_value = "https://github.com/example/project/pull/10"
+                configure_created_object(fake_client)
                 fake_client.find_issue_link_note.return_value = []
                 fake_client.issue_commentability.return_value = {"commentable": True}
                 if remote_mode == "unavailable":
@@ -1371,6 +1378,7 @@ class CliBoundaryTests(unittest.TestCase):
             }
             fake_client.find_existing.return_value = []
             fake_client.create.return_value = "https://github.com/example/project/pull/9"
+            configure_created_object(fake_client)
             fake_client.pull_request_head.return_value = actual_diff["head_sha"]
             fake_client.find_issue_link_note.side_effect = GhError("Issue comments unavailable")
             create_args = ["remote", "create", *common, "--confirm-operation-id", operation_id, "--json"]

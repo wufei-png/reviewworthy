@@ -411,12 +411,19 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
         invalid("status")
     if "reason" in record and not isinstance(record["reason"], str):
         invalid("reason")
+    for key in ("pr_url", "remote", "issue_url", "known_remote"):
+        if key in record and not isinstance(record[key], str):
+            invalid(key)
     remote = record.get("pr_url") if kind == "pull_request" else record.get("remote")
+    if record.get("remote") and kind == "pull_request":
+        invalid("PR remote field")
+    if record.get("pr_url") and kind == "issue":
+        invalid("Issue pr_url field")
     if status != "pending" or remote:
         if _canonical_operation_remote(operation, remote) != remote:
             invalid("remote URL")
     if record.get("known_remote") is not None:
-        if _canonical_operation_remote(operation, record["known_remote"]) != record["known_remote"]:
+        if _canonical_operation_remote(operation, record["known_remote"]) != record["known_remote"] or (remote and remote != record["known_remote"]):
             invalid("known_remote")
     if status == "pending" and (remote or record.get("reason")):
         invalid("pending object already known")
@@ -439,8 +446,14 @@ def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, 
 
 def _write_operation_record(path: Path, record: dict[str, Any], failure_message: str) -> None:
     try:
+        if path.is_file():
+            previous = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(previous, dict) and previous.get("state_version") == OPERATION_STATE_VERSION and previous.get("operation") == record.get("operation"):
+                for key in ("signal_recovery", "known_remote", "inspection"):
+                    if key in previous:
+                        record.setdefault(key, previous[key])
         atomic_write_json(path, record, sort_keys=False)
-    except OSError as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise GhError(f"{failure_message}: {path}: {exc}") from exc
 
 
@@ -568,7 +581,9 @@ class GhClient:
                 raise GhError("gh issue response page was not a list")
             for item in page:
                 if not isinstance(item, dict):
-                    continue
+                    raise GhError("GitHub marker search included a malformed object")
+                if item.get("body") is not None and not isinstance(item["body"], str):
+                    raise GhError("GitHub marker search included a malformed Body")
                 is_pr = "pull_request" in item
                 if operation.kind == "pull_request" and not is_pr:
                     continue

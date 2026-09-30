@@ -13,7 +13,7 @@ from .util import utc_now
 
 
 def inspect_operation(
-    client: GhClient, operation: RemoteOperation, record: dict[str, Any],
+    client: GhClient, operation: RemoteOperation, record: dict[str, Any], *, verify_identity: bool = True,
 ) -> dict[str, Any]:
     """Check immutable repository identity, a known object, and marker ambiguity."""
 
@@ -22,7 +22,8 @@ def inspect_operation(
     def diagnostic(code: str, message: str) -> None:
         result["diagnostics"].append({"code": code, "message": message, "path": "operation"})
 
-    client.verify_repository_identity(operation.repo, operation.repository_id)
+    if verify_identity:
+        client.verify_repository_identity(operation.repo, operation.repository_id)
     remote = record.get("pr_url") or record.get("remote") or record.get("known_remote")
     live = None
     if remote:
@@ -82,7 +83,7 @@ def record_inspection(path: Path, record: dict[str, Any], inspection: dict[str, 
     if inspection.get("remote"):
         updated["known_remote"] = inspection["remote"]
     updated["inspection"] = {**inspection, "recorded_at": utc_now()}
-    _write_operation_record(path, updated, "Could not persist remote inspection; preserve the known URL and reconcile again")
+    _write_operation_record(path, updated, f"Could not persist remote inspection; preserve known URL {inspection.get('remote', 'unknown')} and reconcile again")
 
 
 def load_creation_receipt(
@@ -122,3 +123,21 @@ def find_creation_matches(
     if result.get("matches") == [] and {item["code"] for item in result["diagnostics"]} == {"remote_marker_not_found"}:
         return []
     raise GhError(f"Uncertain retry inspection is incomplete or ambiguous; reconcile {path}: {result}")
+
+
+def inspect_created_operation(
+    client: GhClient, operation: RemoteOperation, path: Path, remote: str,
+) -> dict[str, Any]:
+    """Preserve a canonical create response and inspect it without polling."""
+
+    from .github import load_operation_state
+
+    _, record = load_operation_state(path)
+    record_inspection(path, record, {"outcome": "needs_reconciliation", "remote": remote, "diagnostics": []})
+    record = {**record, "known_remote": remote}
+    result = inspect_operation(client, operation, record, verify_identity=False)
+    if result.get("matches") == []:
+        result["diagnostics"].append({"code": "post_create_marker_not_visible", "message": "The known create succeeded but its marker is not list-visible yet; reconcile later without another create.", "path": "operation"})
+        result["outcome"] = "needs_reconciliation"
+    record_inspection(path, record, result)
+    return result

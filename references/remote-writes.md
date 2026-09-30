@@ -130,3 +130,14 @@ live immutable repository identity and a fresh complete zero-match search. One
 appearing match is reconciled; multiple or incomplete matches stop. Write-ahead
 state precedes exactly one create attempt. A created/linked PR or uncertain Issue
 note must use reconcile instead. Another failure preserves recoverable state.
+
+After a canonical create response, Reviewworthy saves the known URL, reads that
+object directly, and performs one bounded marker search. Visible duplicates include
+all canonical URLs in diagnostics. A delayed zero-match list, unavailable list, or
+unreadable/changed object retains the known result and reports `needs_reconciliation`;
+it never authorizes another create. A PR waits for complete inspection before its
+Issue note. Issue and Signal receipts retain the successful canonical create and
+its inspection evidence; immediate ordinary create retry can still return the
+historical `already_exists` result. Run reconcile for a current remote check.
+Detection covers visible provider records and is not globally exactly-once or an
+assurance that every concurrent write is instantly visible. There is no polling.

@@ -160,3 +160,17 @@ def valid_packet() -> dict:
     packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
     packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
     return packet
+
+
+def configure_created_object(client) -> None:
+    """Make an injected provider expose its successful canonical create once."""
+
+    client.read_operation_object.side_effect = lambda operation, url: {
+        "html_url": url, "title": operation.title, "body": operation.body,
+        "head": {"sha": operation.head_sha}, "base": {"ref": operation.base},
+        "draft": operation.draft,
+    }
+    client.find_existing.side_effect = lambda operation: (
+        client.find_existing.return_value if client.create.call_count == 0
+        else [{"url": client.create.return_value}]
+    )

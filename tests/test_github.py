@@ -66,6 +66,37 @@ class GitHubOperationTests(unittest.TestCase):
             with self.assertRaisesRegex(GhError, "unreadable"):
                 load_operation_state(path)
 
+    def test_known_object_read_uses_direct_canonical_endpoint_and_rejects_kind_drift(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix", "Body")
+        url = "https://github.com/example/project/issues/7"
+        calls = []
+        record = {"html_url": url, "title": operation.title, "body": operation.body}
+
+        def runner(argv, **kwargs):
+            calls.append(argv)
+            return CompletedProcess(argv, 0, json.dumps(record), "")
+
+        client = GhClient(runner)
+        self.assertEqual(client.read_operation_object(operation, url)["body"], operation.body)
+        self.assertEqual(calls[0], ["gh", "api", "repos/example/project/issues/7", "--method", "GET"])
+        record["pull_request"] = {}
+        with self.assertRaisesRegex(GhError, "pull request"):
+            client.read_operation_object(operation, url)
+
+    def test_marker_ambiguity_reports_urls_and_malformed_search_cannot_prove_zero_matches(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix", "Body")
+        records = [{"html_url": f"https://github.com/example/project/issues/{number}", "body": operation.marker} for number in (7, 8)]
+
+        def runner(argv, **kwargs):
+            return CompletedProcess(argv, 0, json.dumps(records), "")
+
+        client = GhClient(runner)
+        with self.assertRaisesRegex(GhError, "issues/7.*issues/8"):
+            client.find_existing(operation)
+        records[:] = [42]
+        with self.assertRaisesRegex(GhError, "malformed"):
+            client.find_existing(operation)
+
     def test_operation_marker_and_id_are_stable_for_same_rendered_request(self) -> None:
         packet = valid_packet()
         body = "Body\n\nhttps://github.com/example/project/issues/1"

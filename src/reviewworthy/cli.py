@@ -22,7 +22,6 @@ from .github import (
     GhError,
     build_operation,
     build_signal_operation,
-    load_operation_receipt,
     load_operation_state,
     operation_lock,
     operation_receipt_path,
@@ -47,7 +46,7 @@ from .packet import (
 )
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
-from .remote import find_creation_matches, inspect_operation, load_creation_receipt, record_inspection
+from .remote import find_creation_matches, inspect_created_operation, inspect_operation, load_creation_receipt, record_inspection
 from .risk import assess_manifest
 from .signal import (
     SIGNAL_AUTHORITY_KINDS,
@@ -576,7 +575,7 @@ def _reconcile_signal_publication(args: argparse.Namespace) -> int:
         subject = current.get("publication_subject_id") or f"{current.get('record_type')}:{current.get('claim_type')}:{current.get('reference')}"
         if subject != operation.subject_id or current.get("record_type") != "issue":
             raise ValueError("Signal subject differs from the original publication")
-        if current.get("lifecycle") != "pending" or not operation.subject_id.startswith(f"issue:{current.get('claim_type')}:"):
+        if current.get("lifecycle") != "pending" or (operation.subject_id.startswith("issue:") and not operation.subject_id.startswith(f"issue:{current.get('claim_type')}:")):
             raise ValueError("Signal lifecycle or claim differs from the original pending publication")
         expected = dict(original)
         remote = record.get("remote") or record.get("known_remote")
@@ -868,6 +867,7 @@ def main(argv: list[str] | None = None) -> int:
                     else:
                         save_operation_pending(receipt_path, operation, signal_recovery=recovery)
                         remote = _canonical_remote_url(client.create(operation), "issue", operation.repo)
+                        payload["inspection"] = inspect_created_operation(client, operation, receipt_path, remote)
                         save_operation_receipt(receipt_path, operation, remote, signal_recovery=recovery)
                         payload.update({"outcome": "created", "remote": remote})
             updated_signal = dict(signal_value)
@@ -876,8 +876,10 @@ def main(argv: list[str] | None = None) -> int:
             updated_signal["publication"] = {"operation_id": operation.operation_id, "repo": operation.repo, "title": args.title, "body": body}
             _replace_json(target, updated_signal)
             payload.update({"signal": str(target), "published": True})
+            if payload.get("inspection", {}).get("outcome") == "needs_reconciliation":
+                payload["outcome"] = "needs_reconciliation"
             _print(payload, args.as_json)
-            return 0
+            return 1 if payload["outcome"] == "needs_reconciliation" else 0
 
         if args.command == "packet":
             if args.packet_command == "init":
@@ -1134,7 +1136,15 @@ def main(argv: list[str] | None = None) -> int:
                         save_operation_pending(receipt_path, operation)
                         pr_url = _canonical_remote_url(client.create(operation), "pull_request", operation.repo)
                         source = "created"
+                        payload["inspection"] = inspect_created_operation(client, operation, receipt_path, pr_url)
                     save_operation_pr_created(receipt_path, operation, pr_url)
+                    inspection = payload.get("inspection")
+                    if inspection and inspection["outcome"] != "already_exists":
+                        reason = ", ".join(item["code"] for item in inspection["diagnostics"])
+                        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
+                        payload.update({"outcome": "needs_reconciliation", "source": source, "pr_url": pr_url, "status": "needs_reconciliation", "reason": reason})
+                        _print(payload, args.as_json)
+                        return 1
                     reason, remote_head_sha = _remote_pr_head_reconciliation(client, operation, pr_url)
                     if reason:
                         save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
@@ -1177,10 +1187,13 @@ def main(argv: list[str] | None = None) -> int:
                         else:
                             save_operation_pending(receipt_path, operation)
                             remote = _canonical_remote_url(client.create(operation), "issue", operation.repo)
+                            payload["inspection"] = inspect_created_operation(client, operation, receipt_path, remote)
                             save_operation_receipt(receipt_path, operation, remote)
                             payload.update({"outcome": "created", "remote": remote})
+            if payload.get("inspection", {}).get("outcome") == "needs_reconciliation":
+                payload["outcome"] = "needs_reconciliation"
             _print(payload, args.as_json)
-            return 0
+            return 1 if payload["outcome"] == "needs_reconciliation" else 0
 
     except (OSError, ValueError, GhError, GitError, json.JSONDecodeError) as exc:
         error = {"error": str(exc)}

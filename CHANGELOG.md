@@ -2,6 +2,8 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Add saved-operation reconciliation for Issues, PR backlinks and Signal publication, explicit uncertain-creation retry, and bounded post-create duplicate inspection with preserved canonical results.
+
 - Break all artifact and operation compatibility with earlier Reviewworthy formats.
 - Keep the full Packet in ignored local state and publish a minimal versioned PR Body Evidence Summary.
 - Replace patch-text identity with a canonical Git content `subject_digest`; the Action recomputes runner-owned facts and labels local verification and ownership as contributor claims.

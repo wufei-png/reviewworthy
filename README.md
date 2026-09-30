@@ -106,6 +106,17 @@ Remote writes are opt-in and use a two-step local protocol:
 
 The operation ID is embedded in a hidden Body marker. Before creating an Issue or Pull Request, Reviewworthy searches for the marker. An uncertain network result must be reconciled before retrying; the tool never blindly creates a duplicate.
 
+Recover a saved current operation with `remote reconcile --state FILE --json`,
+independently of today's Packet, input files or Git refs. It checks the live object
+and repairs local state; an absent Issue note requires the original operation ID
+via `--confirm-operation-id`. Signal publication uses
+`signal publish reconcile SIGNAL_PATH --state FILE --json`. After manual inspection,
+`--retry-uncertain` on the original confirmed create permits one attempt only for a
+valid pending object creation and fresh zero-marker search, accepting residual
+duplicate risk. Each create preserves its canonical result and performs one bounded
+post-create inspection; incomplete visibility or visible duplicate URLs require
+reconciliation. See the [recovery guidance](./references/remote-writes.md).
+
 For Pull Requests, `remote plan/create` recomputes the contribution Diff from the selected base/head merge base. Packet `0.3` binds `comparison=merge_base`, `base_tip_sha`, `merge_base_sha`, `head_sha`, `subject_digest`, `fingerprint_algorithm`, changed files, additions, and deletions; every field must match before the operation is rendered or written. Version `0.3` does not read, recognize, migrate, or reconcile older Packet, Signal, receipt, pending-state, or marker formats.
 
 For a policy-required Draft PR, the draft state is included in the operation ID and passed to `gh pr create --draft`. A pending local operation record is persisted immediately before a create; if the create or receipt persistence is uncertain, later retries stop for reconciliation instead of issuing another create. Current receipts live only under ignored `local/v0.3/operations/` state and carry `state_version=0.3`; older pending or receipt paths are not inspected. Reviewworthy reads the actual remote PR head after create or remote reconciliation and again immediately before an Issue-note write; an unavailable or mismatched head becomes `remote_pr_head_unavailable` or `remote_pr_head_mismatch` and requires reconciliation. Multiple current marker matches stop for reconciliation. Issue-backed PRs contain the canonical Issue URL in the Body and add one exact PR URL note to that Issue; head uncertainty and note failures become `needs_reconciliation` without a second confirmation or another PR. Because GitHub exposes head reads and Issue comments as separate APIs, a head update concurrent with the comment POST remains a narrow provider race that receipts cannot make atomic.
