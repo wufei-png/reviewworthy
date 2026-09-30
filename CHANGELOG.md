@@ -2,6 +2,7 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Bound policy sources by count and bytes, reject unsupported modes/encodings, share local/base-tree claim rules, and propagate input failures into readiness and Action enforcement.
 - Narrow policy discovery to contributor documents and Issue/PR templates, support exact additional authoritative documents, and validate structured policy keys, values and accepted aliases.
 
 - Add saved-operation reconciliation for Issues, PR backlinks and Signal publication, explicit uncertain-creation retry, and bounded post-create duplicate inspection with preserved canonical results.

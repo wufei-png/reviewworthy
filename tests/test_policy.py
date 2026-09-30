@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from reviewworthy.brief import build_project_brief
-from reviewworthy.policy import inspect_policy
+from reviewworthy.policy import MAX_POLICY_SOURCE_BYTES, PolicyTreeError, inspect_policy, inspect_policy_at_commit
+from reviewworthy.util import CommandOutputLimitError
 
 
 class PolicyInspectionTests(unittest.TestCase):
@@ -465,3 +468,178 @@ class PolicyInspectionTests(unittest.TestCase):
                 self.assertEqual(result["diagnostics"], [])
                 for key, value in expected.items():
                     self.assertEqual(result["authoritative_claims"][key], value)
+
+    def _commit_and_compare(self, root: Path) -> dict:
+        def git(*args: str) -> str:
+            return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+        git("init", "-q")
+        git("config", "user.email", "test@example.invalid")
+        git("config", "user.name", "Reviewworthy Test")
+        git("add", ".")
+        git("commit", "--allow-empty", "-qm", "policy inputs")
+        local = inspect_policy(root)
+        tree = inspect_policy_at_commit(root, git("rev-parse", "HEAD"))
+        tree.pop("base_sha")
+        self.assertEqual(local, tree)
+        return local
+
+    def test_local_and_tree_share_explicit_claims_provenance_and_conflicts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            (root / "docs").mkdir()
+            (root / "docs/contributing\t规则\n.md").write_text("AI assistance is prohibited.\n", encoding="utf-8")
+            (root / "docs/tutorial.md").write_text("An issue is not required.\n", encoding="utf-8")
+            (root / ".github/ISSUE_TEMPLATE").mkdir(parents=True)
+            (root / ".github/ISSUE_TEMPLATE/bug.yml").write_text("An issue is required.\n", encoding="utf-8")
+            (root / ".reviewworthy").mkdir()
+            (root / ".reviewworthy/policy.toml").write_text('[discovery]\nauthoritative_documents = ["docs/contributing\\t规则\\n.md"]\n[ai]\nallowed = true\n', encoding="utf-8")
+            result = self._commit_and_compare(root)
+            self.assertEqual(result["result"], "blocked")
+            self.assertIn("policy_conflict", {stop["code"] for stop in result["hard_stops"]})
+
+    def test_malformed_sources_have_same_local_and_tree_diagnostics(self) -> None:
+        cases = ("missing", "non_utf8", "nul", "symlink", "parent_symlink", "directory", "config_symlink", "template_symlink", "unknown", "invalid_toml")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+                (root / ".reviewworthy").mkdir()
+                config = root / ".reviewworthy/policy.toml"
+                config.write_text('[ai]\nallowed = true\n[discovery]\nauthoritative_documents = ["policy.txt"]\n', encoding="utf-8")
+                if case == "non_utf8":
+                    (root / "policy.txt").write_bytes(b"\xff")
+                elif case == "nul":
+                    (root / "policy.txt").write_bytes(b"AI allowed\0")
+                elif case == "symlink":
+                    (root / "policy.txt").symlink_to("README.md")
+                elif case == "parent_symlink":
+                    (root / "docs").symlink_to(".", target_is_directory=True)
+                    config.write_text('[discovery]\nauthoritative_documents = ["docs/README.md"]\n', encoding="utf-8")
+                elif case == "directory":
+                    (root / "policy.txt").mkdir()
+                    (root / "policy.txt/keep").write_text("content", encoding="utf-8")
+                elif case == "config_symlink":
+                    config.unlink()
+                    config.symlink_to("../README.md")
+                elif case == "template_symlink":
+                    (root / "policy.txt").write_text("AI assistance is allowed.\n", encoding="utf-8")
+                    (root / ".github").mkdir()
+                    (root / ".github/ISSUE_TEMPLATE").symlink_to("../docs", target_is_directory=True)
+                elif case == "unknown":
+                    config.write_text('[ai]\nallowed = true\nallowd = true\n', encoding="utf-8")
+                elif case == "invalid_toml":
+                    config.write_text('[ai\nallowed = true', encoding="utf-8")
+                result = self._commit_and_compare(root)
+                self.assertEqual(result["result"], "blocked")
+                self.assertTrue(result["diagnostics"])
+                self.assertEqual(result["structured_claims"], {})
+                self.assertIsNone(result["authoritative_claims"]["ai_assistance"])
+
+    def test_source_budgets_are_checked_before_document_reads_or_parsing(self) -> None:
+        for case in ("count", "file", "total"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".github/ISSUE_TEMPLATE").mkdir(parents=True)
+                count = 129 if case == "count" else 9 if case == "total" else 1
+                size = MAX_POLICY_SOURCE_BYTES if case == "total" else MAX_POLICY_SOURCE_BYTES + 1 if case == "file" else 1
+                for index in range(count):
+                    (root / f".github/ISSUE_TEMPLATE/{index:03}.md").write_bytes(b"x" * size)
+                with patch("reviewworthy.policy._claims_from_document", side_effect=AssertionError("must not parse over budget")), patch("reviewworthy.policy._local_read", side_effect=AssertionError("must not read over budget")):
+                    result = self._commit_and_compare(root)
+                self.assertEqual(result["result"], "blocked")
+                self.assertEqual({item["code"] for item in result["diagnostics"]}, {"policy_source_limit"})
+
+    def test_structured_policy_counts_toward_source_and_total_budgets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".reviewworthy").mkdir()
+            (root / ".reviewworthy/policy.toml").write_text('[ai]\nallowed = true\n', encoding="utf-8")
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            for budget, value in (("MAX_POLICY_SOURCES", 1), ("MAX_POLICY_TOTAL_BYTES", 30)):
+                with self.subTest(budget=budget), patch("reviewworthy.policy." + budget, value):
+                    result = self._commit_and_compare(root)
+                    self.assertEqual(result["diagnostics"][0]["code"], "policy_source_limit")
+
+    def test_git_inventory_limits_are_controlled_unavailability(self) -> None:
+        with patch("reviewworthy.policy.run_bounded", side_effect=CommandOutputLimitError("large output")):
+            with self.assertRaisesRegex(PolicyTreeError, "output limit exceeded"):
+                inspect_policy_at_commit(Path("."), "a" * 40)
+
+    def test_read_and_inventory_errors_do_not_grant_permission(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            with patch("reviewworthy.policy._local_read", side_effect=PermissionError):
+                result = inspect_policy(root)
+                self.assertEqual(result["diagnostics"][0]["code"], "policy_source_unreadable")
+                self.assertIsNone(result["authoritative_claims"]["ai_assistance"])
+            with patch("reviewworthy.policy._local_document_names", side_effect=PermissionError):
+                result = inspect_policy(root)
+                self.assertEqual(result["diagnostics"][0]["code"], "policy_scan_unavailable")
+
+    def test_structured_non_utf8_is_blocked_in_local_and_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".reviewworthy").mkdir()
+            (root / ".reviewworthy/policy.toml").write_bytes(b"\xff")
+            result = self._commit_and_compare(root)
+            self.assertEqual(result["diagnostics"][0]["code"], "policy_source_encoding")
+
+    def test_boundary_budgets_accept_sources_and_count_structured_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".reviewworthy").mkdir()
+            (root / ".reviewworthy/policy.toml").write_text('[ai]\nallowed = true\n[discovery]\nauthoritative_documents = [".reviewworthy/policy.toml", "README.md", "README.md"]\n', encoding="utf-8")
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            total = sum(path.stat().st_size for path in (root / "README.md", root / ".reviewworthy/policy.toml"))
+            with patch("reviewworthy.policy.MAX_POLICY_SOURCES", 2), patch("reviewworthy.policy.MAX_POLICY_TOTAL_BYTES", total):
+                result = self._commit_and_compare(root)
+                self.assertEqual(result["result"], "passed")
+                self.assertEqual(len(result["sources"]), 2)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_bytes(b"x" * MAX_POLICY_SOURCE_BYTES)
+            with patch("reviewworthy.policy._claims_from_document", return_value=({}, {}, {})) as parse:
+                self.assertEqual(self._commit_and_compare(root)["result"], "passed")
+                self.assertEqual(parse.call_count, 2)
+
+    def test_changed_size_after_metadata_check_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            with patch("reviewworthy.policy._local_read", return_value=b"changed"):
+                self.assertEqual(inspect_policy(root)["diagnostics"][0]["code"], "policy_source_limit")
+
+    def test_aliases_fill_partial_canonical_tables_and_keep_original_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".reviewworthy").mkdir()
+            (root / ".reviewworthy/policy.toml").write_text('[ai]\ndisclosure_required = true\n[contribution.ai]\nallowed = true\n[contribution.ai.disclosure]\nlocations = ["pr_body"]\n', encoding="utf-8")
+            result = self._commit_and_compare(root)
+            self.assertEqual(result["structured_claims"]["ai_assistance"], "allowed")
+            self.assertEqual(result["claim_records"]["ai_assistance"]["provenance"][0]["line_start"], 4)
+
+    def test_tree_provenance_does_not_resolve_head_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            local = self._commit_and_compare(root)
+            sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+            (root / "README.md").unlink()
+            (root / "README.md").symlink_to("/tmp/untrusted-policy-target")
+            tree = inspect_policy_at_commit(root, sha)
+            tree.pop("base_sha")
+            self.assertEqual(local, tree)
+
+    def test_brief_retains_blockers_without_hashing_failed_policy_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".reviewworthy").mkdir()
+            (root / ".reviewworthy/policy.toml").write_text('[discovery]\nauthoritative_documents = ["docs/policy.md"]\n', encoding="utf-8")
+            (root / "docs").mkdir()
+            (root / "docs/policy.md").symlink_to("/tmp/missing-private-policy")
+            brief = build_project_brief(root)
+            self.assertEqual(brief["policy"]["result"], "blocked")
+            self.assertNotIn("docs/policy.md", {source["path"] for source in brief["sources"]})

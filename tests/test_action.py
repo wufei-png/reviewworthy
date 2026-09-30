@@ -497,3 +497,23 @@ class ActionEvidenceTests(unittest.TestCase):
                 mode="evidence-enforce",
             )
         self.assertIn("repository_identity_mismatch", {item["code"] for item in result["violations"]})
+
+    def test_base_policy_input_failures_block_enforcement_and_report_without_head_authority(self) -> None:
+        for mode in ("evidence-enforce", "report"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                repository, diff = self._policy_repository(Path(directory), "AI assistance is allowed.\n", '[ai]\nallowed = true\n[discovery]\nauthoritative_documents = ["docs/contributing.md"]\n')
+                (repository / "docs").mkdir()
+                (repository / "docs/contributing.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+                self._git(repository, "add", ".")
+                self._git(repository, "commit", "-qm", "head cannot repair base policy")
+                diff = capture_pr_diff(repository, "main", "feature")
+                result = check_evidence(self._body(diff), root=repository, event_name="pull_request", event_repository="example/project", event_repository_id=101, event_base_sha=diff["base_tip_sha"], event_head_sha=diff["head_sha"], mode=mode)
+                self.assertEqual(result["base_policy"]["machine_authority"], {})
+                self.assertEqual(result["base_policy"]["diagnostics"][0]["path"], "docs/contributing.md")
+                self.assertNotIn("AI assistance is allowed", json.dumps(result["base_policy"]))
+                if mode == "evidence-enforce":
+                    self.assertEqual(result["conclusion"], "failure")
+                    self.assertIn("base_policy_source_missing", {item["code"] for item in result["violations"]})
+                else:
+                    self.assertEqual(result["conclusion"], "success")
+                    self.assertTrue(any("source does not exist" in value for value in result["unknowns"]))

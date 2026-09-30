@@ -12,13 +12,14 @@ from dataclasses import field
 import hashlib
 from pathlib import Path
 from pathlib import PurePosixPath
+import os
 import re
-import tempfile
+import stat
 import tomllib
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .git import is_canonical_repository_relative_path
-from .util import CommandOutputLimitError, CommandTimeoutError, relative_path, run_bounded
+from .util import CommandOutputLimitError, CommandTimeoutError, run_bounded
 
 
 CLAIM_KEYS = (
@@ -117,7 +118,7 @@ def _provenance(path: Path, root: Path, text: str, key: str, match: re.Match[str
         line_start = line_end = 1
         excerpt = lines[0].strip()
     provenance = {
-        "source": relative_path(path, root),
+        "source": path.relative_to(root).as_posix(),
         "line_start": line_start,
         "line_end": line_end,
         "excerpt_sha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest(),
@@ -407,19 +408,95 @@ def _is_default_document_path(path: str) -> bool:
     ) and value.suffix.lower() in {".md", ".markdown", ".txt", ".yml", ".yaml"}
 
 
-def _candidate_document_paths(root: Path, explicit: list[str]) -> list[Path]:
-    candidates = {root / name for name in DEFAULT_DOCUMENTS if (root / name).exists() or (root / name).is_symlink()}
-    github_dir = root / ".github"
-    if github_dir.is_dir():
-        candidates.update(path for path in github_dir.rglob("*") if _is_default_document_path(path.relative_to(root).as_posix()))
-    candidates.update(root / name for name in explicit)
-    return sorted(candidates)
+MAX_POLICY_SOURCES = 128
+MAX_POLICY_SOURCE_BYTES = 1024 * 1024
+MAX_POLICY_TOTAL_BYTES = 8 * 1024 * 1024
 
 
-def _validated_structured(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+@dataclass(frozen=True)
+class _SourceInfo:
+    mode: str
+    size: int
+    object_id: str = ""
+
+
+def _is_template_container(name: str) -> bool:
+    parts = PurePosixPath(name).parts
+    return name == ".github" or (len(parts) == 2 and parts[0] == ".github" and parts[1].lower() in {"issue_template", "pull_request_template"})
+
+
+def _local_info(root: Path, name: str) -> _SourceInfo | None:
+    for index in range(len(PurePosixPath(name).parts)):
+        path = root.joinpath(*PurePosixPath(name).parts[:index + 1])
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return None
+        if stat.S_ISLNK(info.st_mode):
+            return _SourceInfo("120000", info.st_size)
+        if index < len(PurePosixPath(name).parts) - 1 and not stat.S_ISDIR(info.st_mode):
+            return _SourceInfo("unsupported", info.st_size)
+    mode = "100755" if info.st_mode & stat.S_IXUSR else "100644"
+    if not stat.S_ISREG(info.st_mode):
+        mode = "040000" if stat.S_ISDIR(info.st_mode) else "unsupported"
+    return _SourceInfo(mode, info.st_size)
+
+
+def _local_document_names(root: Path) -> list[str]:
+    names = [name for name in DEFAULT_DOCUMENTS if _local_info(root, name) is not None]
+    github_info = _local_info(root, ".github")
+    if github_info is None:
+        return names
+    if github_info.mode != "040000":
+        return names + [".github"]
+
+    def visit(directory: Path) -> None:
+        with os.scandir(directory) as entries:
+            for entry in sorted(entries, key=lambda item: item.name):
+                path = Path(entry.path)
+                name = path.relative_to(root).as_posix()
+                if _is_default_document_path(name):
+                    names.append(name)
+                elif _is_template_container(name) and not entry.is_dir(follow_symlinks=False):
+                    names.append(name)
+                if entry.is_dir(follow_symlinks=False):
+                    visit(path)
+
+    with os.scandir(root / ".github") as entries:
+        for entry in sorted(entries, key=lambda item: item.name):
+            path = Path(entry.path)
+            name = path.relative_to(root).as_posix()
+            if _is_template_container(name) and entry.is_dir(follow_symlinks=False):
+                visit(path)
+            elif _is_default_document_path(name) or _is_template_container(name):
+                names.append(name)
+    return names
+
+
+def _local_read(root: Path, name: str) -> bytes:
+    """Open each component without following source or parent symlinks."""
+
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        parts = PurePosixPath(name).parts
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+        with os.fdopen(child, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise OSError("Policy source is no longer a regular file")
+            return handle.read(MAX_POLICY_SOURCE_BYTES + 1)
+    finally:
+        os.close(descriptor)
+
+
+def _validated_structured(data: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]], dict[tuple[str, ...], tuple[str, ...]]]:
     """Normalize accepted aliases before validating canonical field values."""
 
     canonical: dict[str, Any] = {}
+    origins: dict[tuple[str, ...], tuple[str, ...]] = {}
     diagnostics: list[dict[str, str]] = []
     aliases = {
         ("contribution", "ai"): ("ai",),
@@ -472,15 +549,18 @@ def _validated_structured(data: dict[str, Any]) -> tuple[dict[str, Any], list[di
         if not valid:
             diagnostics.append(_diagnostic("policy_invalid_configuration", location, "Invalid policy value."))
             return
+        if isinstance(value, list):
+            value = sorted(set(value))
         table = canonical.setdefault(normalized[0], {})
         if normalized[1] in table and table[normalized[1]] != value:
             diagnostics.append(_diagnostic("policy_invalid_configuration", location, "Opposed values for canonical policy field and alias."))
         else:
             table[normalized[1]] = value
+            origins.setdefault(normalized, original)
 
     for key, value in sorted(data.items()):
         visit(value, (key,), (key,))
-    return canonical, diagnostics
+    return canonical, diagnostics, origins
 
 
 def inspect_policy_at_commit(root: Path, commit_sha: str) -> dict[str, Any]:
@@ -490,40 +570,41 @@ def inspect_policy_at_commit(root: Path, commit_sha: str) -> dict[str, Any]:
         raise PolicyTreeError("base commit must be a full 40- or 64-character hexadecimal object ID")
     root = root.resolve()
 
-    def git(*args: str) -> bytes:
+    def git(*args: str, max_bytes: int = 16 * 1024 * 1024) -> bytes:
         try:
-            completed = run_bounded(
-                ["git", "-C", str(root), *args],
-                timeout_seconds=60,
-                max_capture_bytes=16 * 1024 * 1024,
-            )
-        except (OSError, CommandTimeoutError, CommandOutputLimitError) as exc:
-            raise PolicyTreeError(str(exc)) from exc
+            completed = run_bounded(["git", "-C", str(root), *args], timeout_seconds=60, max_capture_bytes=max_bytes)
+        except CommandOutputLimitError as exc:
+            raise PolicyTreeError("Base-tree policy Git output limit exceeded.") from exc
+        except (OSError, CommandTimeoutError) as exc:
+            raise PolicyTreeError("Base-tree policy Git command unavailable or timed out.") from exc
         if completed.returncode != 0:
-            detail = completed.stderr.decode("utf-8", errors="replace").strip() or "git command failed"
-            raise PolicyTreeError(detail)
+            raise PolicyTreeError("Base-tree policy Git command failed.")
         return completed.stdout
 
-    resolved = git("rev-parse", "--verify", f"{commit_sha}^{{commit}}").decode("ascii", errors="strict").strip()
-    if resolved.lower() != commit_sha.lower():
-        raise PolicyTreeError("base commit identity did not resolve exactly")
-    names = git("ls-tree", "-r", "--name-only", commit_sha).decode("utf-8", errors="surrogateescape").splitlines()
-    explicit: list[str] = []
-    if STRUCTURED_PATH in names:
-        try:
-            normalized, _ = _validated_structured(tomllib.loads(git("show", f"{commit_sha}:{STRUCTURED_PATH}").decode("utf-8")))
-            explicit = normalized.get("discovery", {}).get("authoritative_documents", [])
-        except (UnicodeError, tomllib.TOMLDecodeError):
-            pass
-    selected = [name for name in names if name == STRUCTURED_PATH or _is_default_document_path(name) or name in explicit]
-    with tempfile.TemporaryDirectory(prefix="reviewworthy-policy-") as directory:
-        snapshot = Path(directory)
-        for name in selected:
-            destination = snapshot.joinpath(*PurePosixPath(name).parts)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(git("show", f"{commit_sha}:{name}"))
-        result = inspect_policy(snapshot)
-    result["repository"] = str(root)
+    try:
+        resolved = git("rev-parse", "--verify", f"{commit_sha}^{{commit}}").decode("ascii").strip()
+        if resolved.lower() != commit_sha.lower():
+            raise PolicyTreeError("base commit identity did not resolve exactly")
+        inventory: dict[str, _SourceInfo] = {}
+        for record in git("ls-tree", "-r", "-t", "-l", "-z", commit_sha).split(b"\0"):
+            if not record:
+                continue
+            metadata, path = record.split(b"\t", 1)
+            mode, kind, object_id, size = metadata.decode("ascii").split()
+            name = path.decode("utf-8", errors="surrogateescape")
+            inventory[name] = _SourceInfo(mode, int(size) if kind == "blob" else 0, object_id)
+    except (UnicodeError, ValueError) as exc:
+        raise PolicyTreeError("Base-tree policy inventory is invalid.") from exc
+
+    def lookup(name: str) -> _SourceInfo | None:
+        for parent in PurePosixPath(name).parents:
+            info = inventory.get(parent.as_posix())
+            if info is not None and info.mode != "040000":
+                return info
+        return inventory.get(name)
+
+    names = [name for name, info in inventory.items() if name in DEFAULT_DOCUMENTS or _is_default_document_path(name) or (_is_template_container(name) and info.mode != "040000")]
+    result = _inspect_policy(root, names, lookup, lambda name: git("cat-file", "blob", inventory[name].object_id, max_bytes=MAX_POLICY_SOURCE_BYTES + 1))
     result["base_sha"] = commit_sha.lower()
     return result
 
@@ -605,39 +686,119 @@ def _structured_match(text: str, path: tuple[str, ...]) -> re.Match[str] | None:
 
 def inspect_policy(root: Path) -> dict[str, Any]:
     root = root.resolve()
-    structured_path = root / STRUCTURED_PATH
+    diagnostics: list[dict[str, str]] = []
+    try:
+        names = _local_document_names(root)
+    except OSError:
+        names = []
+        diagnostics.append(_diagnostic("policy_scan_unavailable", ".github", "Policy source inventory could not be read."))
+    return _inspect_policy(root, names, lambda name: _local_info(root, name), lambda name: _local_read(root, name), diagnostics)
+
+
+def _inspect_policy(
+    root: Path,
+    names: list[str],
+    lookup: Callable[[str], _SourceInfo | None],
+    read: Callable[[str], bytes],
+    initial_diagnostics: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    diagnostics = list(initial_diagnostics or [])
+    texts: dict[str, str] = {}
+    infos: dict[str, _SourceInfo] = {}
+
+    def source_info(name: str, *, required: bool) -> None:
+        try:
+            name.encode("utf-8")
+            if not is_canonical_repository_relative_path(name) or name == "." or "\x00" in name:
+                raise ValueError
+        except (UnicodeError, ValueError):
+            safe_name = name.encode("utf-8", errors="backslashreplace").decode("utf-8")
+            diagnostics.append(_diagnostic("policy_source_path_invalid", safe_name, "Policy source path is unsupported."))
+            return
+        try:
+            info = lookup(name)
+        except OSError:
+            diagnostics.append(_diagnostic("policy_source_unreadable", name, "Policy source metadata could not be read."))
+            return
+        if info is None:
+            if required:
+                diagnostics.append(_diagnostic("policy_source_missing", name, "Explicit policy source does not exist."))
+        elif info.mode not in {"100644", "100755"}:
+            diagnostics.append(_diagnostic("policy_source_unsupported", name, "Policy source must be a regular file; symlinks are unsupported."))
+        elif info.size > MAX_POLICY_SOURCE_BYTES:
+            diagnostics.append(_diagnostic("policy_source_limit", name, "Policy source exceeds the 1 MiB byte limit."))
+        else:
+            infos[name] = info
+
+    def read_text(name: str) -> None:
+        try:
+            data = read(name)
+        except (OSError, PolicyTreeError):
+            diagnostics.append(_diagnostic("policy_source_unreadable", name, "Policy source content could not be read."))
+            return
+        if len(data) > MAX_POLICY_SOURCE_BYTES or len(data) != infos[name].size:
+            diagnostics.append(_diagnostic("policy_source_limit", name, "Policy source exceeded its checked byte size or changed during inspection."))
+            return
+        try:
+            text = data.decode("utf-8")
+            if "\x00" in text:
+                raise UnicodeError
+            texts[name] = text
+        except UnicodeError:
+            diagnostics.append(_diagnostic("policy_source_encoding", name, "Policy source must be UTF-8 text without NUL bytes."))
+
+    source_info(STRUCTURED_PATH, required=False)
+    structured_present = STRUCTURED_PATH in infos or any(item["path"] == STRUCTURED_PATH for item in diagnostics)
+    if STRUCTURED_PATH in infos:
+        read_text(STRUCTURED_PATH)
     structured_claims: dict[str, Any] = {}
     structured_error: str | None = None
     structured_provenance: dict[str, dict[str, Any]] = {}
-    diagnostics: list[dict[str, str]] = []
     explicit: list[str] = []
-    if structured_path.exists():
+    if STRUCTURED_PATH in texts:
+        structured_text = texts[STRUCTURED_PATH]
         try:
-            structured_text = structured_path.read_text(encoding="utf-8")
             data = tomllib.loads(structured_text)
-            normalized, diagnostics = _validated_structured(data)
+            normalized, configuration_diagnostics, origins = _validated_structured(data)
+            diagnostics.extend(configuration_diagnostics)
             explicit = normalized.get("discovery", {}).get("authoritative_documents", [])
-            structured_claims, structured_paths = _structured_claims(data)
+            structured_claims, structured_paths = _structured_claims(normalized)
             structured_provenance = {
-                key: _provenance(structured_path, root, structured_text, key, _structured_match(structured_text, structured_paths[key]))
+                key: _provenance(root / STRUCTURED_PATH, root, structured_text, key, _structured_match(structured_text, origins[structured_paths[key]]))
                 for key in structured_claims
             }
-        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
-            structured_error = "Structured policy could not be read or parsed."
+        except tomllib.TOMLDecodeError:
+            structured_error = "Structured policy could not be parsed."
             diagnostics.append(_diagnostic("policy_invalid_configuration", STRUCTURED_PATH, structured_error))
+    selected = sorted(set(names + explicit) - {STRUCTURED_PATH})
+    for name in selected:
+        source_info(name, required=True)
+    all_selected = set(selected) | ({STRUCTURED_PATH} if structured_present else set())
+    count_exceeded = len(all_selected) > MAX_POLICY_SOURCES
+    total_exceeded = sum(info.size for info in infos.values()) > MAX_POLICY_TOTAL_BYTES
+    if count_exceeded:
+        diagnostics.append(_diagnostic("policy_source_limit", ".", "Policy selection exceeds the 128 source limit."))
+    if total_exceeded:
+        diagnostics.append(_diagnostic("policy_source_limit", ".", "Policy selection exceeds the 8 MiB total byte limit."))
+    if not count_exceeded and not total_exceeded:
+        for name in selected:
+            if name in infos:
+                read_text(name)
+    errors = {item["path"]: item["message"] for item in diagnostics}
     document_sources: list[PolicySource] = []
     document_claims: dict[str, list[dict[str, Any]]] = {}
     document_ambiguities: list[dict[str, Any]] = []
-    for path in _candidate_document_paths(root, explicit):
-        try:
-            text = path.read_text(encoding="utf-8")
+    for name in selected:
+        path = root / name
+        if name in texts:
+            text = texts[name]
             claims, matches, ambiguities = _claims_from_document(text, path, root)
             provenance = {key: _provenance(path, root, text, key, matches.get(key)) for key in claims}
             source_ambiguities = [
                 {
                     "key": key,
                     "kind": "single_repository_document",
-                    "source": relative_path(path, root),
+                    "source": path.relative_to(root).as_posix(),
                     "claims": [
                         {"value": value, **_provenance(path, root, text, key, match)}
                         for value, match in opposed
@@ -646,13 +807,11 @@ def inspect_policy(root: Path) -> dict[str, Any]:
                 for key, opposed in ambiguities.items()
             ]
             document_ambiguities.extend(source_ambiguities)
-            document_sources.append(PolicySource(relative_path(path, root), "repository_document", claims, provenance=provenance, ambiguities=source_ambiguities))
+            document_sources.append(PolicySource(path.relative_to(root).as_posix(), "repository_document", claims, provenance=provenance, ambiguities=source_ambiguities))
             for key, value in claims.items():
                 _claim(document_claims, key, value, path, root, text, matches.get(key))
-        except (OSError, UnicodeError):
-            name = path.relative_to(root).as_posix()
-            diagnostics.append(_diagnostic("policy_source_unreadable", name, "Policy source could not be read as UTF-8 text."))
-            document_sources.append(PolicySource(name, "repository_document", {}, "Policy source could not be read as UTF-8 text."))
+        else:
+            document_sources.append(PolicySource(name.encode("utf-8", errors="backslashreplace").decode("utf-8"), "repository_document", {}, errors.get(name, errors.get(".", "Policy source unavailable."))))
 
     conflicts: list[dict[str, Any]] = []
     for key, values in document_claims.items():
@@ -750,7 +909,7 @@ def inspect_policy(root: Path) -> dict[str, Any]:
     return {
         "repository": str(root),
         "sources": [source.__dict__ for source in document_sources]
-        + ([{"path": ".reviewworthy/policy.toml", "kind": "structured_policy", "claims": structured_claims, "error": structured_error}] if structured_path.exists() else []),
+        + ([{"path": ".reviewworthy/policy.toml", "kind": "structured_policy", "claims": structured_claims, "error": structured_error or errors.get(STRUCTURED_PATH)}] if structured_present else []),
         "authoritative_claims": authoritative,
         "structured_claims": {} if diagnostics else structured_claims,
         "diagnostics": diagnostics,

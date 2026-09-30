@@ -9,6 +9,7 @@ import unittest
 
 from reviewworthy.cli import main
 from reviewworthy.packet import semantic_snapshot, skeleton_packet
+from reviewworthy.policy import inspect_policy
 from reviewworthy.workflow import workflow_status
 
 from helpers import valid_packet
@@ -185,3 +186,18 @@ class WorkflowStatusTests(unittest.TestCase):
         result = workflow_status(packet, Path("packet.json"))
 
         self.assertEqual(result["current_stage"], "narrative")
+
+    def test_policy_input_failure_is_a_readiness_hard_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_bytes(b"\xff")
+            packet = valid_packet()
+            packet["policy"] = inspect_policy(root)
+            snapshot = semantic_snapshot(packet)
+            packet["snapshots"]["semantic"] = snapshot
+            packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
+            packet["understanding"]["assessment"]["semantic_snapshot"] = snapshot
+            result = workflow_status(packet, root / "packet.json")
+            self.assertFalse(result["ready"])
+            self.assertEqual(result["current_stage"], "blocked")
+            self.assertIn("policy_source_encoding", {item["code"] for item in result["blocking"]})

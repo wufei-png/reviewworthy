@@ -189,11 +189,14 @@ def build_project_brief(root: Path, focus: list[str] | None = None) -> dict[str,
     policy = inspect_policy(root)
     tooling, test_paths = _tooling_and_test_paths(root)
     source_paths: dict[str, tuple[Path, str]] = {}
+    failed_policy_paths = {str(source["path"]) for source in policy["sources"] if source.get("error")}
     for source in policy["sources"]:
         path = root / str(source["path"])
-        if path.is_file():
+        if not source.get("error") and path.is_file():
             source_paths[str(path.resolve())] = (path, str(source["kind"]))
     for path in _brief_document_paths(root):
+        if path.relative_to(root).as_posix() in failed_policy_paths:
+            continue
         source_paths[str(path.resolve())] = (path, "project_document")
     for path in tooling:
         source_paths[str(path.resolve())] = (path, "tooling")

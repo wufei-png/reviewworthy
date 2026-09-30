@@ -62,6 +62,7 @@ def _base_policy_projection(policy: dict[str, Any]) -> dict[str, Any]:
         "document_advisory": document_claims,
         "conflicts": policy.get("conflicts", []),
         "ambiguities": policy.get("ambiguities", []),
+        "diagnostics": policy.get("diagnostics", []),
     }
 
 
@@ -71,6 +72,9 @@ def _base_policy_blockers(policy: dict[str, Any], summary: dict[str, Any]) -> li
         blockers.append(_finding("base_policy_conflict", "Base-tree policy sources conflict.", "base_policy.conflicts"))
     if policy.get("ambiguities"):
         blockers.append(_finding("base_policy_ambiguity", "A base-tree policy document makes opposed explicit claims.", "base_policy.ambiguities"))
+
+    for diagnostic in policy.get("diagnostics", []):
+        blockers.append(_finding("base_" + diagnostic["code"], diagnostic["message"], "base_policy.sources." + diagnostic["path"]))
 
     document_prohibits_ai = any(
         isinstance(source, dict)

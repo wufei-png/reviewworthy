@@ -890,6 +890,10 @@ def policy_violations(packet: dict[str, Any], *, enforce_disclosure: bool) -> li
     if policy.get("ambiguities"):
         violations.append({"code": "policy_ambiguity", "message": "A policy source contains opposed explicit claims.", "path": "policy.ambiguities"})
 
+    for diagnostic in policy.get("diagnostics", []):
+        if isinstance(diagnostic, dict):
+            violations.append({"code": str(diagnostic.get("code", "policy_input_invalid")), "message": str(diagnostic.get("message", "Policy input is invalid.")), "path": "policy.sources." + str(diagnostic.get("path", ""))})
+
     claims = policy.get("authoritative_claims", {})
     if not isinstance(claims, dict):
         claims = {}
