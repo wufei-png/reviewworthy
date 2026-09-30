@@ -103,3 +103,69 @@ class PacketMutationTests(unittest.TestCase):
             updated = json.loads(path.read_text())
         self.assertEqual(node(updated, "contribution_basis")["status"], "passed")
         self.assertEqual(updated["repository"]["repository_id"], 101)
+
+    def test_contract_bind_does_not_import_approval_and_approve_hashes_embedded_fields(self) -> None:
+        packet = valid_packet()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, source = root / "packet.json", root / "contract.json"
+            contract = deepcopy(packet["contract"])
+            contract["design"] = "New bounded design"
+            source.write_text(json.dumps(contract))
+            source_before = source.read_bytes()
+            path.write_text(json.dumps(packet))
+            self.assertEqual(self.call("packet", "contract", "bind", "--packet", str(path), "--contract", str(source))[0], 0)
+            bound = json.loads(path.read_text())
+            self.assertEqual(bound["contract"]["approval"]["status"], "not_run")
+            self.assertEqual(self.call("packet", "contract", "approve", "--packet", str(path), "--human-confirmed")[0], 0)
+            approved = json.loads(path.read_text())
+            from reviewworthy.contract import contract_snapshot
+            self.assertEqual(approved["contract"]["approval"]["contract_sha256"], contract_snapshot(approved["contract"]))
+            self.assertEqual(node(approved, "contribution_contract")["status"], "passed")
+            self.assertEqual(source.read_bytes(), source_before)
+            self.assertEqual(self.call("packet", "contract", "approve", "--packet", str(path), "--human-confirmed")[0], 0)
+            self.assertEqual(json.loads(path.read_text()), approved)
+
+    def test_identical_contract_preserves_approval_and_material_fields_revoke_it(self) -> None:
+        from reviewworthy.packet_mutation import bind_contract
+        packet = valid_packet()
+        identical = deepcopy(packet["contract"])
+        identical.pop("approval")
+        updated = maintain_packet(packet, bind_contract(packet, identical))
+        self.assertEqual(updated["contract"]["approval"], packet["contract"]["approval"])
+        self.assertEqual(updated["verification"]["receipts"], packet["verification"]["receipts"])
+        for key, value in (("design", "New design"), ("scope", {"files": ["other.py"]})):
+            with self.subTest(field=key):
+                changed = deepcopy(identical)
+                changed[key] = value
+                updated = maintain_packet(packet, bind_contract(packet, changed))
+                self.assertEqual(updated["contract"]["approval"]["status"], "not_run")
+                self.assertEqual(updated["verification"]["receipts"], [])
+                self.assertEqual(node(updated, "implementation")["status"], "not_run")
+
+    def test_contract_approval_requires_policy_verified_basis_and_candidate_decision(self) -> None:
+        from reviewworthy.packet_mutation import approve_contract
+        cases = []
+        no_basis = valid_packet()
+        no_basis["basis"].pop("verification")
+        cases.append(no_basis)
+        no_policy = valid_packet()
+        node(no_policy, "policy_check").update(status="not_run", evidence=[])
+        cases.append(no_policy)
+        candidate = valid_packet()
+        candidate["candidate_selection"] = {"recommendation": "issue_only", "duplicate_disposition": "not_duplicate"}
+        cases.append(candidate)
+        for packet in cases:
+            with self.assertRaises(ValueError):
+                approve_contract(packet, human_confirmed=True)
+        with self.assertRaises(ValueError):
+            approve_contract(valid_packet(), human_confirmed=False)
+
+    def test_contract_rejects_foreign_identity_arbitrary_records_and_invalid_paths(self) -> None:
+        from reviewworthy.packet_mutation import bind_contract
+        packet = valid_packet()
+        for key, value in (("contribution_id", "other"), ("receipts", []), ("scope", {"files": ["../outside.py"]}), ("risks", [42])):
+            contract = deepcopy(packet["contract"])
+            contract[key] = value
+            with self.subTest(field=key), self.assertRaises(ValueError):
+                bind_contract(packet, contract)

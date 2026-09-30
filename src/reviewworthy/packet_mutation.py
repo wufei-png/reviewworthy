@@ -6,9 +6,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .contract import CONTRACT_FIELDS, contract_snapshot, validate_contract
 from .packet import (
     issue_basis_blockers, policy_violations, require_current_packet,
-    result_record, semantic_snapshot, skeleton_packet,
+    readiness_blockers, result_record, semantic_snapshot, skeleton_packet,
 )
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_identity, repository_matches
@@ -84,7 +85,10 @@ def maintain_packet(previous: dict[str, Any], updated: dict[str, Any]) -> dict[s
     errors = basis_errors(updated)
     _set_result(updated, "contribution_basis", "blocked" if errors else "passed", [] if errors else ["packet.basis"])
     approval = updated["contract"].get("approval", {})
-    if approval.get("status") != "approved" or approval.get("human_confirmed") is not True:
+    if (approval.get("status") == "approved" and approval.get("human_confirmed") is True
+            and approval.get("contract_sha256") == contract_snapshot(updated["contract"])):
+        _set_result(updated, "contribution_contract", "passed", ["packet.contract.approval"])
+    else:
         _set_result(updated, "contribution_contract", "not_run")
     updated["snapshots"]["semantic"] = semantic_snapshot(updated)
     return updated
@@ -137,4 +141,60 @@ def record_basis(packet: dict[str, Any], *, issue: str | None = None, signal: di
     updated["basis"] = basis
     updated["entry"]["mode"] = mode
     # Keep candidate_selection, including advisory and duplicate-work gates.
+    return updated
+
+
+def bind_contract(packet: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
+    """Embed existing Contract fields; approval belongs solely to the Packet."""
+
+    allowed = {*CONTRACT_FIELDS, "contract_version", "contribution_id", "approval"}
+    if set(contract) - allowed:
+        raise ValueError("Contract input may contain only existing Contract fields")
+    embedded = deepcopy(contract)
+    embedded["approval"] = {"status": "not_run", "human_confirmed": False}
+    validation = validate_contract(embedded)
+    if not validation["valid"]:
+        raise ValueError(f"Invalid Contribution Contract: {validation['errors']}")
+    if embedded["contribution_id"] != packet["contribution_id"]:
+        raise ValueError("Contract contribution_id must match packet.contribution_id")
+    if contract_snapshot(embedded) == contract_snapshot(packet["contract"]):
+        embedded["approval"] = deepcopy(packet["contract"].get("approval", embedded["approval"]))
+    updated = deepcopy(packet)
+    updated["contract"] = embedded
+    return updated
+
+
+def approval_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
+    """Require established policy, verified basis and candidate/hard-stop gates."""
+
+    errors = basis_errors(packet)
+    established = packet["policy"].get("result") == "passed" or any(
+        record.get("node") == "policy_check" and record.get("status") == "passed" and record.get("evidence")
+        for record in packet["results"]
+    )
+    if not established:
+        errors.append({"code": "policy_not_bound", "message": "Bind repository policy before Contract approval.", "path": "policy"})
+    errors.extend(error for error in policy_violations(packet, enforce_disclosure=False) if not error["path"].startswith("narrative"))
+    errors.extend(error for error in readiness_blockers(packet) if error["path"].startswith("candidate_selection"))
+    if packet["review"].get("hard_stops"):
+        errors.append({"code": "hard_stop", "message": "Resolve independent hard stops before Contract approval.", "path": "review.hard_stops"})
+    return errors
+
+
+def approve_contract(packet: dict[str, Any], *, human_confirmed: bool) -> dict[str, Any]:
+    if human_confirmed is not True:
+        raise ValueError("Contract approval requires --human-confirmed")
+    contract = deepcopy(packet["contract"])
+    contract["approval"] = {"status": "not_run", "human_confirmed": False}
+    validation = validate_contract(contract)
+    errors = approval_errors(packet)
+    if not validation["valid"] or errors:
+        raise ValueError(f"Contract approval prerequisites unresolved: {validation['errors'] + errors}")
+    if contract.get("contribution_id") != packet["contribution_id"]:
+        raise ValueError("Contract contribution_id must match packet.contribution_id")
+    updated = deepcopy(packet)
+    updated["contract"]["approval"] = {
+        "status": "approved", "human_confirmed": True,
+        "contract_sha256": contract_snapshot(contract),
+    }
     return updated

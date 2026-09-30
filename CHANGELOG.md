@@ -2,6 +2,7 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Bind existing Contract fields into the Packet and approve the embedded boundary with explicit human confirmation and CLI-computed hashes.
 - Add typed Packet policy/basis operations with shared atomic replacement, derived node results and downstream evidence invalidation.
 
 - Check Python >=3.11 and Git before composite Action imports, pin CI Actions to verified full upstream commits, and disable persisted checkout credentials.

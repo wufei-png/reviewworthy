@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .git import is_canonical_repository_relative_path
 from .util import sha256_json
 
 
@@ -65,6 +66,8 @@ def validate_contract(contract: dict[str, Any]) -> dict[str, Any]:
     for key in ("non_goals", "invariants", "validation_plan", "risks", "success_criteria"):
         if key in contract and not isinstance(contract[key], list):
             error("invalid_contract_list", f"{key} must be a list", key)
+        elif key in contract and not all(isinstance(item, str) for item in contract[key]):
+            error("invalid_contract_item", f"{key} items must be strings", key)
     scope = contract.get("scope")
     if not isinstance(scope, dict):
         error("invalid_scope", "scope must be an object", "scope")
@@ -74,6 +77,9 @@ def validate_contract(contract: dict[str, Any]) -> dict[str, Any]:
                 error("invalid_scope_list", f"scope.{key} must be a list", f"scope.{key}")
             elif key in scope and not all(isinstance(item, str) for item in scope[key]):
                 error("invalid_scope_item", f"scope.{key} items must be strings", f"scope.{key}")
+        files = scope.get("files", [])
+        if isinstance(files, list) and any(not is_canonical_repository_relative_path(item) or item == "." for item in files):
+            error("invalid_scope_path", "scope.files must use exact repository-relative POSIX paths", "scope.files")
         if not scope.get("files") and not scope.get("modules"):
             error("empty_scope", "At least one file or module must be bounded", "scope")
     if not isinstance(contract.get("alternatives"), list):

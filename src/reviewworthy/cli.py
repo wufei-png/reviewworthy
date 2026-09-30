@@ -44,7 +44,7 @@ from .packet import (
     skeleton_packet,
     validate_packet,
 )
-from .packet_mutation import bind_policy, record_basis, replace_packet
+from .packet_mutation import approve_contract, bind_contract, bind_policy, record_basis, replace_packet
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .remote import find_creation_matches, inspect_created_operation, inspect_operation, load_creation_receipt, record_inspection
@@ -238,6 +238,17 @@ def _build_parser() -> argparse.ArgumentParser:
             basis_source = mutation.add_mutually_exclusive_group(required=True)
             basis_source.add_argument("--issue")
             basis_source.add_argument("--signal", type=Path)
+        _common_json(mutation)
+
+    packet_contract = packet_commands.add_parser("contract")
+    packet_contract_commands = packet_contract.add_subparsers(dest="packet_operation", required=True)
+    for operation in ("bind", "approve"):
+        mutation = packet_contract_commands.add_parser(operation)
+        mutation.add_argument("--packet", type=Path, required=True)
+        if operation == "bind":
+            mutation.add_argument("--contract", type=Path, required=True)
+        else:
+            mutation.add_argument("--human-confirmed", action="store_true", required=True)
         _common_json(mutation)
 
     action = commands.add_parser("action", help="Check the public pull-request Evidence Summary")
@@ -899,6 +910,13 @@ def main(argv: list[str] | None = None) -> int:
                 atomic_write_json(output, packet, sort_keys=False)
                 result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
                 _print(result, args.as_json)
+                return 0
+            if args.packet_command == "contract":
+                packet = _load_current_packet(args.packet)
+                updated = (bind_contract(packet, _load_object(args.contract)) if args.packet_operation == "bind"
+                           else approve_contract(packet, human_confirmed=args.human_confirmed))
+                updated = replace_packet(args.packet, packet, updated)
+                _print({"updated": str(args.packet), "approval": updated["contract"]["approval"], "semantic_snapshot": updated["snapshots"]["semantic"]}, args.as_json)
                 return 0
             if args.packet_command in {"policy", "basis"}:
                 packet = _load_current_packet(args.packet)
