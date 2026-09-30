@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -20,8 +24,83 @@ from reviewworthy.evidence import (
 )
 from reviewworthy.git import GitError, PR_DIFF_FIELDS, capture_pr_diff
 from reviewworthy.policy import PolicyTreeError
+from reviewworthy.util import run_bounded
 
 from helpers import valid_packet
+
+
+def run_wrapper(root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    repository = Path(__file__).parents[1]
+    content = (repository / "action.yml").read_text(encoding="utf-8")
+    script = textwrap.dedent(content.split("      run: |\n", 1)[1])
+    return subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", script],
+        cwd=root,
+        env={"PYTHONPATH": str(repository / "src"), **env},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+class ActionWrapperTests(unittest.TestCase):
+    def test_wrapper_reports_missing_or_unusable_prerequisites_before_import(self) -> None:
+        cases = (
+            ("missing_python", "python must be available"),
+            ("old_python", "Python >=3.11 is required"),
+            ("broken_python", "Python >=3.11 is required"),
+            ("missing_git", "Git must be available"),
+            ("broken_git", "Git must be available"),
+        )
+        for mode in ("report", "evidence-enforce"):
+            for case, message in cases:
+                with self.subTest(mode=mode, case=case), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    if case == "old_python":
+                        shim = root / "python"
+                        shim.write_text(
+                            f"#!{sys.executable}\nimport sys\n"
+                            "assert sys.argv[1] == '-c', 'package import reached'\n"
+                            "sys.version_info = (3, 10, 0)\nexec(sys.argv[2])\n",
+                            encoding="utf-8",
+                        )
+                        shim.chmod(0o755)
+                    elif case == "broken_python":
+                        shim = root / "python"
+                        shim.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+                        shim.chmod(0o755)
+                    elif case != "missing_python":
+                        (root / "python").symlink_to(sys.executable)
+                    if case == "broken_git":
+                        shim = root / "git"
+                        shim.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+                        shim.chmod(0o755)
+                    result = run_wrapper(root, {"PATH": str(root), "REVIEWWORTHY_MODE": mode})
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("prerequisite error", result.stderr)
+                    self.assertIn(message, result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
+    def test_usable_runtime_keeps_report_findings_non_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "python").symlink_to(sys.executable)
+            (root / "git").symlink_to(shutil.which("git"))
+            result = run_wrapper(root, {"PATH": str(root), "REVIEWWORTHY_MODE": "report"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["unknowns"])
+
+    def test_ci_dependencies_are_immutable_and_checkout_has_no_credentials(self) -> None:
+        root = Path(__file__).parents[1]
+        workflow = (root / ".github/workflows/reviewworthy.yml").read_text(encoding="utf-8")
+        dependencies = re.findall(r"uses: (actions/[^\s]+)", workflow)
+        self.assertEqual(len(dependencies), 2)
+        for dependency in dependencies:
+            self.assertRegex(dependency, r"^actions/(checkout|setup-python)@[0-9a-f]{40}$")
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertNotIn("uses:", (root / "action.yml").read_text(encoding="utf-8"))
 
 
 class ActionEvidenceTests(unittest.TestCase):
@@ -109,6 +188,141 @@ class ActionEvidenceTests(unittest.TestCase):
                     github_event_context(),
                     ("pull_request", "Example/Project", 101, "base", "head", "current body"),
                 )
+
+    def test_wrapper_rejects_malformed_event_json_and_shapes(self) -> None:
+        events = (
+            "{",
+            "[]",
+            '{"pull_request": []}',
+            '{"repository": [], "pull_request": {"base": [], "head": true}}',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "python").symlink_to(sys.executable)
+            (root / "git").symlink_to(shutil.which("git"))
+            event_path = root / "event.json"
+            for event in events:
+                for mode in ("report", "evidence-enforce"):
+                    with self.subTest(event=event, mode=mode):
+                        event_path.write_text(event, encoding="utf-8")
+                        result = run_wrapper(root, {
+                            "PATH": str(root), "REVIEWWORTHY_MODE": mode,
+                            "GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event_path),
+                        })
+                        payload = json.loads(result.stdout)
+                        self.assertEqual(result.returncode, 1 if mode == "evidence-enforce" else 0, result.stderr)
+                        self.assertEqual(payload["checked"], False)
+                        if mode == "evidence-enforce":
+                            self.assertEqual({item["code"] for item in payload["violations"]}, {"evidence_summary_required"})
+
+    def test_wrapper_enforces_fixture_event_and_stays_read_only_with_missing_base(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository, diff = self._repository(root)
+            tools = root / "tools"
+            tools.mkdir()
+            (tools / "python").symlink_to(sys.executable)
+            calls = root / "git-calls.jsonl"
+            git = tools / "git"
+            git.write_text(
+                f"#!{sys.executable}\nimport json, subprocess, sys\n"
+                f"with open({str(calls)!r}, 'a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                f"sys.exit(subprocess.run([{shutil.which('git')!r}, *sys.argv[1:]]).returncode)\n",
+                encoding="utf-8",
+            )
+            git.chmod(0o755)
+            provider_call = root / "provider-called"
+            gh = tools / "gh"
+            gh.write_text(f"#!{sys.executable}\nfrom pathlib import Path\nPath({str(provider_call)!r}).touch()\nraise SystemExit(1)\n", encoding="utf-8")
+            gh.chmod(0o755)
+            # Poison private state: the Action must use only the public Body.
+            private = repository / ".git/reviewworthy/v0.3/contributions/action-fixture/packet.json"
+            private.parent.mkdir(parents=True)
+            private.write_text("invalid private Packet", encoding="utf-8")
+            event = {
+                "repository": {"full_name": "example/project", "id": 101},
+                "pull_request": {
+                    "base": {"sha": diff["base_tip_sha"]},
+                    "head": {"sha": diff["head_sha"]}, "body": self._body(diff),
+                },
+            }
+            event_path = root / "event.json"
+            for missing_base in (False, True):
+                if missing_base:
+                    event["pull_request"]["base"]["sha"] = "0" * 40
+                event_path.write_text(json.dumps(event), encoding="utf-8")
+                for mode in ("report", "evidence-enforce"):
+                    with self.subTest(missing_base=missing_base, mode=mode):
+                        result = run_wrapper(repository, {
+                            "PATH": str(tools), "REVIEWWORTHY_MODE": mode,
+                            "GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event_path),
+                        })
+                        payload = json.loads(result.stdout)
+                        failed = missing_base and mode == "evidence-enforce"
+                        self.assertEqual(result.returncode, 1 if failed else 0, result.stderr)
+                        if failed:
+                            self.assertEqual({item["code"] for item in payload["violations"]}, {"base_policy_unavailable", "current_diff_unavailable"})
+            self.assertFalse(provider_call.exists())
+            self.assertEqual(private.read_text(encoding="utf-8"), "invalid private Packet")
+            commands = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+            for command in commands:
+                verb = command[2] if command[:1] == ["-C"] else command[0]
+                self.assertIn(verb, {"--version", "rev-parse", "ls-tree", "cat-file", "merge-base", "diff"}, command)
+
+    def test_base_policy_diagnostics_reach_action_modes_from_fixture_events(self) -> None:
+        cases = (
+            ("invalid_configuration", "base_policy_invalid_configuration"),
+            ("encoding", "base_policy_source_encoding"),
+            ("oversized", "base_policy_source_limit"),
+            ("symlink", "base_policy_source_unsupported"),
+            ("unreadable", "base_policy_source_unreadable"),
+        )
+        for case, code in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                structured = '[ai]\nallowed = "invalid"\n' if case == "invalid_configuration" else '[ai]\nallowed = true\n'
+                repository, _ = self._policy_repository(root, "Project policy.\n", structured)
+                readme = repository / "README.md"
+                if case == "encoding":
+                    readme.write_bytes(b"\xff\x00")
+                elif case == "oversized":
+                    readme.write_bytes(b"x" * (1024 * 1024 + 1))
+                elif case == "symlink":
+                    readme.unlink()
+                    readme.symlink_to("src/example.py")
+                self._git(repository, "add", ".")
+                self._git(repository, "commit", "--allow-empty", "-qm", "base input fixture")
+                self._git(repository, "branch", "-f", "main", "HEAD")
+                readme_blob = self._git(repository, "rev-parse", "main:README.md")
+                (repository / "src/example.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+                self._git(repository, "commit", "-qam", "new head")
+                diff = capture_pr_diff(repository, "main", "feature")
+                event_path = root / "event.json"
+                event_path.write_text(json.dumps({
+                    "repository": {"full_name": "example/project", "id": 101},
+                    "pull_request": {
+                        "base": {"sha": diff["base_tip_sha"]},
+                        "head": {"sha": diff["head_sha"]}, "body": self._body(diff),
+                    },
+                }), encoding="utf-8")
+
+                def read_base(args: list[str], **kwargs: object) -> object:
+                    if case == "unreadable" and args[-3:] == ["cat-file", "blob", readme_blob]:
+                        raise OSError("fixture base blob is unreadable")
+                    return run_bounded(args, **kwargs)
+
+                with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event_path)}), patch("reviewworthy.policy.run_bounded", side_effect=read_base):
+                    name, slug, repo_id, base, head, body = github_event_context()
+                    for mode in ("report", "evidence-enforce"):
+                        result = check_evidence(body, root=repository, event_name=name, event_repository=slug, event_repository_id=repo_id, event_base_sha=base, event_head_sha=head, mode=mode)
+                        self.assertEqual(result["base_policy"]["machine_authority"], {})
+                        self.assertTrue(result["base_policy"]["diagnostics"])
+                        if mode == "evidence-enforce":
+                            self.assertEqual(result["conclusion"], "failure")
+                            self.assertIn(code, {item["code"] for item in result["violations"]})
+                        else:
+                            self.assertEqual(result["conclusion"], "success")
+                            self.assertTrue(result["unknowns"])
 
     def test_enforcement_rejects_incomplete_runner_context(self) -> None:
         body = append_evidence_summary(

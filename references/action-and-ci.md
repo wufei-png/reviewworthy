@@ -53,6 +53,23 @@ Default `report` mode keeps missing or uncertain evidence non-blocking. `evidenc
 - complete merge-base Diff agreement across base tip, merge base, head, canonical subject digest, fingerprint algorithm, changed files, additions, and deletions;
 - policy evaluation from the immutable runner-owned base commit.
 
+Before importing the package, the composite wrapper requires a runnable `python`
+on PATH with Python >=3.11 and a runnable `git`. Missing or unusable prerequisites
+exit with code 2 and an explicit prerequisite error in either mode. Non-blocking
+`report` findings assume a usable runtime; they do not suppress environment failures.
+Configure Python before invoking the Action. The wrapper adds no third-party
+Action steps or runtime dependencies; this repository's CI validates Python
+3.11, 3.12, and 3.13.
+
+CI dependency pins were resolved on 2026-09-30 with `git ls-remote` against the
+official upstream repositories and cross-checked against their release/commit pages:
+
+- `actions/checkout` `v7` / `v7.0.1` → [`3d3c42e5aac5ba805825da76410c181273ba90b1`](https://github.com/actions/checkout/commit/3d3c42e5aac5ba805825da76410c181273ba90b1).
+- `actions/setup-python` `v7` / `v7.0.0` → [`5fda3b95a4ea91299a34e894583c3862153e4b97`](https://github.com/actions/setup-python/commit/5fda3b95a4ea91299a34e894583c3862153e4b97).
+
+The workflow uses these full commits and `persist-credentials: false`; the matrix
+and composite wrapper remain unchanged in scope.
+
 Contributor-local verification, Ownership Check, and AI disclosure remain labeled contributor claims. The Action does not reinterpret them as runner-verified facts.
 
 For policy, the Action reads base-tree repository documents and `.reviewworthy/policy.toml`; a Pull Request cannot grant itself authority by changing policy on its head. Positive natural-language claims are advisory. Only structured base-tree TOML supplies positive machine authority. Explicit document prohibitions, cross-source conflicts, single-document ambiguities, invalid structured policy, and applicable structured requirements can block `evidence-enforce`.

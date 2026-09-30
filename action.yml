@@ -23,4 +23,16 @@ runs:
             exit 2
             ;;
         esac
+        if ! command -v python >/dev/null 2>&1; then
+          echo "Reviewworthy: prerequisite error: python must be available on PATH (Python >=3.11)." >&2
+          exit 2
+        fi
+        if ! python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+          echo "Reviewworthy: prerequisite error: a runnable Python >=3.11 is required; configure the runner before this Action." >&2
+          exit 2
+        fi
+        if ! command -v git >/dev/null 2>&1 || ! git --version >/dev/null 2>&1; then
+          echo "Reviewworthy: prerequisite error: a runnable Git must be available on PATH." >&2
+          exit 2
+        fi
         python -m reviewworthy action check --mode "${REVIEWWORTHY_MODE:-report}" --root . --json
