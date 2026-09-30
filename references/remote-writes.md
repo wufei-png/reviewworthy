@@ -79,3 +79,27 @@ checks its shape and ID/marker consistency, and does not authenticate local stat
 A lock left by a killed process is never deleted automatically: verify that no
 process owns it, inspect the remote operation manually, remove only that operation's
 `.json.lock`, then reconcile the preserved `.json` record.
+
+To recover an existing current operation independently of today's Packet, files or
+Git refs, preserve its state file and run:
+
+```bash
+reviewworthy remote reconcile --state /path/to/local/v0.3/operations/rw-ID.json --json
+```
+
+Reconcile verifies the immutable live repository ID, reads a known URL directly,
+and searches the marker with bounded transport reads. Zero matches without a known
+URL preserves pending state. Multiple matches report their canonical URLs and block.
+A removed marker, changed title/Body, PR base/draft drift or changed original head
+requires manual inspection; the command never creates an object or rewrites its Body.
+Without confirmation it may repair local receipts and record an existing Issue note.
+For an absent note only, use the saved operation ID:
+
+```bash
+reviewworthy remote reconcile --state STATE --confirm-operation-id rw-ID --json
+```
+
+That permits at most one exact one-line Issue note after commentability and original
+PR head rechecks. An existing note is not posted again. Incomplete live inspection
+or a wrong confirmation cannot authorize this write. A cached create response with
+`source=local_receipt` is historical evidence; reconcile performs the current check.

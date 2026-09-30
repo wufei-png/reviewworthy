@@ -23,6 +23,7 @@ from .github import (
     build_operation,
     build_signal_operation,
     load_operation_receipt,
+    load_operation_state,
     operation_lock,
     operation_receipt_path,
     pull_request_readiness_blockers,
@@ -46,6 +47,7 @@ from .packet import (
 )
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
+from .remote import inspect_operation, record_inspection
 from .risk import assess_manifest
 from .signal import (
     SIGNAL_AUTHORITY_KINDS,
@@ -344,6 +346,10 @@ def _build_parser() -> argparse.ArgumentParser:
         if name == "create":
             command.add_argument("--confirm-operation-id", required=True)
         _common_json(command)
+    reconcile = remote_commands.add_parser("reconcile", help="Inspect and repair one saved current operation")
+    reconcile.add_argument("--state", type=Path, required=True)
+    reconcile.add_argument("--confirm-operation-id")
+    _common_json(reconcile)
     return parser
 
 
@@ -473,7 +479,7 @@ def _remote_pr_head_reconciliation(
     return None, remote_head_sha
 
 
-def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_url: str) -> tuple[str, str]:
+def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_url: str, *, allow_write: bool = True) -> tuple[str, str]:
     """Reconcile exactly one Issue note after a PR has been created."""
 
     if not operation.issue_url:
@@ -493,6 +499,9 @@ def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_
             return "needs_reconciliation", reason
         save_operation_linked(receipt_path, operation, pr_url)
         return "linked", "existing_exact_note"
+    if not allow_write:
+        save_operation_pr_created(receipt_path, operation, pr_url)
+        return "pr_created", "issue_note_confirmation_required"
     commentability = client.issue_commentability(operation.issue_url)
     if not commentability.get("commentable"):
         reason = str(commentability.get("reason", "issue_not_commentable"))
@@ -510,6 +519,31 @@ def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_
         return "needs_reconciliation", reason
     save_operation_linked(receipt_path, operation, pr_url)
     return "linked", "created_exact_note"
+
+
+def _reconcile_saved_operation(args: argparse.Namespace) -> int:
+    with operation_lock(args.state):
+        operation, record = load_operation_state(args.state)
+        if operation.purpose != "contribution":
+            raise ValueError("Use signal publish reconcile for a signal publication operation")
+        if args.confirm_operation_id is not None and args.confirm_operation_id != operation.operation_id:
+            raise ValueError("Confirmation operation ID does not match the original saved operation")
+        client = GhClient()
+        result = inspect_operation(client, operation, record)
+        record_inspection(args.state, record, result)
+        result.update({"operation_id": operation.operation_id, "receipt_path": str(args.state)})
+        if result["outcome"] == "already_exists":
+            remote = result["remote"]
+            if operation.kind == "issue":
+                save_operation_receipt(args.state, operation, remote)
+            else:
+                save_operation_pr_created(args.state, operation, remote)
+                status, reason = _link_pull_request(client, operation, args.state, remote, allow_write=args.confirm_operation_id == operation.operation_id)
+                result.update({"status": status, "link_source": reason})
+                if status != "linked":
+                    result.update({"outcome": "needs_reconciliation", "reason": reason})
+        _print(result, args.as_json)
+        return 0 if result["outcome"] == "already_exists" else 1
 
 
 def _refresh_candidate_snapshot(packet: dict[str, Any]) -> str:
@@ -973,6 +1007,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["valid"] else 1
 
         if args.command == "remote":
+            if args.remote_command == "reconcile":
+                return _reconcile_saved_operation(args)
             packet, operation, actual_diff = _remote_operation(args)
             payload = operation.as_dict()
             if actual_diff is not None:

@@ -38,6 +38,15 @@ class GhError(RuntimeError):
     """The gh CLI could not complete a requested operation."""
 
 
+class MarkerAmbiguityError(GhError):
+    """A complete marker search found multiple canonical objects."""
+
+    def __init__(self, matches: list[dict[str, Any]]):
+        self.matches = matches
+        urls = [item["url"] for item in matches]
+        super().__init__(f"Multiple remote records contain the current operation marker: {', '.join(urls)}")
+
+
 def pull_request_readiness_blockers(
     packet: dict[str, Any],
     body: str,
@@ -406,6 +415,9 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
     if status != "pending" or remote:
         if _canonical_operation_remote(operation, remote) != remote:
             invalid("remote URL")
+    if record.get("known_remote") is not None:
+        if _canonical_operation_remote(operation, record["known_remote"]) != record["known_remote"]:
+            invalid("known_remote")
     if status == "pending" and (remote or record.get("reason")):
         invalid("pending object already known")
     if kind == "pull_request" or status == "pending":
@@ -566,15 +578,29 @@ class GhClient:
                     "state": item.get("state"),
                 }
                 if operation.marker in str(normalized["body"]):
+                    normalized["url"] = _canonical_operation_remote(operation, normalized["url"])
                     items.append(normalized)
             if len(page) < 100:
                 break
             page_number += 1
         if len(items) > 1:
-            raise GhError(
-                f"Multiple remote records contain the current operation marker; reconcile before retrying: {operation.operation_id}"
-            )
+            raise MarkerAmbiguityError(items)
         return items
+
+    def read_operation_object(self, operation: RemoteOperation, remote: str) -> dict[str, Any]:
+        """Read a known object directly, independently of list visibility."""
+
+        remote = _canonical_operation_remote(operation, remote)
+        parsed = parse_public_record(remote)
+        endpoint = "pulls" if operation.kind == "pull_request" else "issues"
+        record = self._json(["api", f"repos/{operation.repo}/{endpoint}/{parsed['number']}", "--method", "GET"])
+        if not isinstance(record, dict):
+            raise GhError("GitHub object response was not an object")
+        if _canonical_operation_remote(operation, record.get("html_url")) != remote:
+            raise GhError("GitHub object response URL differs from the known URL")
+        if operation.kind == "issue" and "pull_request" in record:
+            raise GhError("Known Issue URL returned a pull request")
+        return record
 
     def pull_request_head(self, pr_url: str) -> str:
         """Read the current head commit for one canonical GitHub pull request."""
