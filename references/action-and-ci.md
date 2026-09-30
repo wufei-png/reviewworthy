@@ -74,8 +74,49 @@ Contributor-local verification, Ownership Check, and AI disclosure remain labele
 
 For policy, the Action reads base-tree repository documents and `.reviewworthy/policy.toml`; a Pull Request cannot grant itself authority by changing policy on its head. Positive natural-language claims are advisory. Only structured base-tree TOML supplies positive machine authority. Explicit document prohibitions, cross-source conflicts, single-document ambiguities, invalid structured policy, and applicable structured requirements can block `evidence-enforce`.
 
+Base-tree input diagnostics also block enforcement: missing explicitly selected
+documents, unsupported source modes (including symlinks), unreadable sources,
+invalid UTF-8/NUL content, unsupported paths, and count/byte limits. `report`
+records these as unknowns without turning the head's policy into fallback authority.
+
 The Action does not fetch missing objects, invoke `gh`, create or edit remote records, infer maintainer approval, or judge the substantive quality of a human explanation. Consumers should use `actions/checkout` with `fetch-depth: 0` so the base and head objects exist locally.
+
+For consumption, set workflow `permissions: { contents: read }` for checkout;
+Reviewworthy itself uses the event file and local Git objects and needs no
+`pull-requests: write`, `issues: write`, `gh` authentication, or secrets. Check out
+with `fetch-depth: 0` and `persist-credentials: false`, and ensure the exact event
+base/head and their merge base are present. Incomplete history or missing objects
+can fail `evidence-enforce`; the Action will not repair history over the network.
+
+Pin checkout, Python setup, and Reviewworthy itself to audited full commit SHAs.
+For Reviewworthy, resolve a published ref from its official repository, verify the
+commit implements the required current contracts, and inspect it before recording
+the full SHA in the consuming workflow. This document supplies no published
+Reviewworthy release pin: local implementation commits are not usable external
+pins until published. A version tag or branch can move. See GitHub's
+[secure use guidance](https://docs.github.com/en/actions/reference/security/secure-use).
+
+Use `pull_request` for this event-based check with read-only permissions and no
+secrets on an isolated runner. `pull_request_target` and `workflow_run` can carry
+privileged tokens, secrets, and trusted cache access: never execute untrusted head
+code, tests, install/build hooks, or a checkout's local `uses: ./` Action in that
+context. Load the Action from a trusted immutable pin; treat the PR's Body and Git
+objects as data. Base-tree policy authority protects policy evaluation only when
+the code performing the evaluation is trusted. The current checker requires a
+`pull_request` event; privileged event names do not satisfy enforcement and are
+not a supported shortcut. Disabling persisted credentials does not make arbitrary
+head code safe in a privileged job. This repository's local `uses: ./` smoke test
+runs under its read-only regression workflow to test the wrapper under development.
 
 External-contribution routing remains the consuming repository's responsibility. A Maintainer Change may follow repository-owned direct-push rules while ordinary CI continues to run; the portable Action does not query provider roles.
 
 Fixture evals are provider-free and narrow. Packet cases assert exact blocker sets plus readiness. Action cases assert exact violation sets and conclusion. JSON Schema validation is test/CI-only through `requirements-dev.txt`; Python validators own stateful semantics such as Git identity, semantic freshness, policy provenance, and remote-write readiness.
+
+The local `action check --mode report` smoke test without a PR event demonstrates
+the runtime path only. Enforcement evidence comes from fixture-owned events and
+Git objects, including malformed events, unavailable base objects and policy
+input failures; it is not a live GitHub runner or provider check. Remote creation
+recovery, including the manual-inspection and explicitly confirmed
+`--retry-uncertain` exception with residual duplicate risk, belongs to the
+[contributor CLI](./remote-writes.md), not the Action. Bounded marker inspection
+does not promise globally exactly-once writes.

@@ -123,9 +123,24 @@ For a policy-required Draft PR, the draft state is included in the operation ID 
 
 The first release does not create review comments or Discussions, close PRs, merge changes, or use an LLM as an Action gatekeeper. It can verify a referenced Discussion read-only through GraphQL; it does not publish Discussions or interpret maintainer responses.
 
+Provider verification and remote writes currently support public repositories on
+`github.com` through the authenticated `gh` CLI. Private repositories, GitHub
+Enterprise hosts, and private advisory APIs are outside that adapter contract.
+The [private security-reporting exception](./SECURITY.md) is a human-owned intake
+and coordinated-fix process; the CLI does not ingest private reports or require
+their details to be published to satisfy ordinary contribution gates.
+
 The repository also ships a read-only composite Action in [`action.yml`](./action.yml). The pull-request Body shows maintainers a human-readable overview, followed by the current versioned machine-readable Evidence Summary. The overview labels contributor-local verification, ownership, and AI disclosure as claims; “ready for maintainer review” describes completion of the contributor workflow, not maintainer approval or a quality score. The Action parses the machine block and recomputes repository- and diff-owned facts. Default `report` mode is non-blocking; `evidence-enforce` requires a valid current Summary and exact recomputed diff identity. The Action never reads a Packet from the checkout, fetches missing objects, publishes, comments, or infers maintainer approval. Consumers that enable `evidence-enforce` should check out with `fetch-depth: 0`.
 
 The runtime has no third-party dependencies. Schema validation is a test/CI-only concern: `requirements-dev.txt` installs `jsonschema`, and CI validates the portable schemas and generated test artifacts without adding it to the package runtime dependencies. Fixture evals assert exact blocker/violation sets and conclusion/result outcomes rather than whole response snapshots.
+
+The composite wrapper checks runnable Python >=3.11 and Git before importing the
+package; missing prerequisites fail in both modes even though report findings are
+non-blocking. Consumer workflows should use `contents: read`, disable persisted
+checkout credentials, and pin all Actions to verified published full commits.
+Do not execute untrusted head code under privileged events. See the
+[Action setup and trust boundaries](./references/action-and-ci.md) for complete
+history, base-tree authority, and the Python 3.11–3.13 CI matrix.
 
 ## Documents
 
