@@ -1,6 +1,6 @@
 # 04 — 实现前 Packet 操作接口
 
-Design status: **Approved (2026-09-30)**. Execution status: **Not started**.
+Design status: **Approved (2026-09-30)**. Execution status: **Complete (2026-09-30)**.
 
 Earlier foundations (ordering reference): 02。
 
@@ -39,9 +39,26 @@ Use implement-in-stages for scoped local commits, then delegated-change-review f
 
 Update this plan and the queue together after implementation/review; do not start the next session automatically.
 
-- Status: Not started.
-- Comparison base and commits: —
-- Checks/results: —
-- Review findings and decisions: —
-- Fixes and rechecks: —
-- Final interfaces/deviations/unverified items: —
+- Status: Complete (2026-09-30). Only session 04 was executed; no push, release, remote object creation or mutation canary.
+- Comparison base: `eb329da` (`eb329da..d28abf4` was the full delegated-review target).
+- Stage commits:
+  1. `df7c515` — typed policy/basis operations, shared atomic Packet replacement and result/invalidation maintenance; existing candidate bind/transition and Issue verification recording use that seam. 109 focused Packet/mutation/workflow/CLI/schema tests passed.
+  2. `1556bce` — Contract field binding and explicit human approval of the embedded Contract; source approval is not imported and the standalone artifact is not changed. 137 focused tests including artifact validation passed.
+  3. `0d4442d` — monotonic review recording and exact verification-plan recording with CLI-owned digest. 116 focused tests passed.
+  4. `d28abf4` — current `next` suggestions, active Skill/references/README and a CLI-only pre-implementation journey. 101 focused tests passed.
+- Checks/results: Python 3.11.5 passed 313 tests before review and 315 tests after the accepted fixes and final idempotence audit with `PYTHONPATH=src python -m unittest discover -s tests -v`. All 11 eval fixtures passed before and after fixes. `python -m compileall -q src tests` and complete-range `git diff --check eb329da` passed. Schema checks used the available test-only `jsonschema` dependency; runtime dependencies and artifact versions did not change. The journey uses a real temporary Git repository and a fake read-only provider; it is not live-provider evidence.
+- Review findings and decisions: one fresh read-only subagent used `review-agent` and inspected the full session diff. It independently passed 124 focused tests and reported two P2 findings. Both were independently reproduced and accepted; no rejected findings. The first found that schema-valid review sections can omit optional lists; the second found that verified PR/Discussion Signals supplied an immutable ID that basis binding failed to retain. No second delegated review was run after fixes; regression checks verified the accepted fixes.
+- Fixes and rechecks:
+  - `d7c36f3` — initialize absent optional review lists while rejecting malformed present values; 82 mutation/Packet/workflow/schema tests passed, including the CLI failure-without-write regression.
+  - `a5a6745` — final audit found that filling absent optional review lists on an identical minimal input unnecessarily reset receipts. Preserve absent empty lists; regression assertions verify identical-input receipt/understanding preservation. 83 mutation/Packet/workflow/schema tests passed.
+  - `c4fa93a` — import an absent immutable repository ID from validated external Signal evidence and preserve identity-mismatch rejection; 72 mutation/Signal/CLI/schema tests passed, including PR and Discussion cases. Final full regression/eval/compile/diff checks passed after these fixes.
+- Final interfaces:
+  - `packet policy bind --root ROOT --packet PACKET [--json]` collects policy itself.
+  - `packet basis record --packet PACKET (--issue URL | --signal FILE) [--repository OWNER/REPO] [--json]` records the existing basis fields. Public references infer an absent slug; verified external Signal evidence supplies an absent immutable ID. Existing candidate recommendation/duplicate gates remain attached, and existing read-only Issue/Signal verification remains required.
+  - `packet contract bind --packet PACKET --contract FILE [--json]` binds the standalone Contract fields; identical fields preserve current approval.
+  - `packet contract approve --packet PACKET --human-confirmed [--json]` checks established policy, valid verified basis and candidate/hard-stop gates, then computes the current embedded Contract hash. No second approved copy is required.
+  - `packet review record --packet PACKET --input FILE [--json]` accepts the existing review section or `risk assess --json` result, merges signals/stops and only raises scrutiny. Clearing hard stops is outside this recording interface.
+  - `packet verification plan --packet PACKET --input FILE [--json]` accepts the existing plan/check shape and computes its digest; argv/cwd/required retain their exact semantics. Changed plans reset receipts and affected results.
+- Invalidation: material basis/policy changes reset Contract approval; material Contract edits require approval again and reset the implementation binding. Review/plan changes preserve Contract approval and implementation binding but reset affected verification, Ownership, narrative confirmation and understanding. Old understanding content/material hashes remain for explanation with status reset; no completed record is made current by assigning a new hash. Identical semantic inputs and provider timestamp-only refreshes preserve current evidence.
+- Deviations: added optional `basis record --repository` because a local Signal has no public URL from which to infer the Packet's missing identity. This uses the existing repository fields rather than a new envelope. `next` treats the default skeleton's empty slug as incomplete and asks for a missing verification plan before suggesting implementation; absent human content/approval stays a decision hint.
+- Unverified items/limits: Python 3.12/3.13, live GitHub/provider/runner behavior and wheel/release installation were not exercised locally in 04. Existing remote race/visibility limits remain. Human confirmation remains a contributor claim; no new authentication or authority inference was added. Session 05/06 were not started.
