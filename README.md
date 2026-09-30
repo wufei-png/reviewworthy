@@ -13,14 +13,25 @@ The project brand is **Reviewworthy**. The portable Agent Skill is **`maintainer
 The normal entry is an existing repository Issue. Ask an Agent with the installed `maintainer-first-contribution` Skill to prepare the contribution from that Issue. The Skill owns the conversation; the CLI preserves deterministic evidence and tells the Skill what is unresolved.
 
 ```bash
-reviewworthy packet init --root . --contribution-id contribution-001
-PACKET=.git/reviewworthy/v0.3/contributions/contribution-001/packet.json
+reviewworthy start --root . --contribution-id contribution-001 \
+  --issue https://github.com/OWNER/REPO/issues/123 --focus src/relevant-file.py --json
+# Use the returned Packet path (Git worktrees may use a different metadata path):
+PACKET=$(git rev-parse --git-path reviewworthy/v0.3/contributions/contribution-001/packet.json)
 reviewworthy status --packet "$PACKET" --json
 reviewworthy next --packet "$PACKET" --json
 ```
 
-Bind the repository's policy directly and record the Issue basis without editing the
-Packet or inventing a Candidate Menu:
+`start` creates or reuses Git-private Packet and Project Brief artifacts, binds
+current repository policy and the explicit Issue on initialization, and verifies
+the Issue through read-only `gh` calls. Repeat `--focus` for additional selected
+files. It returns artifact paths and the next action; provider failures preserve
+those artifacts for retry. Repeating start retains existing bound decisions and
+contributor content, reports Brief freshness, and labels reused verification.
+The Brief remains a source manifest; the Skill and contributor own understanding.
+
+For advanced initialization, use `packet init`. To deliberately refresh policy or
+change the basis, use typed operations without editing the Packet or inventing a
+Candidate Menu:
 
 ```bash
 reviewworthy packet policy bind --root . --packet "$PACKET" --json
@@ -40,6 +51,17 @@ basis or policy changes reset Contract approval and affected downstream evidence
 identical inputs and provider timestamp refreshes preserve current evidence.
 
 From there, follow `next`: inspect repository policy, record and verify the Issue-backed contribution basis, agree the bounded Contract, implement only after approval, bind the finished Diff, run the Packet's verification plan, demonstrate ownership, and review the exact PR narrative before any confirmed remote write. Re-run `status` or `next` after each transition instead of reconstructing progress from prose.
+
+Prepare a bounded Contract and a plan with exact check commands; the Skill helps
+write those inputs and obtains the contributor's decisions. The CLI leaves absent
+human choices visible in `next`, including actual PR target refs at the ready
+boundary. If a matching current remote operation is unresolved, `next` suggests
+saved-operation reconciliation while retaining the Packet's evidence-derived stage.
+
+Keep working Contract, review, plan, Ownership, AI and Body input files beside the
+returned Packet (or in another Git-ignored location). Diff binding and receipt
+execution require a clean worktree; evidence drafts must not accidentally become
+contribution changes.
 
 Before implementation, use the existing Contract, review and plan shapes:
 

@@ -1,6 +1,6 @@
 # 06 — Onboarding 与完整旅程
 
-Design status: **Approved (2026-09-30)**. Execution status: **Not started**.
+Design status: **Approved (2026-09-30)**. Execution status: **Implemented; delegated review pending**.
 
 Earlier foundations (ordering reference): 01–05。
 
@@ -28,9 +28,11 @@ Use implement-in-stages for scoped local commits, then delegated-change-review f
 
 Update this plan and the queue together after implementation/review; do not start the next session automatically.
 
-- Status: Not started.
-- Comparison base and commits: —
-- Checks/results: —
-- Review findings and decisions: —
-- Fixes and rechecks: —
-- Final interfaces/deviations/unverified items: —
+- Status: Implemented; delegated review pending (2026-09-30).
+- Comparison base: `894e1f9a6c55627018bd5c06c40efa9c30270ea2`.
+- Commits: `afe0dab` (retryable start; 82 focused tests), `72457ea` (next/recovery and journeys; 59 focused tests); current documentation stage records distribution evidence.
+- Checks/results: Python 3.11.5 passed 336 unit tests (including schema/generated-artifact validation), 11 eval fixtures, compileall and diff checks. Local Action report smoke passed with `checked=false` because no PR event was supplied; event enforcement is covered by hermetic Git/event fixtures. Build environment used setuptools 84.0.0 and `pip wheel --no-deps --no-build-isolation --wheel-dir /tmp/reviewworthy-wheel .`. A separate clean environment installed that wheel with `--no-deps`, reported version `0.3.0a1`, and ran all four E2E test methods from `/tmp` without source PYTHONPATH. Import resolved to that environment's site-packages; wheel metadata has no runtime dependencies.
+- Review findings and decisions: Pending one fresh read-only review over the full comparison-base diff.
+- Fixes and rechecks: None yet.
+- Final interfaces: `start --root ROOT --contribution-id ID --issue URL [--focus PATH ...] --json`; existing `status/next --packet FILE --json` retained. Start returns Git-private Packet/Brief paths, freshness findings, verification provenance and derived status; existing decisions/prose are preserved, recorded Issue verification is reused explicitly, and deliberate changes use existing typed operations. Ready `next` returns a decision hint for actual refs/Body export, or an executable `remote reconcile --state FILE --json` for an exact current unresolved PR operation. No new schema/artifact version or session state.
+- Evidence boundaries: Python, Node and Go tooling-shape journeys use real Git and Python subprocess receipts with a strict fake gh transport. npm/Go execution, Python 3.12/3.13, live GitHub/provider/runner permissions and a published release remain unverified locally. No push or remote object creation was performed.
