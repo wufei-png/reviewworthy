@@ -1,6 +1,6 @@
 # 03 — Action、CI 与支持文档
 
-Design status: **Approved (2026-09-30)**. Execution status: **Not started**.
+Design status: **Approved (2026-09-30)**. Execution status: **Complete (2026-09-30)**.
 
 Earlier foundations (ordering reference): 02。
 
@@ -23,9 +23,52 @@ Use implement-in-stages for scoped local commits, then delegated-change-review f
 
 Update this plan and the queue together after implementation/review; do not start the next session automatically.
 
-- Status: Not started.
-- Comparison base and commits: —
-- Checks/results: —
-- Review findings and decisions: —
-- Fixes and rechecks: —
-- Final interfaces/deviations/unverified items: —
+- Status: Complete (2026-09-30), scoped local implementation only.
+- Comparison base: `a4c316b06c1362872ac9e28ad0f684676cde014f`.
+- Stage 1: `afe6fbb` — composite Python/Git preflight, immutable upstream CI pins,
+  checkout credentials disabled, and fixture enforcement/diagnostic coverage.
+  33 Action tests and 102 CLI/Policy/Git/Schema tests passed; after moving the
+  poisoned Packet fixture to current Git-private state, its wrapper integration
+  test passed again. Compileall and staged diff checks passed before commit.
+- Stage 2: `d8c9741` — Action permissions/history/trust/pinning guidance,
+  public-provider and private security-intake boundaries, durable eval description,
+  and release guidance with the explicit uncertain-create retry exception.
+  27 documentation/artifact tests passed. Newly executed evidence is recorded here,
+  separately from the existing release checklist.
+- Final checks: `PYTHONPATH=src python -m unittest discover -s tests -v` passed
+  **298 tests** on Python **3.11.5**; `PYTHONPATH=src python -m reviewworthy eval run --json`
+  passed **11 fixtures**; `python -m compileall -q src tests`, worktree/staged/full-range
+  diff checks passed. `action check --mode report` without a PR event passed with
+  missing-Summary unknowns: this is runtime smoke evidence only. Repository policy
+  dogfood inspection remained explicit with no conflicts, ambiguities or diagnostics.
+- Enforcement evidence: actual composite Bash execution over fixture-owned
+  PR events/Git objects passed and rejected unavailable base objects; malformed
+  JSON/event shapes remained non-blocking in report and failed enforcement.
+  Base-policy tests cover invalid configuration, invalid encoding, byte limits,
+  unsupported symlinks and controlled unreadable-blob failures, alongside the
+  existing missing-source, conflict, ambiguity and base-authority tests. Recorded
+  Git calls were read-only; the poisoned current private Packet was untouched,
+  and the `gh` trap was never invoked. Old Python is simulated by a test shim;
+  missing/broken Python and Git are exercised with a controlled PATH.
+- Upstream evidence: official `git ls-remote` and release/commit pages were checked
+  on 2026-09-30. `actions/checkout` `v7`/`v7.0.1` resolved to
+  `3d3c42e5aac5ba805825da76410c181273ba90b1`; `actions/setup-python` `v7`/`v7.0.0`
+  resolved to `5fda3b95a4ea91299a34e894583c3862153e4b97`. Source links are in
+  [the active Action reference](../../references/action-and-ci.md).
+- Review: one fresh read-only subagent using `review-agent`, via
+  `delegated-change-review`, inspected the full `a4c316b..d8c9741` change and
+  relevant call sites. Conclusion: **No findings**. Accepted/rejected findings:
+  none; no review fixes required. The reviewer independently passed all 33 Action
+  tests and full-range diff checks and confirmed the official upstream pins.
+- Record closure: this plan and the queue are updated together in the final
+  documentation commit; documentation/artifact and full-range diff checks are
+  rerun for that record update.
+- Final interfaces: no new CLI command, flag, schema or artifact version. The
+  composite wrapper exits **2** for unusable prerequisites in either mode before
+  imports; usable-runtime `report` findings remain non-blocking. Existing
+  `evidence-enforce` behavior and the Python 3.11–3.13 CI matrix are preserved.
+- Deviations/unverified items: none in scope. Python 3.12/3.13 and an actual old
+  Python interpreter, live GitHub runner/provider behavior, wheel installation and
+  release validation were not executed locally. No push, publication, remote
+  writes or mutation canary. Full history, trusted pinned execution and bounded
+  remote visibility/race limits remain documented operational constraints.

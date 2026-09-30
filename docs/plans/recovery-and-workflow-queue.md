@@ -1,6 +1,6 @@
 # Reviewworthy recovery and workflow queue — 2026-09-30
 
-Design status: **Approved by the user on 2026-09-30**. Sessions 01–02 are complete; sessions 03–06 are not started.
+Design status: **Approved by the user on 2026-09-30**. Sessions 01–03 are complete; sessions 04–06 are not started.
 
 This is the approved implementation queue. Each session plan contains its own planned interfaces, target files, stages and acceptance criteria. Read this queue and only the selected session plan before inspecting its referenced code/tests/contracts.
 
@@ -77,7 +77,7 @@ The plan numbers 01–06 correspond to the approved design's original S1–S6. N
 |---|---|---|---|---|
 | [01 — 远端操作恢复](./01-remote-recovery.md) | Complete (2026-09-30) | `bff7626`, `5ba38e9`, `f71e7e6`, `db001c2`, `9b05957`; fixes `be4767d`, `43cc333` | 262 unit tests, 11 evals, compileall and full-range diff checks passed. One fresh read-only review; both P2 findings reproduced, accepted and fixed; focused rechecks passed. | Final interfaces match the plan. No live GitHub writes or push. Pre-existing current Signal snapshot/whitespace omissions and bounded visibility/race limits are documented in 01. |
 | [02 — Policy 与 Git 输入边界](./02-policy-and-git-inputs.md) | Complete (2026-09-30) | `b575ac8`, `93825f9`, `f9ff4cc`; audit fix `322289a`; review fix `11e1b3d` | 292 unit tests, 11 evals, compileall and full-range diff checks passed. One fresh read-only review found one P2 Gitlink parity defect; independently reproduced, accepted and fixed; 108 focused tests and final regression/full rechecks passed. | Existing CLI unchanged; exact optional authoritative-document list and bounded policy diagnostics delivered. Unusual historical Diff fields may need rebinding/reverification; saved-operation recovery remains intact. Python 3.12/3.13 and live-provider checks unverified locally; no remote writes/push. |
-| [03 — Action、CI 与支持文档](./03-action-and-ci.md) | Not started | — | — | — |
+| [03 — Action、CI 与支持文档](./03-action-and-ci.md) | Complete (2026-09-30) | `afe6fbb`, `d8c9741`; final documentation commit closes the record | 298 unit tests, 11 evals, compileall and full-range diff checks passed. One fresh read-only review: No findings; reviewer independently passed 33 Action tests and verified upstream pins. Documentation/artifact checks rerun for record closure. | Wrapper preflight exits 2 before imports; CLI/contracts unchanged. Upstream pins verified live; fixture enforcement is provider-free. Python 3.12/3.13, actual old Python, live GitHub runner/provider and wheel/release checks unverified locally; no remote writes/push. |
 | [04 — 实现前 Packet 操作接口](./04-preimplementation-mutations.md) | Not started | — | — | — |
 | [05 — 验证、Ownership 与公开叙述](./05-evidence-and-narrative.md) | Not started | — | — | — |
 | [06 — Onboarding 与完整旅程](./06-onboarding-journey.md) | Not started | — | — | — |
