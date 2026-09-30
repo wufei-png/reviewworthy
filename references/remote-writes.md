@@ -4,6 +4,29 @@ Remote writes are explicit operations, not incidental side effects.
 
 The CLI first renders the exact target, title, Body, base/head, permissions, and stable operation ID. The user confirms that operation ID. If any rendered field changes, the old confirmation is invalid.
 
+Before planning, record and approve the current public narrative:
+
+```bash
+reviewworthy packet narrative record --packet "$PACKET" --title "Fix the bounded failure" --body-file body.md --json
+reviewworthy packet narrative preview --packet "$PACKET" --output .git/reviewworthy/body.md --json
+reviewworthy packet narrative confirm --packet "$PACKET" --human-confirmed --json
+```
+
+`record` preserves the exact title/Body and accepts optional `--human-expression-file`
+for contributor-authored motivation, trade-offs and risks. Changed prose or human
+expression clears final approval; identical recording preserves it. `preview` is
+read-only for the Packet and displays current prose plus the public evidence
+projection with blockers for proposed confirmation. Its optional output saves the
+raw Body for `remote plan/create`; that file is a convenience and carries no authority.
+`confirm` asserts explicit human approval after viewing the preview, confirms the
+current disclosure, and requires complete current evidence, exact Issue linkage,
+policy disclosure and human-expression gates. It does not infer stage verification.
+There is no additional confirmation artifact or challenge. `remote plan` recomputes
+Git identity and adds the operation marker; its title/Body inputs must equal the
+Packet text exactly, including whitespace. Review that final plan before confirming
+its operation ID. Changes to implementation, required verification, Ownership,
+understanding, AI claims or prose require the appropriate human reapproval.
+
 The operation ID is embedded in the Body as:
 
 ```text

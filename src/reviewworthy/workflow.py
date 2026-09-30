@@ -33,7 +33,8 @@ _STAGE_CODES = (
     }),
     ("narrative", {
         "missing_pr_title", "missing_pr_body", "narrative_not_confirmed", "missing_ai_disclosure",
-        "missing_disclosure_location", "disclosure_not_human_confirmed", "missing_human_expression",
+        "missing_disclosure_location", "disclosure_not_human_confirmed", "missing_human_expression", "missing_disclosure_stage",
+        "disclosure_not_in_pr_body", "disclosure_overclaims_verification",
     }),
 )
 
@@ -179,11 +180,18 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
             ]
         return [{"kind": "decision", "command": "", "reason": f"Define at least one required verification-plan check, then record the plan with `reviewworthy packet verification plan --packet {quoted_packet} --input FILE --json`."}]
     if stage == "ownership":
-        return [{"kind": "decision", "command": "", "reason": "Complete the light Ownership Check: problem, scope, verification, and risks."}]
+        return [{"kind": "decision", "command": "", "reason": f"Complete the light Ownership Check, then record its explicit outcome and problem/scope/verification/risks with `reviewworthy packet ownership record --packet {quoted_packet} --input FILE --json`."}]
     if stage == "understanding":
         return [{"kind": "command", "command": f"reviewworthy understanding validate {quoted_packet} --json", "reason": "Inspect the Heightened/Learning understanding gaps, then record current Orientation and Assessment."}]
     if stage == "narrative":
-        return [{"kind": "decision", "command": "", "reason": "Finish remaining flow evidence and the human-owned PR narrative."}]
+        codes = {error["code"] for error in readiness_blockers(packet)}
+        if codes & {"missing_ai_disclosure", "missing_disclosure_location", "missing_disclosure_stage", "disclosure_overclaims_verification"}:
+            return [{"kind": "decision", "command": "", "reason": f"Record explicit assistance and disclosure claims with `reviewworthy packet ai record --packet {quoted_packet} --input FILE --json`."}]
+        if codes & {"missing_pr_title", "missing_pr_body", "missing_human_expression", "disclosure_not_in_pr_body"}:
+            return [{"kind": "decision", "command": "", "reason": f"Finish current prose and human expression, then use `reviewworthy packet narrative record --packet {quoted_packet} --title TITLE --body-file FILE --json` (add --human-expression-file FILE when required)."}]
+        return [{"kind": "command", "command": f"reviewworthy packet narrative preview --packet {quoted_packet} --json",
+                 "reason": f"Review the exact current prose/disclosure, then explicitly approve it with `reviewworthy packet narrative confirm --packet {quoted_packet} --human-confirmed --json`."}]
+
     if stage == "invalid":
         return [{"kind": "command", "command": f"reviewworthy packet validate {quoted_packet} --json", "reason": "Repair the current Packet 0.3 structure before continuing."}]
     if stage == "blocked":

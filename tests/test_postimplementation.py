@@ -35,6 +35,8 @@ class EvidenceMutationTests(unittest.TestCase):
         partial = maintain_packet(packet, packet)
         self.assertEqual(node(partial, 'verification')['status'], 'not_run')
         self.assertEqual(len(partial['verification']['receipts']), 1)
+        from reviewworthy.evidence import build_evidence_summary
+        self.assertEqual(build_evidence_summary(partial, partial['diff'])['claims']['verification']['claimed_outcome'], 'not_recorded')
         self.assertIn('--check-id second', workflow_status(partial, Path('packet.json'))['next'][0]['command'])
         second = deepcopy(partial['verification']['receipts'][0])
         second.update(check_id='second', exit_code=1, command_outcome='failed')
@@ -158,3 +160,159 @@ class EvidenceMutationTests(unittest.TestCase):
                 before = path.read_bytes()
                 self.assertEqual(self.call('packet', 'ai', 'record', '--packet', str(path), '--input', str(source))[0], 2)
                 self.assertEqual(path.read_bytes(), before)
+
+
+    def test_narrative_exact_preview_confirm_and_later_reapproval(self) -> None:
+        packet = valid_packet()
+        packet['policy']['authoritative_claims']['disclosure_required'] = True
+        packet['narrative']['body'] += '\n' + packet['ai_assistance']['disclosure']['text']
+        packet['snapshots']['semantic'] = semantic_snapshot(packet)
+        for phase in packet['understanding'].values():
+            phase['semantic_snapshot'] = packet['snapshots']['semantic']
+        with tempfile.TemporaryDirectory() as directory:
+            path, source = Path(directory) / 'packet.json', Path(directory) / 'body.md'
+            path.write_text(json.dumps(packet))
+            body = packet['narrative']['body'] + '\nA concrete explanation.\n'
+            source.write_text(body)
+            args = ('packet', 'narrative', 'record', '--packet', str(path), '--title', 'Exact title', '--body-file', str(source))
+            self.assertEqual(self.call(*args)[0], 0)
+            recorded = json.loads(path.read_text())
+            self.assertFalse(recorded['narrative']['final_preview_confirmed'])
+            self.assertEqual(recorded['verification'], packet['verification'])
+            before = path.read_bytes()
+            preview_path = Path(directory) / 'preview.md'
+            code, preview = self.call('packet', 'narrative', 'preview', '--packet', str(path), '--output', str(preview_path))
+            self.assertEqual(code, 0)
+            self.assertEqual(preview['body'], body)
+            self.assertEqual(preview['confirmation_blockers'], [])
+            self.assertEqual(preview_path.read_text(), body)
+            self.assertEqual(path.read_bytes(), before)
+            code, confirmed = self.call('packet', 'narrative', 'confirm', '--packet', str(path), '--human-confirmed')
+            self.assertEqual(code, 0)
+            self.assertTrue(confirmed['status']['ready'])
+            current = json.loads(path.read_text())
+            self.assertTrue(current['ai_assistance']['disclosure']['human_confirmed'])
+            from reviewworthy.github import build_operation
+            operation = build_operation(current, 'example/project', 'pull_request', 'Exact title', body, 'main', 'HEAD', current['diff'])
+            self.assertEqual(operation.body, preview['public_body'].rstrip() + '\n\n' + operation.marker)
+            # Identical recording preserves the approval.
+            self.assertEqual(self.call(*args)[0], 0)
+            self.assertTrue(json.loads(path.read_text())['narrative']['final_preview_confirmed'])
+            source.write_text(body + 'Edited risk.\n')
+            self.assertEqual(self.call(*args)[0], 0)
+            self.assertFalse(json.loads(path.read_text())['narrative']['final_preview_confirmed'])
+            self.assertIn('narrative preview', self.call('next', '--packet', str(path))[1]['next'][0]['command'])
+
+    def test_confirmation_rejects_missing_link_disclosure_expression_and_current_evidence(self) -> None:
+        from reviewworthy.packet_mutation import confirm_narrative
+        for mutate in (
+            lambda data: data['narrative'].update(body='No Issue URL'),
+            lambda data: data['policy']['authoritative_claims'].update(disclosure_required=True),
+            lambda data: data['policy']['authoritative_claims'].update(human_pr_narrative_required=True),
+            lambda data: data['verification'].update(receipts=[]),
+            lambda data: data['review'].update(profile='heightened'),
+        ):
+            packet = valid_packet()
+            mutate(packet)
+            with self.assertRaises(ValueError):
+                confirm_narrative(packet, human_confirmed=True)
+        with self.assertRaises(ValueError):
+            confirm_narrative(valid_packet(), human_confirmed=False)
+
+    def test_cli_standard_journey_reaches_remote_plan_with_real_receipts(self) -> None:
+        import subprocess
+        import sys
+        from reviewworthy.contract import skeleton_contract
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
+            git('init', '-q', '-b', 'main')
+            git('config', 'user.name', 'Test Contributor')
+            git('config', 'user.email', 'test@example.invalid')
+            (root / 'README.md').write_text('AI assistance is allowed.\nAI assistance must be disclosed in the PR body.\n')
+            (root / 'src').mkdir()
+            (root / 'src/example.py').write_text('one\n')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            code, created = self.call('packet', 'init', '--root', str(root), '--contribution-id', 'journey')
+            self.assertEqual(code, 0)
+            path = Path(created['created'])
+            source = root / '.git/input.json'
+            self.assertEqual(self.call('packet', 'policy', 'bind', '--root', str(root), '--packet', str(path))[0], 0)
+            self.assertEqual(self.call('packet', 'basis', 'record', '--packet', str(path), '--issue', 'https://github.com/example/project/issues/1')[0], 0)
+            remote = {**valid_packet()['basis']['verification'], 'verified': True, 'labels': []}
+            with patch('reviewworthy.cli.GhClient') as provider:
+                provider.return_value.verify_public_reference.return_value = remote
+                self.assertEqual(self.call('issue', 'verify', '--packet', str(path), '--record')[0], 0)
+            contract = skeleton_contract('journey')
+            contract.update(problem='Bounded failure', design='Guard the input', scope={'files': ['src/example.py']})
+            source.write_text(json.dumps(contract))
+            self.assertEqual(self.call('packet', 'contract', 'bind', '--packet', str(path), '--contract', str(source))[0], 0)
+            self.assertEqual(self.call('packet', 'contract', 'approve', '--packet', str(path), '--human-confirmed')[0], 0)
+            plan = {'plan_version': '0.1', 'checks': [{'id': 'unit', 'argv': [sys.executable, '-c', 'raise SystemExit(0)'], 'cwd': '.', 'required': True}]}
+            source.write_text(json.dumps(plan))
+            self.assertEqual(self.call('packet', 'verification', 'plan', '--packet', str(path), '--input', str(source))[0], 0)
+            git('checkout', '-qb', 'contribution')
+            (root / 'src/example.py').write_text('one\ntwo\n')
+            git('add', 'src/example.py')
+            git('commit', '-qm', 'implementation')
+            self.assertEqual(self.call('diff', 'bind', '--root', str(root), '--packet', str(path), '--base', 'main', '--head', 'HEAD')[0], 0)
+            self.assertEqual(self.call('next', '--packet', str(path))[1]['current_stage'], 'verification')
+            self.assertEqual(self.call('verify', 'run', '--root', str(root), '--packet', str(path), '--check-id', 'unit')[0], 0)
+            self.assertEqual(self.call('next', '--packet', str(path))[1]['current_stage'], 'ownership')
+            source.write_text(json.dumps(valid_packet()['ownership']))
+            self.assertEqual(self.call('packet', 'ownership', 'record', '--packet', str(path), '--input', str(source))[0], 0)
+            source.write_text(json.dumps(valid_packet()['ai_assistance']))
+            self.assertEqual(self.call('packet', 'ai', 'record', '--packet', str(path), '--input', str(source))[0], 0)
+            body_path = root / '.git/body.md'
+            body_path.write_text('https://github.com/example/project/issues/1\n\nFix the bounded failure.\n' + valid_packet()['ai_assistance']['disclosure']['text'] + '\n')
+            self.assertEqual(self.call('packet', 'narrative', 'record', '--packet', str(path), '--title', 'Fix bounded failure', '--body-file', str(body_path))[0], 0)
+            self.assertEqual(self.call('packet', 'narrative', 'preview', '--packet', str(path))[1]['confirmation_blockers'], [])
+            self.assertEqual(self.call('packet', 'narrative', 'confirm', '--packet', str(path), '--human-confirmed')[0], 0)
+            self.assertTrue(self.call('next', '--packet', str(path))[1]['ready'])
+            args = ('remote', 'plan', '--root', str(root), '--packet', str(path), '--repo', 'example/project', '--kind', 'pull_request', '--title', 'Fix bounded failure', '--body-file', str(body_path), '--base', 'main', '--head', 'HEAD')
+            with patch('reviewworthy.cli.GhClient') as provider:
+                code, operation = self.call(*args)
+                self.assertEqual(code, 0)
+                self.assertEqual(operation['readiness_blockers'], [])
+                provider.assert_not_called()
+            current = json.loads(path.read_text())
+            self.assertTrue(all(record['status'] == 'passed' and record['evidence'] for record in current['results']))
+            self.assertEqual(current['verification']['receipts'][0]['provenance'], 'contributor_local')
+            body_path.write_text(body_path.read_text() + '\n')
+            self.assertEqual(self.call(*args)[0], 2)
+
+    def test_heightened_and_learning_require_current_orientation_then_assessment(self) -> None:
+        from reviewworthy.understanding import RUBRIC_CATEGORIES
+        for profile in ('heightened', 'learning'):
+            packet = valid_packet()
+            packet['review']['profile'] = profile
+            packet['narrative']['human_expression_required'] = True
+            packet['narrative']['human_expression'] = ''
+            packet['snapshots']['semantic'] = semantic_snapshot(packet)
+            for phase in packet['understanding'].values():
+                phase['status'] = 'not_run'
+                phase['semantic_snapshot'] = packet['snapshots']['semantic']
+            with tempfile.TemporaryDirectory() as directory:
+                path, body_path, expression = (Path(directory) / name for name in ('packet.json', 'body.md', 'human.md'))
+                path.write_text(json.dumps(packet))
+                body_path.write_text(packet['narrative']['body'])
+                expression.write_text('I chose the narrow boundary to preserve callers; the old exception behavior is the risk.')
+                self.assertEqual(self.call('packet', 'narrative', 'record', '--packet', str(path), '--title', packet['narrative']['title'], '--body-file', str(body_path), '--human-expression-file', str(expression))[0], 0)
+                rubric = [argument for category in sorted(RUBRIC_CATEGORIES) for argument in ('--rubric', f'{category}=Concrete contributor evidence for {category}.')]
+                assessment = ('understanding', 'record', str(path), '--phase', 'assessment', '--status', 'passed', '--question', 'Which invariant protects callers?', '--answer', 'The existing input boundary preserves the caller contract.', *rubric)
+                before = path.read_bytes()
+                self.assertEqual(self.call(*assessment)[0], 2)
+                self.assertEqual(path.read_bytes(), before)
+                orientation = ('understanding', 'record', str(path), '--phase', 'orientation', '--status', 'passed', '--summary', 'Explained the current contract and failure path.', '--topic', 'contract', '--topic', 'diff', '--topic', 'verification', '--topic', 'policy', *rubric)
+                self.assertEqual(self.call(*orientation)[0], 0)
+                self.assertEqual(self.call('packet', 'narrative', 'confirm', '--packet', str(path), '--human-confirmed')[0], 2)
+                self.assertEqual(self.call(*assessment)[0], 0)
+                self.assertEqual(self.call('packet', 'narrative', 'confirm', '--packet', str(path), '--human-confirmed')[0], 0)
+                changed_orientation = list(orientation)
+                changed_orientation[changed_orientation.index('--summary') + 1] = 'A revised explanation of the failure path.'
+                self.assertEqual(self.call(*changed_orientation)[0], 0)
+                current = json.loads(path.read_text())
+                self.assertEqual(current['understanding']['assessment']['status'], 'not_run')
+                self.assertFalse(current['narrative']['final_preview_confirmed'])

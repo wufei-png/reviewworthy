@@ -65,6 +65,29 @@ reviewworthy diff bind --root . --packet "$PACKET" --base main --head HEAD --jso
 reviewworthy next --packet "$PACKET" --json
 ```
 
+Complete the post-implementation evidence through typed operations:
+
+```bash
+reviewworthy verify run --root . --packet "$PACKET" --check-id unit --json
+reviewworthy packet ownership record --packet "$PACKET" --input ownership.json --json
+reviewworthy packet ai record --packet "$PACKET" --input ai-assistance.json --json
+reviewworthy packet narrative record --packet "$PACKET" --title "Fix the bounded failure" --body-file body.md --json
+reviewworthy packet narrative preview --packet "$PACKET" --output .git/reviewworthy/body.md --json
+# Only after the human approves the displayed prose and current disclosure:
+reviewworthy packet narrative confirm --packet "$PACKET" --human-confirmed --json
+reviewworthy next --packet "$PACKET" --json
+```
+
+Ownership and AI inputs are the existing Packet sections, with explicit check
+outcomes and boolean human claims. Policy-required human expression can be supplied
+with `--human-expression-file FILE` on narrative recording. Heightened/Learning
+still require current Orientation followed by Assessment before final confirmation.
+The preview exports the exact current Body for subsequent remote commands and shows
+the public evidence projection; `remote plan` additionally renders the operation
+marker and recomputes Git identity. Remote title/Body inputs must match the Packet
+exactly, including whitespace. Material edits require appropriate human reapproval;
+audit-only receipt timestamps and output hashes preserve evidence.
+
 `diff bind` is intentionally separate from generic `diff capture`: it checks the Packet's approved scope and Diff budget, records the implementation result, updates the semantic snapshot, and deterministically routes the workflow into verification. It does not create another persisted readiness field.
 
 Discovery is an advanced entry when no suitable Issue exists and repository policy permits it. Use the candidate and Contribution Signal commands to establish a defensible basis before the same Contract, implementation, Diff-binding, and verification path. Discovery recommendations are evidence, never authorization.

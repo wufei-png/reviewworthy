@@ -174,4 +174,8 @@ def record_understanding(
             "rubric": {"covered": sorted(rubric or {}), "evidence": dict(rubric or {})},
             "semantic_snapshot": semantic_snapshot,
         }
+    if phase == "orientation" and understanding["orientation"] != packet.get("understanding", {}).get("orientation"):
+        assessment = understanding.get("assessment")
+        if isinstance(assessment, dict):
+            assessment["status"] = "not_run"
     return updated

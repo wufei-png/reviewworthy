@@ -593,6 +593,11 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(narrative, dict):
         _error(errors, "invalid_narrative", "narrative must be an object", "narrative")
     else:
+        for key in ("final_preview_confirmed", "human_expression_required"):
+            if not isinstance(narrative.get(key), bool):
+                _error(errors, "invalid_narrative_confirmation", f"narrative.{key} must be boolean", f"narrative.{key}")
+        if not isinstance(narrative.get("human_expression"), str):
+            _error(errors, "invalid_human_expression", "Human expression must be a string", "narrative.human_expression")
         allowed_narrative = {"title", "body", "final_preview_confirmed", "human_expression_required", "human_expression"}
         for key in sorted(set(narrative) - allowed_narrative):
             _error(errors, "unknown_narrative_field", f"narrative.{key} is not part of Packet {PACKET_VERSION}", f"narrative.{key}")

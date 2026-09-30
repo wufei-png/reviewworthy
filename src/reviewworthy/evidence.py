@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from .git import FINGERPRINT_ALGORITHM, PR_DIFF_FIELDS
+from .packet import current_verification_receipts
 from .repository import repository_slugs_match
 from .util import canonical_json
 
@@ -43,31 +44,17 @@ def _repository_summary(packet: dict[str, Any]) -> dict[str, Any]:
 
 def _claim_summary(packet: dict[str, Any]) -> dict[str, Any]:
     verification = packet.get("verification")
-    receipts = verification.get("receipts", []) if isinstance(verification, dict) else []
-    plan_digest = verification.get("plan_digest") if isinstance(verification, dict) else None
-    diff = packet.get("diff") if isinstance(packet.get("diff"), dict) else {}
-    passed_receipts = [
-        receipt
-        for receipt in receipts
-        if isinstance(receipt, dict)
-        and receipt.get("receipt_version") == "0.3"
-        and receipt.get("plan_digest") == plan_digest
-        and receipt.get("subject_digest") == diff.get("subject_digest")
-        and receipt.get("command_outcome") == "passed"
-        and receipt.get("exit_code") == 0
-        and receipt.get("integrity_status") == "stable"
-        and receipt.get("provenance") == "contributor_local"
-        and receipt.get("head_sha_before") == receipt.get("head_sha") == receipt.get("head_sha_after")
-        and receipt.get("worktree_clean_before") is True
-        and receipt.get("worktree_clean_after") is True
-    ]
+    passed_receipts = current_verification_receipts(packet)
+    required = {check.get("id") for check in verification.get("plan", {}).get("checks", [])
+                if isinstance(check, dict) and check.get("required") is True} if isinstance(verification, dict) else set()
+    verified = bool(required) and required <= {receipt["check_id"] for receipt in passed_receipts}
     review = packet.get("review") if isinstance(packet.get("review"), dict) else {}
     ownership = packet.get("ownership") if isinstance(packet.get("ownership"), dict) else {}
     ai_assistance = packet.get("ai_assistance") if isinstance(packet.get("ai_assistance"), dict) else {}
     disclosure = ai_assistance.get("disclosure") if isinstance(ai_assistance.get("disclosure"), dict) else {}
     return {
         "verification": {
-            "claimed_outcome": "passed" if passed_receipts else "not_recorded",
+            "claimed_outcome": "passed" if verified else "not_recorded",
             "receipt_count": len(passed_receipts),
         },
         "ownership": {

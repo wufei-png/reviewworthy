@@ -21,6 +21,12 @@ PYTHONPATH=src python -m reviewworthy brief create --root . --focus src/reviewwo
 PACKET=.git/reviewworthy/v0.3/contributions/contribution-001/packet.json
 PYTHONPATH=src python -m reviewworthy diff bind --root . --packet "$PACKET" --base BASE_REF --head HEAD --json
 PYTHONPATH=src python -m reviewworthy verify run --root . --packet "$PACKET" --check-id unit --json
+PYTHONPATH=src python -m reviewworthy packet ownership record --packet "$PACKET" --input ownership.json --json
+PYTHONPATH=src python -m reviewworthy packet ai record --packet "$PACKET" --input ai-assistance.json --json
+PYTHONPATH=src python -m reviewworthy packet narrative record --packet "$PACKET" --title "Fix the bounded failure" --body-file body.md --json
+PYTHONPATH=src python -m reviewworthy packet narrative preview --packet "$PACKET" --json
+# Only after the contributor explicitly approves the current preview/disclosure:
+PYTHONPATH=src python -m reviewworthy packet narrative confirm --packet "$PACKET" --human-confirmed --json
 PYTHONPATH=src python -m reviewworthy status --packet "$PACKET" --json
 PYTHONPATH=src python -m reviewworthy next --packet "$PACKET" --json
 ```

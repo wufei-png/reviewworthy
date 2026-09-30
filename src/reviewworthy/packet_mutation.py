@@ -11,7 +11,7 @@ from .disclosure import disclosure_errors
 from .git import verification_plan_digest
 from .packet import (
     current_verification_receipts, deterministic_evidence_checks, issue_basis_blockers, policy_violations, require_current_packet,
-    readiness_blockers, result_record, semantic_snapshot, skeleton_packet, validate_packet,
+    issue_link_blockers, readiness_blockers, result_record, semantic_snapshot, skeleton_packet, validate_packet,
 )
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_identity, repository_matches, validate_repository_identity
@@ -129,6 +129,11 @@ def maintain_packet(previous: dict[str, Any], updated: dict[str, Any]) -> dict[s
         updated["ai_assistance"]["disclosure"]["human_confirmed"] = False
     if previous.get("ai_assistance") != updated.get("ai_assistance"):
         updated["narrative"]["final_preview_confirmed"] = False
+        _set_result(updated, "narrative", "not_run")
+    if (previous.get("narrative") != updated.get("narrative")
+            or previous.get("understanding") != updated.get("understanding")):
+        updated["narrative"]["final_preview_confirmed"] = False
+    if updated["narrative"].get("final_preview_confirmed") is not True:
         _set_result(updated, "narrative", "not_run")
     policy_errors = policy_violations(updated, enforce_disclosure=False)
     policy_errors = [error for error in policy_errors if not error["path"].startswith("narrative")]
@@ -370,4 +375,38 @@ def record_ai(packet: dict[str, Any], assistance: dict[str, Any]) -> dict[str, A
     new_unconfirmed["disclosure"]["human_confirmed"] = False
     if old_unconfirmed != new_unconfirmed:
         updated["ai_assistance"]["disclosure"]["human_confirmed"] = False
+    return updated
+
+
+def record_narrative(packet: dict[str, Any], *, title: str, body: str,
+                     human_expression: str | None = None) -> dict[str, Any]:
+    """Record exact public prose without importing a human approval."""
+
+    if not title.strip() or not body.strip():
+        raise ValueError("Narrative title and Body must be nonempty")
+    updated = deepcopy(packet)
+    updated["narrative"].update(title=title, body=body)
+    if human_expression is not None:
+        updated["narrative"]["human_expression"] = human_expression
+    return updated
+
+
+def narrative_confirmation_candidate(packet: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Validate the proposed explicit final approval, including current disclosure."""
+
+    updated = maintain_packet(packet, packet)
+    updated["narrative"]["final_preview_confirmed"] = True
+    updated["ai_assistance"]["disclosure"]["human_confirmed"] = True
+    _set_result(updated, "narrative", "passed", ["packet.narrative:human-confirmed"])
+    errors = readiness_blockers(updated)
+    errors.extend(issue_link_blockers(updated, updated["narrative"]["body"]))
+    return updated, errors
+
+
+def confirm_narrative(packet: dict[str, Any], *, human_confirmed: bool) -> dict[str, Any]:
+    if human_confirmed is not True:
+        raise ValueError("Final narrative approval requires --human-confirmed after preview")
+    updated, errors = narrative_confirmation_candidate(packet)
+    if errors:
+        raise ValueError(f"Narrative confirmation prerequisites unresolved: {errors}")
     return updated

@@ -15,6 +15,7 @@ from .brief import build_project_brief, render_project_brief, validate_project_b
 from .candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, transition_candidate, validate_candidate_menu
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
+from .evidence import append_evidence_summary, build_evidence_summary
 from .evals import run_evals
 from .git import GitError, PR_DIFF_FIELDS, capture_bindable_pr_diff, capture_pr_diff, local_state_path, run_verification, verification_plan_digest
 from .github import (
@@ -45,7 +46,8 @@ from .packet import (
     validate_packet,
 )
 from .packet_mutation import (
-    approve_contract, bind_contract, bind_policy, record_ai, record_basis, record_ownership, record_review,
+    approve_contract, bind_contract, bind_policy, confirm_narrative, narrative_confirmation_candidate,
+    record_ai, record_basis, record_narrative, record_ownership, record_review,
     record_verification_plan, replace_packet,
 )
 from .policy import inspect_policy
@@ -263,6 +265,23 @@ def _build_parser() -> argparse.ArgumentParser:
         mutation.add_argument("--input", type=Path, required=True)
         _common_json(mutation)
 
+    narrative_parser = packet_commands.add_parser("narrative")
+    narrative_commands = narrative_parser.add_subparsers(dest="packet_operation", required=True)
+    for operation in ("record", "preview", "confirm"):
+        mutation = narrative_commands.add_parser(operation)
+        mutation.add_argument("--packet", type=Path, required=True)
+        if operation == "record":
+            mutation.add_argument("--title", required=True)
+            mutation.add_argument("--body-file", type=Path, required=True)
+            mutation.add_argument("--human-expression-file", type=Path,
+                                  help="Contributor-authored motivation, trade-offs and risks")
+        elif operation == "confirm":
+            mutation.add_argument("--human-confirmed", action="store_true", required=True)
+        else:
+            mutation.add_argument("--output", type=Path, help="Save exact narrative Body for remote plan/create")
+            mutation.add_argument("--force", action="store_true")
+        _common_json(mutation)
+
     action = commands.add_parser("action", help="Check the public pull-request Evidence Summary")
     action_commands = action.add_subparsers(dest="action_command", required=True)
     action_check = action_commands.add_parser("check")
@@ -406,9 +425,9 @@ def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any, di
         raise ValueError("Remote operations require packet.repository.repository_id to be a positive immutable GitHub ID")
     body = args.body_file.read_text(encoding="utf-8")
     narrative = packet.get("narrative", {})
-    if not isinstance(narrative, dict) or args.title.strip() != str(narrative.get("title", "")).strip():
+    if not isinstance(narrative, dict) or args.title != narrative.get("title"):
         raise ValueError("Remote title must exactly match the approved packet narrative title")
-    if body.strip() != str(narrative.get("body", "")).strip():
+    if body != narrative.get("body"):
         raise ValueError("Remote Body must exactly match the approved packet narrative Body")
     actual_diff = capture_pr_diff(args.root, args.base, args.head) if args.kind == "pull_request" else None
     operation = build_operation(packet, args.repo, args.kind, args.title, body, args.base, args.head, actual_diff)
@@ -721,7 +740,7 @@ def main(argv: list[str] | None = None) -> int:
                     result_record["status"] = args.status
                     result_record["evidence"] = list(args.evidence) or [f"{args.phase}:{args.status}"]
                     result_record.setdefault("details", {})["phase"] = args.phase
-            _replace_json(args.path, updated)
+            updated = replace_packet(args.path, packet, updated)
             depth = updated.get("review", {}).get("profile", "standard") if isinstance(updated.get("review"), dict) else "standard"
             result = validate_understanding(updated.get("understanding"), semantic_snapshot(updated), review_profile=depth)
             result["updated"] = str(args.path)
@@ -922,6 +941,32 @@ def main(argv: list[str] | None = None) -> int:
                 atomic_write_json(output, packet, sort_keys=False)
                 result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
                 _print(result, args.as_json)
+                return 0
+            if args.packet_command == "narrative":
+                packet = _load_current_packet(args.packet)
+                if args.packet_operation == "record":
+                    updated = record_narrative(packet, title=args.title,
+                        body=args.body_file.read_text(encoding="utf-8"),
+                        human_expression=args.human_expression_file.read_text(encoding="utf-8") if args.human_expression_file else None)
+                    updated = replace_packet(args.packet, packet, updated)
+                    _print({"updated": str(args.packet), "narrative": updated["narrative"],
+                            "status": workflow_status(updated, args.packet)}, args.as_json)
+                elif args.packet_operation == "confirm":
+                    updated = confirm_narrative(packet, human_confirmed=args.human_confirmed)
+                    _replace_json(args.packet, updated)
+                    _print({"updated": str(args.packet), "narrative": updated["narrative"],
+                            "status": workflow_status(updated, args.packet)}, args.as_json)
+                else:
+                    candidate, errors = narrative_confirmation_candidate(packet)
+                    body = packet["narrative"]["body"]
+                    public_body = append_evidence_summary(body, build_evidence_summary(candidate, candidate["diff"]),
+                                                          workflow_ready=not errors)
+                    if args.output:
+                        if args.output.resolve() == args.packet.resolve():
+                            raise ValueError("Narrative output must not overwrite the Packet")
+                        _write_text(args.output, body, args.force)
+                    _print({"title": packet["narrative"]["title"], "body": body, "public_body": public_body,
+                            "confirmation_blockers": errors, "output": str(args.output) if args.output else None}, args.as_json)
                 return 0
             if args.packet_command in {"review", "verification", "ownership", "ai"}:
                 packet = _load_current_packet(args.packet)
