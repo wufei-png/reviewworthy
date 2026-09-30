@@ -27,3 +27,19 @@ content produces decision hints with the relevant domain interface. Material
 updates reset affected downstream evidence without rebinding old understanding
 to a fresh hash. Local Signals can establish identity with
 `packet basis record --signal FILE --repository OWNER/REPO`.
+
+`reviewworthy start --root . --contribution-id contribution-001 --issue URL --focus PATH --json`
+collects the same source-manifest facts and stores its Brief beside the Packet in
+Git-private `reviewworthy/v0.3/contributions/contribution-001/` state. Repeat
+`--focus` for additional selected files. It binds policy and the explicit Issue
+when creating the Packet, verifies that Issue read-only, and returns both artifact
+paths, Brief freshness findings, and derived workflow status. A provider failure
+returns the saved paths and can retry against the same artifacts. An interruption
+between artifact writes reuses the surviving Brief.
+
+Repeated start preserves existing Packet decisions and Brief human sections, and
+reuses an already recorded Issue verification rather than claiming a new provider
+check. Changed inputs need the existing typed Packet operations; changed focus
+needs deliberate Brief regeneration or a new contribution ID. A stale Brief is
+reported without replacing contributor content. Start never grants Contract or
+narrative approval and never creates a remote object.

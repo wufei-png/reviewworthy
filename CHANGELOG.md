@@ -2,6 +2,8 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Start an Issue-backed contribution with reusable Git-private Packet/Brief artifacts and read-only provider verification, preserving bound decisions and contributor prose on retry.
+
 - Record, preview and explicitly confirm exact PR prose and current disclosure; guide post-implementation `next` actions and retain current Orientation-before-Assessment gates.
 
 - Record explicit Ownership and AI-assistance claims through typed Packet operations, checking current verification and disclosure policy without inventing human approval.

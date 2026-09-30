@@ -34,6 +34,7 @@ from .github import (
     save_operation_pr_created,
     save_operation_receipt,
 )
+from .onboarding import prepare_start
 from .packet import (
     good_first_issue_policy_errors,
     deterministic_evidence_checks,
@@ -122,6 +123,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reviewworthy", description="Contributor-side evidence for reviewworthy AI-assisted contributions")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
+
+    start = commands.add_parser("start", help="Initialize or resume an Issue-backed contribution without remote writes")
+    start.add_argument("--root", type=Path, default=Path("."))
+    start.add_argument("--contribution-id", required=True)
+    start.add_argument("--issue", required=True)
+    start.add_argument("--focus", action="append", default=[])
+    _common_json(start)
 
     for name in ("status", "next"):
         workflow_command = commands.add_parser(name, help=f"Show derived workflow {name} from a current Packet 0.3")
@@ -677,6 +685,21 @@ def _reconcile_signal_publication(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
+        if args.command == "start":
+            result = prepare_start(args.root, args.contribution_id, args.issue, args.focus)
+            path = Path(result["packet"])
+            packet = _load_current_packet(path)
+            if packet["basis"].get("verification", {}).get("status") != "verified":
+                try:
+                    result["issue_verification"] = _verify_and_record_issue(packet, path, record=True)
+                except GhError as exc:
+                    result["issue_verification"] = {"valid": False, "error": str(exc)}
+            else:
+                result["issue_verification"] = {"valid": True, "source": "existing_packet"}
+            result["status"] = workflow_status(_load_current_packet(path), path)
+            _print(result, args.as_json)
+            return 0 if result["issue_verification"]["valid"] else 1
+
         if args.command in {"status", "next"}:
             result = workflow_status(_load_current_packet(args.packet), args.packet)
             if args.command == "next":
