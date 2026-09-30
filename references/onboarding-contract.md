@@ -38,8 +38,11 @@ returns the saved paths and can retry against the same artifacts. An interruptio
 between artifact writes reuses the surviving Brief.
 
 Repeated start preserves existing Packet decisions and Brief human sections, and
-reuses an already recorded Issue verification rather than claiming a new provider
-check. Changed inputs need the existing typed Packet operations; changed focus
+reuses an already recorded plain-Issue or Issue-Signal verification rather than
+claiming a new provider check. If an implementation renames or deletes a selected
+focus file, retry still returns the saved paths and next action, with an
+`invalid_focus_file` freshness finding. Changed inputs need the existing typed
+Packet operations; changed focus
 needs deliberate Brief regeneration or a new contribution ID. A stale Brief is
 reported without replacing contributor content. Start never grants Contract or
 narrative approval and never creates a remote object.
