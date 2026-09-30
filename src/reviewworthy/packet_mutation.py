@@ -231,7 +231,8 @@ def record_review(packet: dict[str, Any], review: dict[str, Any]) -> dict[str, A
         incoming = review.get(key, [])
         if not isinstance(incoming, list) or not all(isinstance(item, (str, dict)) for item in incoming):
             raise ValueError(f"review.{key} must be a list of existing risk records")
-        if not isinstance(current.get(key), list):
+        current.setdefault(key, [])
+        if not isinstance(current[key], list):
             raise ValueError(f"packet.review.{key} must be a list")
         for item in incoming:
             if item not in current[key]:

@@ -291,3 +291,27 @@ class PacketMutationTests(unittest.TestCase):
             before = path.read_bytes()
             self.assertEqual(self.call("packet", "basis", "record", "--packet", str(path), "--signal", str(source), "--repository", "other/project")[0], 2)
             self.assertEqual(path.read_bytes(), before)
+
+    def test_review_record_accepts_absent_optional_lists_and_rejects_malformed_present_lists(self) -> None:
+        from reviewworthy.packet import validate_packet
+        packet = valid_packet()
+        packet["review"] = {"profile": "standard"}
+        snapshot = semantic_snapshot(packet)
+        packet["snapshots"]["semantic"] = snapshot
+        for phase in ("orientation", "assessment"):
+            packet["understanding"][phase]["semantic_snapshot"] = snapshot
+        self.assertTrue(validate_packet(packet)["valid"])
+        with tempfile.TemporaryDirectory() as directory:
+            path, source = Path(directory) / "packet.json", Path(directory) / "review.json"
+            source.write_text(json.dumps({"profile": "heightened", "signals": [], "hard_stops": []}))
+            path.write_text(json.dumps(packet))
+            self.assertEqual(self.call("packet", "review", "record", "--packet", str(path), "--input", str(source))[0], 0)
+            updated = json.loads(path.read_text())
+            self.assertEqual(updated["review"], {"profile": "heightened", "signals": [], "hard_stops": []})
+            for field in ("signals", "hard_stops"):
+                malformed = deepcopy(packet)
+                malformed["review"][field] = None
+                path.write_text(json.dumps(malformed))
+                before = path.read_bytes()
+                self.assertEqual(self.call("packet", "review", "record", "--packet", str(path), "--input", str(source))[0], 2)
+                self.assertEqual(path.read_bytes(), before)
