@@ -169,14 +169,27 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
             if isinstance(checks, list) and isinstance(check, dict) and check.get("required") is True
             and isinstance(check.get("id"), str) and check["id"] not in current_ids
         ]
-        if missing_ids:
+        receipt_errors = [error for error in validate_packet(packet)["errors"]
+                          if error["path"].startswith("verification.receipts[")]
+        planned_ids = {check.get("id") for check in checks if isinstance(check, dict)}
+        recovery_ids = []
+        for index, receipt in enumerate(verification.get("receipts", [])):
+            if not isinstance(receipt, dict) or receipt.get("check_id") not in planned_ids:
+                continue
+            prefix = f"verification.receipts[{index}]"
+            if (receipt.get("integrity_status") != "stable"
+                    or any(error["path"].startswith(prefix) for error in receipt_errors)):
+                if receipt["check_id"] not in missing_ids and receipt["check_id"] not in recovery_ids:
+                    recovery_ids.append(receipt["check_id"])
+        if missing_ids or recovery_ids:
             return [
                 {
                     "kind": "command",
                     "command": f"reviewworthy verify run --root . --packet {quoted_packet} --check-id {shlex.quote(check_id)} --json",
-                    "reason": f"Run required current check {check_id}.",
+                    "reason": (f"Restore a clean worktree at the bound HEAD (rebind a changed Diff), then rerun blocking check {check_id}."
+                               if check_id in recovery_ids else f"Run required current check {check_id}."),
                 }
-                for check_id in missing_ids
+                for check_id in [*missing_ids, *recovery_ids]
             ]
         return [{"kind": "decision", "command": "", "reason": f"Define at least one required verification-plan check, then record the plan with `reviewworthy packet verification plan --packet {quoted_packet} --input FILE --json`."}]
     if stage == "ownership":

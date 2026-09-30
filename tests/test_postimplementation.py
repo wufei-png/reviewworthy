@@ -344,3 +344,30 @@ class EvidenceMutationTests(unittest.TestCase):
             self.assertIn('required_verification_missing', {error['code'] for error in plan['readiness_blockers']})
             self.assertEqual(extract_evidence_summary(plan['body'])['claims']['verification'],
                              {'claimed_outcome': 'not_recorded', 'receipt_count': 0})
+
+
+    def test_unstable_optional_receipt_routes_to_its_rerun_and_can_recover(self) -> None:
+        packet = valid_packet()
+        check = deepcopy(packet['verification']['plan']['checks'][0])
+        check.update(id='optional', required=False)
+        packet['verification']['plan']['checks'].append(check)
+        packet['verification']['plan_digest'] = verification_plan_digest(packet['verification']['plan'])
+        packet['verification']['receipts'][0]['plan_digest'] = packet['verification']['plan_digest']
+        packet = maintain_packet(packet, packet)
+        receipt = deepcopy(packet['verification']['receipts'][0])
+        receipt.update(check_id='optional', integrity_status='invalid', worktree_clean_after=False)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'packet.json'
+            path.write_text(json.dumps(packet))
+            with patch('reviewworthy.cli.capture_pr_diff', return_value=packet['diff']), patch('reviewworthy.cli.run_verification', return_value=receipt):
+                self.assertEqual(self.call('verify', 'run', '--packet', str(path), '--check-id', 'optional')[0], 1)
+                status = self.call('next', '--packet', str(path))[1]
+                self.assertEqual(status['current_stage'], 'verification')
+                self.assertIn('--check-id optional', status['next'][0]['command'])
+                self.assertIn('clean worktree', status['next'][0]['reason'])
+                self.assertNotIn('Define at least one', status['next'][0]['reason'])
+                self.assertEqual(node(json.loads(path.read_text()), 'verification')['status'], 'blocked')
+                receipt.update(integrity_status='stable', worktree_clean_after=True)
+                self.assertEqual(self.call('verify', 'run', '--packet', str(path), '--check-id', 'optional')[0], 0)
+                self.assertEqual(node(json.loads(path.read_text()), 'verification')['status'], 'passed')
+                self.assertEqual(self.call('next', '--packet', str(path))[1]['current_stage'], 'ownership')

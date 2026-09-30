@@ -29,7 +29,9 @@ The CLI computes `plan_digest`; argv stays an argument list with no shell expans
 Diff binding and `verify run` maintain the implementation/verification flow results.
 Partial required checks remain `not_run`, failed required checks are `failed`, and
 stale or unstable receipts are `blocked`; only exact current passing receipts
-complete verification. Re-running a check replaces its receipt. A semantic outcome
+complete verification. Unstable optional receipts also block progression; `next`
+routes their cleanup and rerun instead of redefining an already complete required
+plan. Re-running a check replaces its receipt. A semantic outcome
 change resets Ownership, understanding and final narrative confirmation; timestamps
 and output hashes alone preserve them. Ownership updates preserve executed receipts.
 
