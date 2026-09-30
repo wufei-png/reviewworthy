@@ -767,7 +767,7 @@ def _inspect_policy(
                 key: _provenance(root / STRUCTURED_PATH, root, structured_text, key, _structured_match(structured_text, origins[structured_paths[key]]))
                 for key in structured_claims
             }
-        except tomllib.TOMLDecodeError:
+        except (ValueError, RecursionError):
             structured_error = "Structured policy could not be parsed."
             diagnostics.append(_diagnostic("policy_invalid_configuration", STRUCTURED_PATH, structured_error))
     selected = sorted(set(names + explicit) - {STRUCTURED_PATH})

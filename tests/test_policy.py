@@ -657,3 +657,14 @@ class PolicyInspectionTests(unittest.TestCase):
             result = self._commit_and_compare(root)
             self.assertEqual(result["diagnostics"][0]["code"], "policy_source_missing")
             self.assertNotIn("docs/[policy].md", {source["path"] for source in result["sources"]})
+
+    def test_toml_parser_depth_and_integer_limits_are_controlled_failures(self) -> None:
+        for value in ("[" * 1200 + "true" + "]" * 1200, "9" * 4500):
+            with self.subTest(value_length=len(value)), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".reviewworthy").mkdir()
+                (root / ".reviewworthy/policy.toml").write_text("[ai]\nallowed = " + value + "\n", encoding="utf-8")
+                result = self._commit_and_compare(root)
+                self.assertEqual(result["result"], "blocked")
+                self.assertEqual(result["diagnostics"][0]["code"], "policy_invalid_configuration")
+                self.assertEqual(result["diagnostics"][0]["path"], ".reviewworthy/policy.toml")
