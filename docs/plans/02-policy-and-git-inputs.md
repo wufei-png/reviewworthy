@@ -1,6 +1,6 @@
 # 02 — Policy 与 Git 输入边界
 
-Design status: **Approved (2026-09-30)**. Execution status: **Not started**.
+Design status: **Approved (2026-09-30)**. Execution status: **Complete (2026-09-30)**.
 
 Earlier foundations (ordering reference): 无硬依赖；按批准顺序在 01 后执行。
 
@@ -40,9 +40,13 @@ Use implement-in-stages for scoped local commits, then delegated-change-review f
 
 Update this plan and the queue together after implementation/review; do not start the next session automatically.
 
-- Status: Not started.
-- Comparison base and commits: —
-- Checks/results: —
-- Review findings and decisions: —
-- Fixes and rechecks: —
-- Final interfaces/deviations/unverified items: —
+- Status: Complete (2026-09-30).
+- Comparison base: `88be02ac2e49ccea43ec784b8cc83f10dd95ac58`. The fresh review covered the full selected-session change through `322289a`; accepted-finding fix `11e1b3d` was independently verified afterward.
+- Stage commits: `b575ac8` narrows default sources and validates optional discovery/canonical policy plus accepted aliases; `93825f9` bounds reads, shares local/tree rules and propagates blockers through Action, Packet and workflow; `f9ff4cc` uses NUL Diff names/numstat, exact scope paths and unchanged raw identity. Each stage passed focused checks, explicit staged-diff inspection and whitespace checks before its local commit.
+- Final audit fix: `322289a` converts reproduced TOML depth and integer-conversion limits into path-bearing configuration diagnostics. Policy/Action focused rechecks passed (68 tests).
+- Checks/results: Python 3.11.5 full `PYTHONPATH=src python -m unittest discover -s tests -v` passed 292 tests after the accepted review fix; `PYTHONPATH=src python -m reviewworthy eval run --json` passed all 11 fixtures; `python -m compileall -q src tests`, `git diff --check` and full-session `git diff --check 88be02a..HEAD` passed. Focused Policy/Schema/Brief/Action and Git/Packet/Action/recovery checks passed; documentation closure checks (`tests.test_docs tests.test_artifacts`) passed 27 tests. Real temp repositories covered unusual paths, additions/deletions, binary files and disabled renames; `core.quotePath` toggles and two hash seeds preserved scope paths, counts and semantic identity. Local/tree tests compare all claims, provenance and diagnostics after excluding base location metadata.
+- Review findings and decisions: one fresh read-only `$review-agent` using delegated-change-review returned one P2: an initialized Gitlink ancestor could supply positive local policy while the same commit tree rejected it. Independently reproduced with `docs/policy.md` in a real submodule; accepted. No rejected findings and no other qualifying findings. The reviewer ran 123 focused tests successfully.
+- Fixes and rechecks: `11e1b3d` reads bounded local index modes, rejects Gitlink ancestors and avoids scanning submodule template contents. Real initialized-submodule regression cases cover explicit docs, a default template container and a nested template submodule; unavailable Git metadata blocks positive authority while plain-directory policy inspection remains usable without a Git executable. The relevant Policy/Action/Brief/workflow suite passed 108 tests, final focused regression rechecks passed 3 tests, then the full 292-test suite and 11 evals passed.
+- Final interfaces/deviations: existing CLI spellings are unchanged. Optional `[discovery] authoritative_documents` selects exact additional paths; wildcard punctuation is literal and never expanded. Canonical schema/runtime checks retain supported Unicode and tab/newline path boundaries. Fixed budgets are 128 sources, 1 MiB/source and 8 MiB total, including structured policy; the bounded TOML bootstrap discovers the list before document count/size preflight. Ordered `policy_*` input diagnostics become contributor hard stops and `base_policy_*` Action enforcement violations; report remains non-blocking. Brief keeps orientation separate and preserves blockers without hashing failed policy sources. No new required version field or public hex-path field.
+- Historical evidence: active contract notes explain that unusual-path historical Diff fields may require rebinding and reverification for a new plan; a regression proves 01 still reconciles the original retained operation ID without re-capturing the Diff or rendering another operation.
+- Unverified items/remaining limits: Python 3.12/3.13 CI jobs were not run locally; their existing matrix is unchanged. Tests are hermetic/local and do not prove live-provider behavior. No live GitHub writes, remote objects, mutation canary or push. Whole-tree/index enumeration can still reach its bounded Git output/time limits and then fails with controlled unavailability. Local policy inspection observes current filesystem/index inputs rather than promising an atomic repository snapshot. Session 03 was not started.
