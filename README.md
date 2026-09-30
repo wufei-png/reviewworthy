@@ -132,6 +132,7 @@ The runtime has no third-party dependencies. Schema validation is a test/CI-only
 - [Remote write reference](./references/remote-writes.md)
 - [Architecture decisions](./docs/adr/)
 - [Threat model](./THREAT_MODEL.md)
+- [Implementation plan (2026-09-30)](./references/implementation-plan-2026-09-30.md)
 
 ## Status
 
