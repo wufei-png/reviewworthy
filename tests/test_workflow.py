@@ -22,7 +22,7 @@ class WorkflowStatusTests(unittest.TestCase):
         result = workflow_status(packet, Path("packet.json"))
 
         self.assertEqual(result["current_stage"], "basis")
-        self.assertIn("canonical GitHub Issue URL", result["next"][0]["reason"])
+        self.assertIn("packet policy bind", result["next"][0]["command"])
 
     def test_ready_packet_has_remote_plan_as_next_step(self) -> None:
         result = workflow_status(valid_packet(), Path("packet.json"))

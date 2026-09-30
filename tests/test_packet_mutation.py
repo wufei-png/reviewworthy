@@ -227,3 +227,67 @@ class PacketMutationTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())["review"]["profile"], "heightened")
             source.write_text(json.dumps({"plan_version": "0.1", "checks": [{"id": "unit", "argv": ["python"], "cwd": ".", "required": True}]}))
             self.assertEqual(self.call("packet", "verification", "plan", "--packet", str(path), "--input", str(source))[0], 0)
+
+    def test_cli_only_preimplementation_journey_uses_next_without_manual_packet_edits(self) -> None:
+        import shlex
+        import subprocess
+        from reviewworthy.contract import skeleton_contract
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "README.md").write_text("AI assistance is allowed.\n")
+            code, created = self.call("packet", "init", "--root", str(root), "--contribution-id", "journey")
+            self.assertEqual(code, 0)
+            path = Path(created["created"])
+            code, status = self.call("next", "--packet", str(path))
+            self.assertEqual(status["current_stage"], "basis")
+            self.assertIn("packet policy bind", status["next"][0]["command"])
+            self.assertEqual(self.call("packet", "policy", "bind", "--root", str(root), "--packet", str(path))[0], 0)
+            self.assertIn("packet basis record", self.call("next", "--packet", str(path))[1]["next"][0]["reason"])
+            self.assertEqual(self.call("packet", "basis", "record", "--packet", str(path), "--issue", "https://github.com/example/project/issues/1")[0], 0)
+            verify = self.call("next", "--packet", str(path))[1]["next"][0]["command"]
+            remote = {**valid_packet()["basis"]["verification"], "verified": True, "labels": []}
+            with patch("reviewworthy.cli.GhClient") as provider:
+                provider.return_value.verify_public_reference.return_value = remote
+                self.assertEqual(self.call(*shlex.split(verify)[1:-1])[0], 0)
+            status = self.call("next", "--packet", str(path))[1]
+            self.assertEqual(status["current_stage"], "contract")
+            self.assertIn("packet contract bind", status["next"][0]["reason"])
+            contract = skeleton_contract("journey")
+            contract.update(problem="Bounded regression", design="Guard invalid input", scope={"files": ["src/example.py"]})
+            source = root / "contract.json"
+            source.write_text(json.dumps(contract))
+            self.assertEqual(self.call("packet", "contract", "bind", "--packet", str(path), "--contract", str(source))[0], 0)
+            self.assertIn("packet contract approve", self.call("next", "--packet", str(path))[1]["next"][0]["reason"])
+            self.assertEqual(self.call("packet", "contract", "approve", "--packet", str(path), "--human-confirmed")[0], 0)
+            status = self.call("next", "--packet", str(path))[1]
+            self.assertEqual(status["current_stage"], "verification")
+            self.assertIn("packet verification plan", status["next"][0]["reason"])
+            source.write_text(json.dumps({"profile": "learning", "signals": [], "hard_stops": []}))
+            self.assertEqual(self.call("packet", "review", "record", "--packet", str(path), "--input", str(source))[0], 0)
+            source.write_text(json.dumps(valid_packet()["verification"]["plan"]))
+            self.assertEqual(self.call("packet", "verification", "plan", "--packet", str(path), "--input", str(source))[0], 0)
+            status = self.call("next", "--packet", str(path))[1]
+            self.assertEqual(status["current_stage"], "implementation")
+            self.assertIn("diff bind", status["next"][0]["command"])
+            packet = json.loads(path.read_text())
+            for name in ("policy_check", "contribution_basis", "contribution_contract"):
+                self.assertEqual(node(packet, name)["status"], "passed")
+            self.assertEqual(packet["review"]["profile"], "learning")
+
+    def test_local_signal_can_establish_identity_through_basis_command(self) -> None:
+        packet = skeleton_packet("local-journey", "discovery")
+        packet["policy"] = {"authoritative_claims": {"discovery_evidence_allowed": True}, "result": "passed"}
+        signal = skeleton_signal("local_evidence", "reproducible_evidence", "local:reproduction")
+        signal["evidence"] = ["python reproduce.py"]
+        with tempfile.TemporaryDirectory() as directory:
+            path, source = Path(directory) / "packet.json", Path(directory) / "signal.json"
+            path.write_text(json.dumps(packet))
+            source.write_text(json.dumps(signal))
+            self.assertEqual(self.call("packet", "basis", "record", "--packet", str(path), "--signal", str(source), "--repository", "example/project")[0], 0)
+            updated = json.loads(path.read_text())
+            self.assertEqual(node(updated, "contribution_basis")["status"], "passed")
+            self.assertEqual(updated["repository"]["owner"], "example")
+            before = path.read_bytes()
+            self.assertEqual(self.call("packet", "basis", "record", "--packet", str(path), "--signal", str(source), "--repository", "other/project")[0], 2)
+            self.assertEqual(path.read_bytes(), before)

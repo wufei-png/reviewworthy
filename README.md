@@ -29,6 +29,8 @@ reviewworthy issue verify --packet "$PACKET" --record --json
 ```
 
 For an existing Signal artifact, use `packet basis record --packet "$PACKET" --signal FILE`.
+Local Signals may supply `--repository OWNER/REPO` when the Packet has no identity;
+external references infer it and reject a conflicting established identity.
 External Signals still need the existing read-only `signal verify FILE --record`
 operation before binding for readiness. Recording a basis preserves candidate
 recommendation and duplicate-work gates already present in the Packet. Material
@@ -36,6 +38,23 @@ basis or policy changes reset Contract approval and affected downstream evidence
 identical inputs and provider timestamp refreshes preserve current evidence.
 
 From there, follow `next`: inspect repository policy, record and verify the Issue-backed contribution basis, agree the bounded Contract, implement only after approval, bind the finished Diff, run the Packet's verification plan, demonstrate ownership, and review the exact PR narrative before any confirmed remote write. Re-run `status` or `next` after each transition instead of reconstructing progress from prose.
+
+Before implementation, use the existing Contract, review and plan shapes:
+
+```bash
+reviewworthy packet contract bind --packet "$PACKET" --contract contract.json --json
+# Only after the human has approved the current embedded Contract:
+reviewworthy packet contract approve --packet "$PACKET" --human-confirmed --json
+reviewworthy packet review record --packet "$PACKET" --input review.json --json
+reviewworthy packet verification plan --packet "$PACKET" --input verification-plan.json --json
+reviewworthy next --packet "$PACKET" --json
+```
+
+`review.json` is the existing Packet review section or a `risk assess --json`
+result. `verification-plan.json` contains the existing `plan_version` and `checks`
+fields. Each check keeps its exact `id`, `argv`, repository-relative `cwd`, and
+boolean `required`. The CLI owns approval hashes, plan digests, snapshots and
+results. These operations never consume a generic Packet patch.
 
 After implementation, bind the exact clean current HEAD and merge-base Diff before verification:
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 from typing import Any
 
+from .contract import validate_contract
 from .packet import issue_reference, readiness_blockers, validate_packet
 
 
@@ -105,6 +106,8 @@ def _derived_stage(packet: dict[str, Any], blockers: list[dict[str, str]]) -> st
     codes = {item.get("code") for item in blockers}
     incomplete_nodes = _incomplete_result_nodes(packet)
     for stage, stage_codes in _STAGE_CODES:
+        if stage == "implementation" and "missing_verification_plan" in codes:
+            return "verification"
         if codes & stage_codes or incomplete_nodes & _RESULT_STAGE_NODES.get(stage, set()):
             return stage
     return "blocked"
@@ -139,19 +142,36 @@ def _current_receipt_ids(packet: dict[str, Any]) -> set[str]:
 def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list[dict[str, str]]:
     quoted_packet = shlex.quote(str(packet_path))
     if stage == "basis":
+        policy = packet.get("policy", {})
+        policy_recorded = isinstance(policy, dict) and policy.get("result") in {"passed", "blocked"}
+        policy_recorded = policy_recorded or any(
+            isinstance(record, dict) and record.get("node") == "policy_check"
+            and record.get("status") == "passed" and record.get("evidence")
+            for record in packet.get("results", [])
+        )
+        if not policy_recorded:
+            return [{"kind": "command", "command": f"reviewworthy packet policy bind --root . --packet {quoted_packet} --json", "reason": "Bind repository policy from the current checkout before contribution decisions."}]
         if issue_reference(packet):
             return [{"kind": "command", "command": f"reviewworthy issue verify --packet {quoted_packet} --record --json", "reason": "Record current provider evidence for the Issue contribution basis."}]
         basis = packet.get("basis") if isinstance(packet.get("basis"), dict) else {}
         if basis.get("kind") == "issue":
-            return [{"kind": "decision", "command": "", "reason": "Add the canonical GitHub Issue URL that supports this Issue-backed contribution."}]
+            return [{"kind": "decision", "command": "", "reason": f"Choose the canonical GitHub Issue URL, then record it with `reviewworthy packet basis record --packet {quoted_packet} --issue URL --json`."}]
         signal = basis.get("signal") if isinstance(basis.get("signal"), dict) else {}
         if signal.get("record_type") in {"pull_request", "discussion"}:
-            return [{"kind": "decision", "command": "", "reason": "Verify the source Signal artifact with `reviewworthy signal verify SIGNAL_PATH --record --json`, then bind that updated Signal 0.3 record to this Packet."}]
-        return [{"kind": "decision", "command": "", "reason": "Create or repair the required Signal 0.3 contribution basis and bind it to this Packet."}]
+            return [{"kind": "decision", "command": "", "reason": f"Verify the source Signal artifact with `reviewworthy signal verify SIGNAL_PATH --record --json`, then bind it with `reviewworthy packet basis record --packet {quoted_packet} --signal SIGNAL_PATH --json`."}]
+        return [{"kind": "decision", "command": "", "reason": f"Create or repair the Signal 0.3 basis, then bind it with `reviewworthy packet basis record --packet {quoted_packet} --signal SIGNAL_PATH --json`; local evidence needs a Packet repository identity and explicit policy allowance."}]
     if stage == "contract":
-        return [{"kind": "decision", "command": "", "reason": "Resolve candidate disposition and explicitly approve the bounded Contribution Contract."}]
+        selection = packet.get("candidate_selection", {})
+        if isinstance(selection, dict) and selection.get("recommendation") in {"issue_only", "seek_maintainer_signal", "do_not_contribute"} and not selection.get("transition"):
+            return [{"kind": "decision", "command": "", "reason": "Resolve candidate disposition with an explicit human-confirmed transition and reason before Contract approval."}]
+        contract = packet.get("contract", {})
+        unapproved = dict(contract)
+        unapproved["approval"] = {"status": "not_run", "human_confirmed": False}
+        if not validate_contract(unapproved)["valid"]:
+            return [{"kind": "decision", "command": "", "reason": f"Write the bounded Contract fields, then embed them with `reviewworthy packet contract bind --packet {quoted_packet} --contract FILE --json`."}]
+        return [{"kind": "decision", "command": "", "reason": f"Resolve any candidate disposition and obtain explicit human approval of the embedded Contract, then run `reviewworthy packet contract approve --packet {quoted_packet} --human-confirmed --json`."}]
     if stage == "profile":
-        return [{"kind": "decision", "command": "", "reason": "Raise the review profile to heightened or learning because recorded risk signals require full review depth."}]
+        return [{"kind": "decision", "command": "", "reason": f"Choose heightened or learning review depth, then record the review section or risk assess result with `reviewworthy packet review record --packet {quoted_packet} --input FILE --json`."}]
     if stage == "implementation":
         repository = packet.get("repository") if isinstance(packet.get("repository"), dict) else {}
         base = repository.get("default_branch") if isinstance(repository.get("default_branch"), str) and repository.get("default_branch") else "main"
@@ -179,7 +199,7 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
                 }
                 for check_id in missing_ids
             ]
-        return [{"kind": "decision", "command": "", "reason": "Define at least one required verification-plan check."}]
+        return [{"kind": "decision", "command": "", "reason": f"Define at least one required verification-plan check, then record the plan with `reviewworthy packet verification plan --packet {quoted_packet} --input FILE --json`."}]
     if stage == "ownership":
         return [{"kind": "decision", "command": "", "reason": "Complete the light Ownership Check: problem, scope, verification, and risks."}]
     if stage == "understanding":
@@ -198,7 +218,14 @@ def workflow_status(packet: Any, packet_path: Path) -> dict[str, Any]:
     validation_errors = list(validation.get("errors", []))
     readiness = readiness_blockers(packet)
     blockers = _deduplicated([*validation_errors, *readiness])
-    structural_errors = [item for item in validation_errors if item.get("code") not in _EXPECTED_INCOMPLETE_CODES]
+    structural_errors = [
+        item for item in validation_errors
+        if item.get("code") not in _EXPECTED_INCOMPLETE_CODES
+        and not (item.get("code") == "invalid_repository_identity"
+                 and item.get("path") in {"repository.owner", "repository.name"}
+                 and isinstance(packet, dict) and isinstance(packet.get("repository"), dict)
+                 and packet["repository"].get("owner") == packet["repository"].get("name") == "")
+    ]
     if structural_errors or not isinstance(packet, dict):
         stage = "invalid"
     elif not blockers:

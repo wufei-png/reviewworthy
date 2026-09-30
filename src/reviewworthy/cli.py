@@ -238,6 +238,7 @@ def _build_parser() -> argparse.ArgumentParser:
         if section == "policy":
             mutation.add_argument("--root", type=Path, default=Path("."))
         else:
+            mutation.add_argument("--repository", help="github.com owner/name when the basis cannot supply identity")
             basis_source = mutation.add_mutually_exclusive_group(required=True)
             basis_source.add_argument("--issue")
             basis_source.add_argument("--signal", type=Path)
@@ -940,7 +941,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.packet_command in {"policy", "basis"}:
                 packet = _load_current_packet(args.packet)
                 updated = (bind_policy(packet, args.root) if args.packet_command == "policy"
-                           else record_basis(packet, issue=args.issue, signal=_load_object(args.signal) if args.signal else None))
+                           else record_basis(packet, issue=args.issue, signal=_load_object(args.signal) if args.signal else None, repository=args.repository))
                 updated = replace_packet(args.packet, packet, updated)
                 _print({"updated": str(args.packet), "semantic_snapshot": updated["snapshots"]["semantic"]}, args.as_json)
                 return 0

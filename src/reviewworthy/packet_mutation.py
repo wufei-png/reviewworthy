@@ -13,7 +13,7 @@ from .packet import (
     readiness_blockers, result_record, semantic_snapshot, skeleton_packet, validate_packet,
 )
 from .policy import inspect_policy
-from .repository import parse_public_record, repository_identity, repository_matches
+from .repository import parse_public_record, repository_identity, repository_matches, validate_repository_identity
 from .signal import require_current_signal, signal_readiness_blockers, validate_signal
 from .util import atomic_write_json
 
@@ -28,7 +28,8 @@ def basis_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
     """Check current basis evidence without checking later workflow stages."""
 
     basis = packet["basis"]
-    errors = issue_basis_blockers(packet)
+    errors = validate_repository_identity(packet["repository"])
+    errors.extend(issue_basis_blockers(packet))
     errors.extend(signal_readiness_blockers(basis, packet["entry"]["mode"], packet["repository"]))
     if basis.get("kind") in {"signal", "discovery-evidence"}:
         errors.extend(validate_signal(basis.get("signal"), repository=packet["repository"])["errors"])
@@ -109,10 +110,17 @@ def bind_policy(packet: dict[str, Any], root: Path) -> dict[str, Any]:
     return updated
 
 
-def record_basis(packet: dict[str, Any], *, issue: str | None = None, signal: dict[str, Any] | None = None) -> dict[str, Any]:
+def record_basis(packet: dict[str, Any], *, issue: str | None = None, signal: dict[str, Any] | None = None, repository: str | None = None) -> dict[str, Any]:
     if (issue is None) == (signal is None):
         raise ValueError("Provide exactly one Issue URL or Signal artifact")
     updated = deepcopy(packet)
+    if repository is not None:
+        identity = repository_identity(repository)
+        current = updated["repository"]
+        if not current.get("owner") and not current.get("name"):
+            updated["repository"] = identity
+        elif not repository_matches(current, repository):
+            raise ValueError("Basis repository must match the established Packet identity")
     parsed = parse_public_record(issue if issue is not None else signal.get("reference"))
     if issue is not None and (parsed is None or parsed["record_type"] != "issue"):
         raise ValueError("--issue requires a canonical public GitHub Issue URL")

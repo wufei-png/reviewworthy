@@ -15,3 +15,15 @@ The brief supports contributor orientation but does not replace human ownership 
 `brief validate path.json` checks the artifact structure and embedded hash. Use `brief validate path.json --root .` when freshness against the current repository must also be established.
 
 Phase 2 adds repository identity, base-SHA binding, and explicit focus-file hashes to newly generated briefs. Earlier package-phase artifacts are intentionally fail-closed rather than silently upgraded: these facts cannot be reconstructed safely after the fact. Regenerate the brief and re-record the human-owned sections when a validator reports missing Phase 2 fields.
+
+From `packet init`, bind policy with `packet policy bind`, record the Issue or Signal
+with `packet basis record`, verify public evidence through the existing read-only
+commands, and embed the existing Contract with `packet contract bind`. Explicit
+human approval uses `packet contract approve --human-confirmed` against the embedded
+Contract. Use `packet review record --input FILE` for risk/review data and
+`packet verification plan --input FILE` for the existing plan shape. Re-run `next`
+after each operation. Known inputs produce executable commands; absent human
+content produces decision hints with the relevant domain interface. Material
+updates reset affected downstream evidence without rebinding old understanding
+to a fresh hash. Local Signals can establish identity with
+`packet basis record --signal FILE --repository OWNER/REPO`.
