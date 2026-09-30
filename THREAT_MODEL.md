@@ -15,7 +15,8 @@ Advisory evidence includes Candidate recommendations, duplicate-work disposition
 - The full Packet is Git-private local state; only the minimal Evidence Summary enters the PR Body.
 - Packet, Signal, receipt, pending state, and remote marker `0.3` do not read, recognize, migrate, or reconcile older formats.
 - Action policy is read from the base commit, so a Pull Request cannot authorize itself by changing policy on its head.
-- Remote writes require confirmation of the exact rendered operation ID. Current pending/receipt state is versioned and multiple marker matches stop for reconciliation.
+- Remote writes require confirmation of the exact rendered operation ID. Current pending/receipt state is versioned and multiple marker matches stop for reconciliation. Saved-operation reconciliation checks immutable repository identity, the known canonical object and a bounded marker search; an absent Issue backlink needs the original ID confirmation. Explicit uncertain retry additionally requires normal current-input/readiness validation, a valid pending creation without a known object and a fresh zero-match search after manual inspection. It accepts residual duplicate risk and makes one create attempt.
+- Known canonical create results survive incomplete post-create inspection. Local recovery records are unsigned implementation state; marked bodies may have lost original trailing whitespace, and pre-existing current Signal operation records did not preserve a full original Signal snapshot. State consistency checks cannot authenticate those omitted facts. Stale locks fail closed and are never removed automatically.
 - Git, verification, and `gh` commands have time and captured-output bounds. Artifact replacement is atomic within one filesystem.
 
 ## Non-guarantees

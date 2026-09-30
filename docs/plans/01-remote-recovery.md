@@ -1,6 +1,6 @@
 # 01 — 远端操作恢复
 
-Design status: **Approved (2026-09-30)**. Execution status: **Not started**.
+Design status: **Approved (2026-09-30)**. Execution status: **Complete (2026-09-30)**.
 
 Earlier foundations (ordering reference): 无。
 
@@ -45,9 +45,22 @@ Use implement-in-stages for scoped local commits, then delegated-change-review f
 
 Update this plan and the queue together after implementation/review; do not start the next session automatically.
 
-- Status: Not started.
-- Comparison base and commits: —
-- Checks/results: —
-- Review findings and decisions: —
-- Fixes and rechecks: —
-- Final interfaces/deviations/unverified items: —
+- Status: Complete (2026-09-30). Implemented the five planned behavior stages, followed by separately verified review fixes and documentation closure in the current tree; no later session started.
+- Comparison base: `b868ee9499fb3f19907795c450502560be1628a8` (actual clean checkout before implementation, newer than the planning baseline).
+- Stage commits:
+  1. `bff7626` — validated current-state loading, default pending refusal and lock recovery guidance.
+  2. `5ba38e9` — saved Issue/PR reconciliation, known-object and marker checks, original-ID-controlled backlink.
+  3. `f71e7e6` — matching Signal publication recovery with original input/target snapshots for new operations.
+  4. `db001c2` — explicit one-attempt retry of the same pending creation after complete zero-match inspection.
+  5. `9b05957` — canonical-result preservation, bounded post-create inspection and duplicate-race diagnostics.
+- Checks/results: Python 3.11.5; final `PYTHONPATH=src python -m unittest discover -s tests -v` passed **262 tests** (35.011s); `PYTHONPATH=src python -m reviewworthy eval run --json` passed **11/11 fixtures**. `python -m compileall -q src tests`, working-tree `git diff --check`, and the full comparison-range whitespace check passed. Tests include current state validation; zero/one/multiple matches; known URL list delay and marker/payload/head drift; confirmation and exact-note behavior; uncertain creates/notes and local receipt/artifact failures; late target edits/deletion/creation; post-create duplicate races; default lock refusal. Stage-focused checks passed before each scoped commit; docs/artifacts closure checks also passed.
+- Review: one fresh, read-only `$review-agent` via delegated-change-review reviewed `b868ee9..9b05957` and the active Skill/threat-model documentation changes. It returned two P2 findings, both independently reproduced and accepted; no findings were rejected. No second review was run.
+- Fixes and rechecks:
+  - `be4767d` — preserve and validate an exact original publication Body retained in a pre-existing current Signal artifact, rather than replace it with the trimmed marked-body projection. Regression proves original confirmed create inputs still work. Remote-focused **89 tests** passed, plus compileall and diff checks.
+  - `43cc333` — recheck Signal target existence/content immediately before replacement after provider reads; refuse edits, deletion or a newly created output instead of overwriting them. Remote-focused **90 tests** passed, plus compileall and diff checks. Final full suite/evals above include both fixes.
+- Final interfaces:
+  - `remote reconcile --state FILE --json [--confirm-operation-id ID]`.
+  - `signal publish reconcile SIGNAL_PATH --state FILE --json`.
+  - `--retry-uncertain` on the existing `remote create` and `signal publish create`, retaining their original input/readiness and exact-ID confirmation requirements.
+  - Existing ID algorithm, marker spelling, state version/path and historical `source=local_receipt` immediate retries remain unchanged. Reconcile is the current remote check. Small additive inspection/known-URL fields retain recovery evidence; new Signal operations additionally retain their original local target/input/Body.
+- Deviations/unverified items: no interface naming deviation and no real GitHub writes, mutation canary, push or release. Provider behavior was exercised through injected clients/transport fixtures, not live authenticated GitHub. Pre-existing current Signal records did not store a full original snapshot; their unrecorded original evidence/authority and unavailable trailing Body whitespace cannot be authenticated or reconstructed. A retained exact publication Body is preserved. Duplicate detection covers visible records only; explicitly retrying an invisible prior write accepts residual duplicate risk. The existing separate head-read/comment POST race remains; local target rechecks do not provide global coordination with independent writers. Leftover locks require manual process/remote inspection and are never deleted by age. See [active recovery guidance](../../references/remote-writes.md).

@@ -1,8 +1,8 @@
 # Reviewworthy recovery and workflow queue — 2026-09-30
 
-Design status: **Approved by the user on 2026-09-30**. All implementation sessions are not started.
+Design status: **Approved by the user on 2026-09-30**. Session 01 is complete; sessions 02–06 are not started.
 
-This is a future implementation queue. Each session plan contains its own planned interfaces, target files, stages and acceptance criteria. Read this queue and only the selected session plan before inspecting its referenced code/tests/contracts.
+This is the approved implementation queue. Each session plan contains its own planned interfaces, target files, stages and acceptance criteria. Read this queue and only the selected session plan before inspecting its referenced code/tests/contracts.
 
 ## Purpose, baseline and independent execution
 
@@ -75,7 +75,7 @@ The plan numbers 01–06 correspond to the approved design's original S1–S6. N
 
 | Session plan | Status | Commits | Checks/review/fixes | Deviations/unverified items |
 |---|---|---|---|---|
-| [01 — 远端操作恢复](./01-remote-recovery.md) | Not started | — | — | — |
+| [01 — 远端操作恢复](./01-remote-recovery.md) | Complete (2026-09-30) | `bff7626`, `5ba38e9`, `f71e7e6`, `db001c2`, `9b05957`; fixes `be4767d`, `43cc333` | 262 unit tests, 11 evals, compileall and full-range diff checks passed. One fresh read-only review; both P2 findings reproduced, accepted and fixed; focused rechecks passed. | Final interfaces match the plan. No live GitHub writes or push. Pre-existing current Signal snapshot/whitespace omissions and bounded visibility/race limits are documented in 01. |
 | [02 — Policy 与 Git 输入边界](./02-policy-and-git-inputs.md) | Not started | — | — | — |
 | [03 — Action、CI 与支持文档](./03-action-and-ci.md) | Not started | — | — | — |
 | [04 — 实现前 Packet 操作接口](./04-preimplementation-mutations.md) | Not started | — | — | — |
