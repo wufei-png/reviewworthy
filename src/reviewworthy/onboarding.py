@@ -26,7 +26,9 @@ def prepare_start(root: Path, contribution_id: str, issue: str, focus: list[str]
     directory = local_state_path(root, f"reviewworthy/v0.3/contributions/{contribution_id}")
     packet_path = directory / "packet.json"
     brief_path = directory / "project-brief.json"
-    current_brief = build_project_brief(root, focus)
+    # Saved focus files can disappear during implementation. Retain their
+    # manifest and let freshness validation report that instead of blocking reuse.
+    current_brief = build_project_brief(root, [] if brief_path.exists() else focus)
     facts = current_brief["repository"]
     if facts["provider"] == "github" and not repository_matches(facts, slug):
         raise ValueError("The Issue must belong to the checkout's origin repository")

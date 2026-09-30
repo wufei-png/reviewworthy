@@ -160,3 +160,34 @@ class OnboardingTests(unittest.TestCase):
             self.assertEqual(result['status']['current_stage'], 'blocked')
             self.assertFalse(result['status']['ready'])
             self.assertEqual(result['status']['next'][0]['kind'], 'decision')
+
+    def test_resume_reports_renamed_or_deleted_focus_without_replacing_artifacts(self) -> None:
+        for operation in ('rename', 'delete'):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.repository(root)
+                with patch('reviewworthy.cli.GhClient', side_effect=lambda: GhClient(ReadOnlyTransport())):
+                    code, started = self.start(root)
+                self.assertEqual(code, 0)
+                path, brief_path = Path(started['packet']), Path(started['brief'])
+                source = path.parent / 'contract.json'
+                contract = skeleton_contract('journey')
+                contract.update(problem='Bounded failure', design='Guard input', scope={'files': ['example.py']})
+                source.write_text(json.dumps(contract))
+                self.assertEqual(self.call('packet', 'contract', 'bind', '--packet', str(path), '--contract', str(source))[0], 0)
+                self.assertEqual(self.call('packet', 'contract', 'approve', '--packet', str(path), '--human-confirmed')[0], 0)
+                before = path.read_bytes(), brief_path.read_bytes()
+                if operation == 'rename':
+                    self.git(root, 'mv', 'example.py', 'renamed.py')
+                else:
+                    self.git(root, 'rm', 'example.py')
+                self.git(root, 'commit', '-qm', operation + ' focus')
+                with patch('reviewworthy.cli.GhClient') as provider:
+                    code, resumed = self.start(root)
+                    provider.assert_not_called()
+                self.assertEqual(code, 0, resumed)
+                self.assertEqual(resumed['packet'], started['packet'])
+                self.assertEqual(resumed['brief'], started['brief'])
+                self.assertEqual(resumed['status']['current_stage'], 'verification')
+                self.assertIn('invalid_focus_file', {error['code'] for error in resumed['brief_validation']['errors']})
+                self.assertEqual((path.read_bytes(), brief_path.read_bytes()), before)
