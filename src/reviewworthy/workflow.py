@@ -7,7 +7,9 @@ import shlex
 from typing import Any
 
 from .contract import validate_contract
+from .github import GhError, build_operation, load_operation_state
 from .packet import current_verification_receipts, issue_reference, readiness_blockers, validate_packet
+from .repository import repository_matches
 
 
 _STAGE_CODES = (
@@ -209,7 +211,39 @@ def _next_actions(packet: dict[str, Any], packet_path: Path, stage: str) -> list
         return [{"kind": "command", "command": f"reviewworthy packet validate {quoted_packet} --json", "reason": "Repair the current Packet 0.3 structure before continuing."}]
     if stage == "blocked":
         return [{"kind": "decision", "command": "", "reason": "Resolve the remaining policy, security, or hard-stop findings before continuing."}]
-    return [{"kind": "command", "command": "reviewworthy remote plan ...", "reason": "The Packet is ready for an explicit remote-write plan."}]
+    recovery = _current_operation_recovery(packet, packet_path)
+    if recovery:
+        return [recovery]
+    return [{"kind": "decision", "command": "", "reason": (
+        "The Packet is ready. Choose the actual PR base/head refs and export the exact Body "
+        f"with `reviewworthy packet narrative preview --packet {quoted_packet} --output FILE --json`, "
+        "then use `reviewworthy remote plan --root ROOT --packet PACKET --repo OWNER/REPO "
+        "--kind pull_request --title TITLE --body-file FILE --base BASE --head HEAD --json`. "
+        "Use the Packet repository and confirmed title; approve the displayed operation ID before any write."
+    )}]
+
+
+def _current_operation_recovery(packet: dict[str, Any], packet_path: Path) -> dict[str, str] | None:
+    """Suggest recovery only for an exact current operation; never change readiness."""
+
+    directory = packet_path.parent / "local" / "v0.3" / "operations"
+    for path in sorted(directory.glob("*.json")):
+        try:
+            operation, record = load_operation_state(path)
+            if (operation.kind != "pull_request" or operation.purpose != "contribution"
+                    or not repository_matches(packet.get("repository"), operation.repo)
+                    or record["status"] not in {"pending", "pr_created", "link_attempted", "needs_reconciliation"}):
+                continue
+            current = build_operation(packet, operation.repo, "pull_request",
+                                      packet["narrative"]["title"], packet["narrative"]["body"],
+                                      operation.base, operation.head, packet["diff"])
+            if current.as_dict() != operation.as_dict():
+                continue
+        except (GhError, OSError, ValueError):
+            continue
+        return {"kind": "command", "command": f"reviewworthy remote reconcile --state {shlex.quote(str(path))} --json",
+                "reason": "Inspect the matching saved operation before any new write; an absent Issue backlink needs explicit confirmation of its original operation ID."}
+    return None
 
 
 def workflow_status(packet: Any, packet_path: Path) -> dict[str, Any]:

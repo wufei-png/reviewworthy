@@ -29,7 +29,9 @@ class WorkflowStatusTests(unittest.TestCase):
 
         self.assertTrue(result["ready"])
         self.assertEqual(result["current_stage"], "ready")
-        self.assertIn("remote plan", result["next"][0]["command"])
+        self.assertIn("remote plan", result["next"][0]["reason"])
+        self.assertEqual(result["next"][0]["kind"], "decision")
+        self.assertEqual(result["next"][0]["command"], "")
 
     def test_approved_contract_routes_to_implementation_before_diff_exists(self) -> None:
         packet = valid_packet()
@@ -201,3 +203,33 @@ class WorkflowStatusTests(unittest.TestCase):
             self.assertFalse(result["ready"])
             self.assertEqual(result["current_stage"], "blocked")
             self.assertIn("policy_source_encoding", {item["code"] for item in result["blocking"]})
+
+    def test_unrelated_malformed_and_stale_operations_cannot_change_packet_routing(self) -> None:
+        from copy import deepcopy
+        from reviewworthy.github import build_operation, operation_receipt_path, save_operation_pending
+        packet = valid_packet()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'packet.json'
+            before = workflow_status(packet, path)
+            other = deepcopy(packet)
+            other['contribution_id'] = 'another-contribution'
+            operation = build_operation(other, 'example/project', 'pull_request',
+                                        other['narrative']['title'], other['narrative']['body'], 'main', 'feature', other['diff'])
+            state = operation_receipt_path(path, operation.operation_id)
+            save_operation_pending(state, operation)
+            state.with_name('malformed.json').write_text('{not-json')
+            self.assertEqual(workflow_status(packet, path), before)
+            operation = build_operation(packet, 'example/project', 'pull_request',
+                                        packet['narrative']['title'], packet['narrative']['body'], 'main', 'feature', packet['diff'])
+            current_state = operation_receipt_path(path, operation.operation_id)
+            save_operation_pending(current_state, operation)
+            self.assertIn('remote reconcile', workflow_status(packet, path)['next'][0]['command'])
+            changed = deepcopy(packet)
+            changed['narrative']['title'] = 'New confirmed title'
+            self.assertEqual(workflow_status(changed, path)['next'][0]['kind'], 'decision')
+            blocked = deepcopy(packet)
+            blocked['review']['hard_stops'] = [{'kind': 'security', 'reason': 'Use the private security channel.'}]
+            blocked['snapshots']['semantic'] = semantic_snapshot(blocked)
+            result = workflow_status(blocked, path)
+            self.assertEqual(result['current_stage'], 'blocked')
+            self.assertNotIn('reconcile', result['next'][0]['command'])

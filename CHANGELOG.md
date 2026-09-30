@@ -2,6 +2,8 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Guide ready Packets to explicit PR target decisions or exact-current saved-operation reconciliation without replacing derived readiness; exercise complete Python/Node/Go-shaped hermetic CLI journeys.
+
 - Start an Issue-backed contribution with reusable Git-private Packet/Brief artifacts and read-only provider verification, preserving bound decisions and contributor prose on retry.
 
 - Record, preview and explicitly confirm exact PR prose and current disclosure; guide post-implementation `next` actions and retain current Orientation-before-Assessment gates.

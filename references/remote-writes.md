@@ -169,3 +169,15 @@ its inspection evidence; immediate ordinary create retry can still return the
 historical `already_exists` result. Run reconcile for a current remote check.
 Detection covers visible provider records and is not globally exactly-once or an
 assurance that every concurrent write is instantly visible. There is no polling.
+
+At the ready boundary, `next --packet FILE --json` suggests
+`remote reconcile --state FILE --json` only when a valid current saved PR operation
+exactly matches the Packet's rendered operation (including repository, narrative,
+Diff, base/head choices and operation ID). It reads local state only and leaves
+Packet readiness derived from evidence. Unrelated, stale and malformed operation
+records cannot change that readiness or divert the next action. Saved operations
+remain independently recoverable with the explicit reconcile command after the
+Packet has changed. An absent Issue backlink still requires the original operation
+ID confirmation. Without a matching unresolved operation, `next` returns a decision
+hint for the actual target refs and Body export, not a command with executable
+ellipsis placeholders.
