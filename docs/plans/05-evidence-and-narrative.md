@@ -1,6 +1,6 @@
 # 05 — 验证、Ownership 与公开叙述
 
-Design status: **Approved (2026-09-30)**. Execution status: **Not started**.
+Design status: **Approved (2026-09-30)**. Execution status: **Complete (2026-09-30)**.
 
 Earlier foundations (ordering reference): 04。
 
@@ -33,9 +33,19 @@ Use implement-in-stages for scoped local commits, then delegated-change-review f
 
 Update this plan and the queue together after implementation/review; do not start the next session automatically.
 
-- Status: Not started.
-- Comparison base and commits: —
-- Checks/results: —
-- Review findings and decisions: —
-- Fixes and rechecks: —
-- Final interfaces/deviations/unverified items: —
+- Status: Complete (2026-09-30). Only session 05 was executed; 06 remains not started.
+- Comparison base: `48ac1e732a0776dcd7d9925cca8b222830dc0f44`.
+- Stage commits:
+  1. `1987d6c` — synchronize implementation/verification results and downstream semantic invalidation; 123 Packet/CLI/workflow/schema checks passed.
+  2. `84e2af0` — typed Ownership/AI recording, explicit claims, policy checks and confirmation resets; 153 focused checks including docs/artifacts passed.
+  3. `32d0282` — exact narrative record/preview/confirm, public projection and actionable next steps; 157 focused checks passed, including a CLI-only Standard journey from init through real Git binding/local execution to remote plan, and Heightened/Learning phase-order tests.
+- Complete-change checks: initially 325 unit tests passed; after both review fixes, 327 unit tests passed on Python 3.11.5. All 11 eval fixtures, compileall, staged whitespace checks and full comparison-range diff checks passed. Documentation/artifact checks were rerun for record closure.
+- One fresh read-only delegated review inspected the complete `48ac1e7..32d0282` session diff and independently passed 56 focused checks. Both P2 findings were independently reproduced and accepted; no findings were rejected:
+  - Partial required verification generated `not_recorded` with a positive receipt count, violating the existing public Summary contract and breaking preview/remote plan.
+  - An unstable optional receipt blocked verification while `next` incorrectly requested an already existing required plan rather than routing cleanup and rerun of that check.
+- Fixes and rechecks:
+  - `a56c2f2` — incomplete public verification uses the existing `not_recorded`/zero-count projection. Added schema/rendering and CLI preview/remote-plan regressions; 53 focused checks passed.
+  - `c70505c` — route blocking optional receipts to their check IDs with clean-worktree/bound-HEAD recovery guidance. Added CLI failure-to-recovery regression; 79 focused checks passed.
+- Final interfaces: `packet ownership record --packet ... --input FILE`; `packet ai record --packet ... --input FILE`; `packet narrative record --packet ... --title ... --body-file ... [--human-expression-file FILE]`; `packet narrative preview --packet ... [--output FILE --force]`; `packet narrative confirm --packet ... --human-confirmed`. All support `--json`. Existing input sections and artifact/schema versions remain in use; no second business-fact envelope, freshness field, or confirmation challenge was added.
+- Material contribution inputs invalidate their dependent human evidence; Ownership changes preserve actual receipts, while audit-only receipt timestamp/output-hash updates preserve readiness. Current receipt identity includes command, HEAD, provenance and worktree proof in the semantic projection. A historical understanding snapshot may require re-recording against current CLI-maintained evidence. Changed Orientation resets Assessment; final confirmation explicitly approves current prose/disclosure without inventing stage human verification. Remote input title/Body equality now includes whitespace. Preview's exported raw Body is only a convenience; remote plan still recomputes Git identity and renders the operation marker.
+- Unverified items and limits: Git/provider journeys use hermetic repositories and injected provider evidence; no live GitHub writes, runner execution, push, wheel/release checks or Python 3.12/3.13 execution. CLI structure/evidence checks do not prove human comprehension or truthfulness of disclosure. Final documentation commit closes this record and the shared queue.
