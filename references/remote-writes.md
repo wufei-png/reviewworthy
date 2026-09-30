@@ -71,3 +71,11 @@ sequenceDiagram
 Immediately before a create, the CLI persists a pending operation record. After a successful create it replaces that record with ignored `local/v0.3/operations/` state. Every record carries `state_version=0.3`; older paths and unversioned states are not read or reconciled. The receipt bridges GitHub's short read-after-write delay: an immediate retry returns `already_exists` without issuing a second create request. A pending, malformed, incomplete, mismatched, or multiply matched marker is a reconciliation error, not permission to retry.
 
 `signal publish` is an Issue-only remote operation for turning a local Discovery draft into a public Signal. Its plan requires `--repository-id`, binds that immutable GitHub identity into the operation, and rechecks the live numeric ID immediately before reconciliation or creation. It has its own stable operation subject and updates the Signal artifact only after the same receipt protocol succeeds. Discussion publication is intentionally not inferred from or silently substituted for an Issue publication.
+
+Current state is validated independently of the create retry rule. A pending record
+still stops ordinary create. The stored marked Body cannot reproduce every
+original hash input because creation stripped trailing whitespace; state validation
+checks its shape and ID/marker consistency, and does not authenticate local state.
+A lock left by a killed process is never deleted automatically: verify that no
+process owns it, inspect the remote operation manually, remove only that operation's
+`.json.lock`, then reconcile the preserved `.json` record.

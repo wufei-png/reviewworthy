@@ -12,6 +12,8 @@ from reviewworthy.github import (
     build_operation,
     build_signal_operation,
     load_operation_receipt,
+    load_operation_state,
+    save_operation_pending,
     operation_lock,
     operation_receipt_path,
     save_operation_link_attempted,
@@ -25,6 +27,45 @@ from helpers import valid_packet
 
 
 class GitHubOperationTests(unittest.TestCase):
+    def test_state_loading_preserves_pending_and_original_marked_body(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix", "Body  ")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            save_operation_pending(path, operation)
+            loaded, record = load_operation_state(path)
+            self.assertEqual(loaded, operation)
+            self.assertEqual(record["status"], "pending")
+            with self.assertRaisesRegex(GhError, "uncertain or pending"):
+                load_operation_receipt(path, operation)
+
+    def test_state_loader_rejects_malformed_contracts(self) -> None:
+        operation = build_operation(valid_packet(), "example/project", "issue", "Fix", "Body")
+        mutations = [
+            ("state_version", "0.2"), ("status", "linked"), ("operation", []),
+            ("operation.repository_id", True), ("operation.marker", "old"),
+            ("operation.operation_id", "rw-../bad"), ("operation.permissions", ["admin"]),
+            ("operation.repo", "bad/slug/extra"), ("operation.draft", "false"),
+            ("operation.purpose", "other"), ("operation.head", 1),
+            ("operation.subject_id", ""), ("remote", "https://github.com/example/project/issues/2"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            for key, value in mutations:
+                with self.subTest(key=key):
+                    save_operation_pending(path, operation)
+                    record = json.loads(path.read_text())
+                    target = record
+                    parts = key.split(".")
+                    for part in parts[:-1]:
+                        target = target[part]
+                    target[parts[-1]] = value
+                    path.write_text(json.dumps(record))
+                    with self.assertRaises(GhError):
+                        load_operation_state(path)
+            path.write_text("{broken")
+            with self.assertRaisesRegex(GhError, "unreadable"):
+                load_operation_state(path)
+
     def test_operation_marker_and_id_are_stable_for_same_rendered_request(self) -> None:
         packet = valid_packet()
         body = "Body\n\nhttps://github.com/example/project/issues/1"

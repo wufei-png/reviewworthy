@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from subprocess import CompletedProcess
 import tempfile
@@ -308,7 +309,7 @@ def operation_lock(path: Path):
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(json.dumps({"state_version": OPERATION_STATE_VERSION, "operation_id": path.stem, "recorded_at": utc_now()}) + "\n")
     except FileExistsError as exc:
-        raise GhError(f"Operation is already in progress; reconcile the lock before retrying: {lock_path}") from exc
+        raise GhError(f"Operation is already in progress. Verify no process owns it, inspect remote state manually, then remove only this lock and run reconcile; never remove a live lock: {lock_path}") from exc
     try:
         yield lock_path
     finally:
@@ -318,43 +319,109 @@ def operation_lock(path: Path):
             pass
 
 
-def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
+def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
+    """Validate a current local record without applying create's pending stop rule.
+
+    Marked bodies have already lost trailing whitespace; the stored ID cannot be
+    rehashed reliably. This validates consistency, not signed local authority.
+    """
+
     try:
-        receipt = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise GhError(f"Operation receipt is unreadable; reconcile before retrying: {path}: {exc}") from exc
-    if not isinstance(receipt, dict) or receipt.get("state_version") != OPERATION_STATE_VERSION or any(
-        receipt.get(key) != expected
-        for key, expected in {
-            "operation_id": operation.operation_id,
-            "marker": operation.marker,
-            "repo": operation.repo,
-            "kind": operation.kind,
-        }.items()
-    ):
-        raise GhError(f"Operation receipt does not match the rendered operation; reconcile before retrying: {path}")
-    if receipt.get("operation") != operation.as_dict():
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise GhError(f"Operation state is unreadable; inspect {path}: {exc}") from exc
+
+    def invalid(detail: str) -> None:
+        raise GhError(f"Operation state does not match the current operation contract ({detail}): {path}")
+
+    if not isinstance(record, dict) or record.get("state_version") != OPERATION_STATE_VERSION:
+        invalid("state_version")
+    payload = record.get("operation")
+    if not isinstance(payload, dict):
+        invalid("operation")
+    kind = payload.get("kind")
+    purpose = payload.get("purpose")
+    if not isinstance(kind, str) or not isinstance(purpose, str) or kind not in {"issue", "pull_request"} or purpose not in {"contribution", "signal_publication"}:
+        invalid("kind/purpose")
+    if purpose == "signal_publication" and kind != "issue":
+        invalid("signal publication kind")
+    for key in ("operation_id", "marker", "repo", "title", "body", "subject_id"):
+        if not isinstance(payload.get(key), str) or not payload[key].strip():
+            invalid(key)
+    if not re.fullmatch(r"rw-[0-9a-f]{20}", payload["operation_id"]):
+        invalid("operation_id")
+    marker = f"<!-- reviewworthy:v0.3:operation-id={payload['operation_id']} -->"
+    if payload["marker"] != marker or payload["body"].count(marker) != 1 or not payload["body"].endswith("\n\n" + marker):
+        invalid("marker/body")
+    try:
+        if canonical_repository_slug(payload["repo"]) != payload["repo"]:
+            invalid("repo")
+    except ValueError:
+        invalid("repo")
+    repository_id = payload.get("repository_id")
+    if type(repository_id) is not int or repository_id <= 0:
+        invalid("repository_id")
+    if type(payload.get("draft")) is not bool:
+        invalid("draft")
+    for key in ("base", "head", "issue_url", "link_note_template", "subject_digest"):
+        if key not in payload or (payload[key] is not None and (not isinstance(payload[key], str) or not payload[key].strip())):
+            invalid(key)
+    issue_url = payload["issue_url"]
+    if issue_url is not None:
+        parsed = parse_public_record(issue_url)
+        if not parsed or parsed["record_type"] != "issue" or parsed["url"] != issue_url or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", payload["repo"]):
+            invalid("issue_url")
+    permissions = ["issues:write"] if kind == "issue" else ["contents:read", "pull-requests:write"] + (["issues:write"] if issue_url else [])
+    if payload.get("permissions") != permissions:
+        invalid("permissions")
+    if payload["link_note_template"] != ("{pr_url}" if kind == "pull_request" and issue_url else None):
+        invalid("link_note_template")
+    if kind == "pull_request":
+        if not payload["head"] or payload.get("comparison") != "merge_base":
+            invalid("head/comparison")
+        for key in ("base_tip_sha", "merge_base_sha", "head_sha", "subject_digest", "fingerprint_algorithm"):
+            if not isinstance(payload.get(key), str) or not payload[key].strip():
+                invalid(key)
+    elif payload["head"] is not None or payload["draft"] or payload["subject_digest"] is not None:
+        invalid("issue fields")
+    if purpose == "signal_publication" and (payload["base"] is not None or issue_url is not None):
+        invalid("signal fields")
+    try:
+        operation = RemoteOperation(**{**payload, "permissions": tuple(permissions)})
+    except TypeError:
+        invalid("operation fields")
+    if payload != operation.as_dict():
+        invalid("operation fields")
+    if any(record.get(key) != payload[key] for key in ("operation_id", "marker", "repo", "kind")):
+        invalid("record identity")
+    if not isinstance(record.get("recorded_at"), str) or not record["recorded_at"].strip():
+        invalid("recorded_at")
+    status = record.get("status")
+    allowed = {"pending", "pr_created", "link_attempted", "linked", "needs_reconciliation"} if kind == "pull_request" else {"pending", "succeeded"}
+    if not isinstance(status, str) or status not in allowed:
+        invalid("status")
+    if "reason" in record and not isinstance(record["reason"], str):
+        invalid("reason")
+    remote = record.get("pr_url") if kind == "pull_request" else record.get("remote")
+    if status != "pending" or remote:
+        if _canonical_operation_remote(operation, remote) != remote:
+            invalid("remote URL")
+    if status == "pending" and (remote or record.get("reason")):
+        invalid("pending object already known")
+    if kind == "pull_request" or status == "pending":
+        if record.get("issue_url") != (issue_url or ""):
+            invalid("record issue_url")
+    return operation, record
+
+
+def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    stored, receipt = load_operation_state(path)
+    if stored != operation:
         raise GhError(f"Operation receipt payload does not match the rendered operation; reconcile before retrying: {path}")
-    status = receipt.get("status")
-    if status == "pending":
-        raise GhError(f"Operation has an uncertain or pending remote write; reconcile before retrying: {path}")
-    if operation.kind == "pull_request" and status in {"pr_created", "link_attempted", "linked", "needs_reconciliation"}:
-        pr_url = receipt.get("pr_url")
-        parsed_pr = parse_public_record(pr_url)
-        if not parsed_pr or parsed_pr.get("record_type") != "pull_request" or not repository_slugs_match(f"{parsed_pr['owner']}/{parsed_pr['name']}", operation.repo):
-            raise GhError(f"Pull-request receipt has no valid pr_url; reconcile before retrying: {path}")
-        if operation.issue_url and receipt.get("issue_url") != operation.issue_url:
-            raise GhError(f"Pull-request receipt has a mismatched issue_url; reconcile before retrying: {path}")
-        if operation.issue_url and not parse_public_record(receipt.get("issue_url")):
-            raise GhError(f"Pull-request receipt has an invalid issue_url; reconcile before retrying: {path}")
-    elif status != "succeeded":
-        raise GhError(f"Operation receipt has an unsupported status; reconcile before retrying: {path}")
-    if status == "succeeded":
-        _canonical_operation_remote(operation, receipt.get("remote"))
-    if not isinstance(receipt.get("recorded_at"), str) or not receipt["recorded_at"].strip():
-        raise GhError(f"Operation receipt has no valid timestamp; reconcile before retrying: {path}")
+    if receipt["status"] == "pending":
+        raise GhError(f"Operation has an uncertain or pending remote write; run remote reconcile --state {path} before retrying")
     return receipt
 
 
