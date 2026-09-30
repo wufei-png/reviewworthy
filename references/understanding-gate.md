@@ -8,6 +8,27 @@ Understanding is responsibility-building, not proof of authorship.
 
 `standard` uses the light Ownership Check and does not require Orientation or Assessment. `heightened` and `learning` add both phases and require `behavior`, `invariant`, `test`, `flow`, `tradeoffs`, `failures`, and `regressions`. Risk signals can raise Standard to Heightened; Learning is an explicit educational profile.
 
+Record a review section (`profile`, `signals`, `hard_stops`) or the JSON result of
+`reviewworthy risk assess MANIFEST --json` through
+`reviewworthy packet review record --packet "$PACKET" --input FILE --json`.
+Recording merges risk signals and independent hard stops and permits only profile
+escalation. An empty list or lower requested profile does not remove earlier
+scrutiny. This command does not resolve hard stops; their explicit decision remains
+outside this recording interface. A material review change resets downstream
+verification, Ownership and understanding without changing Contract approval.
+
+Before implementation, record the Packet's existing verification plan shape:
+
+```bash
+reviewworthy packet verification plan --packet "$PACKET" --input verification-plan.json --json
+```
+
+The input has `plan_version: "0.1"` and `checks`, each with a unique `id`, nonempty
+`argv`, canonical repository-relative `cwd` (including `.`), and boolean `required`.
+The CLI computes `plan_digest`; argv stays an argument list with no shell expansion.
+Changing the plan resets receipts and downstream evidence; an identical plan
+preserves them. Neither input accepts arbitrary Packet records or supplied hashes.
+
 The deterministic CLI records the evidence without generating the explanation or answers. The JSON Schema validates the portable shape; `reviewworthy understanding validate` is the canonical check for rubric categories/evidence shape, equal question/answer counts, exact semantic snapshots, and phase ordering. It cannot prove that the contributor's explanation is correct:
 
 ```bash

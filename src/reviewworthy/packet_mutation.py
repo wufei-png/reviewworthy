@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from .contract import CONTRACT_FIELDS, contract_snapshot, validate_contract
+from .git import verification_plan_digest
 from .packet import (
     issue_basis_blockers, policy_violations, require_current_packet,
-    readiness_blockers, result_record, semantic_snapshot, skeleton_packet,
+    readiness_blockers, result_record, semantic_snapshot, skeleton_packet, validate_packet,
 )
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_identity, repository_matches
@@ -197,4 +198,54 @@ def approve_contract(packet: dict[str, Any], *, human_confirmed: bool) -> dict[s
         "status": "approved", "human_confirmed": True,
         "contract_sha256": contract_snapshot(contract),
     }
+    return updated
+
+
+def record_review(packet: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    """Record an existing review section or risk-assessment result monotonically."""
+
+    if "review_profile" in review:
+        allowed = {"review_profile", "signals", "hard_stops", "user_escalated", "requested_review_profile", "changed_files", "heightened_path_globs", "matched_path_rules"}
+        profile = review["review_profile"]
+    else:
+        allowed = {"profile", "signals", "hard_stops"}
+        profile = review.get("profile")
+    if set(review) - allowed:
+        raise ValueError("Review input must be an existing review section or risk assess result")
+    ranks = {"standard": 0, "heightened": 1, "learning": 2}
+    if not isinstance(profile, str) or profile not in ranks:
+        raise ValueError("Review profile must be standard, heightened, or learning")
+    updated = deepcopy(packet)
+    current = updated["review"]
+    if current.get("profile") not in ranks:
+        raise ValueError("Current Packet review profile is invalid")
+    for key in ("signals", "hard_stops"):
+        incoming = review.get(key, [])
+        if not isinstance(incoming, list) or not all(isinstance(item, (str, dict)) for item in incoming):
+            raise ValueError(f"review.{key} must be a list of existing risk records")
+        if not isinstance(current.get(key), list):
+            raise ValueError(f"packet.review.{key} must be a list")
+        for item in incoming:
+            if item not in current[key]:
+                current[key].append(deepcopy(item))
+    current["profile"] = max((current["profile"], profile), key=ranks.__getitem__)
+    if current["signals"] and current["profile"] == "standard":
+        current["profile"] = "heightened"
+    return updated
+
+
+def record_verification_plan(packet: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    """Consume the current plan shape, computing the digest within the CLI."""
+
+    if set(plan) != {"plan_version", "checks"}:
+        raise ValueError("Verification input must contain only plan_version and checks")
+    checks = plan.get("checks")
+    if not isinstance(checks, list) or any(not isinstance(check, dict) or set(check) != {"id", "argv", "cwd", "required"} for check in checks):
+        raise ValueError("Each verification check must contain only id, argv, cwd and required")
+    updated = deepcopy(packet)
+    updated["verification"]["plan"] = deepcopy(plan)
+    updated["verification"]["plan_digest"] = verification_plan_digest(plan)
+    errors = [error for error in validate_packet(updated)["errors"] if error["path"].startswith("verification.plan")]
+    if errors:
+        raise ValueError(f"Invalid verification plan: {errors}")
     return updated

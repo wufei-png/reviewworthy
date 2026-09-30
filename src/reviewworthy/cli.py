@@ -44,7 +44,10 @@ from .packet import (
     skeleton_packet,
     validate_packet,
 )
-from .packet_mutation import approve_contract, bind_contract, bind_policy, record_basis, replace_packet
+from .packet_mutation import (
+    approve_contract, bind_contract, bind_policy, record_basis, record_review,
+    record_verification_plan, replace_packet,
+)
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .remote import find_creation_matches, inspect_created_operation, inspect_operation, load_creation_receipt, record_inspection
@@ -249,6 +252,14 @@ def _build_parser() -> argparse.ArgumentParser:
             mutation.add_argument("--contract", type=Path, required=True)
         else:
             mutation.add_argument("--human-confirmed", action="store_true", required=True)
+        _common_json(mutation)
+
+    for section, operation in (("review", "record"), ("verification", "plan")):
+        section_parser = packet_commands.add_parser(section)
+        section_commands = section_parser.add_subparsers(dest="packet_operation", required=True)
+        mutation = section_commands.add_parser(operation)
+        mutation.add_argument("--packet", type=Path, required=True)
+        mutation.add_argument("--input", type=Path, required=True)
         _common_json(mutation)
 
     action = commands.add_parser("action", help="Check the public pull-request Evidence Summary")
@@ -910,6 +921,14 @@ def main(argv: list[str] | None = None) -> int:
                 atomic_write_json(output, packet, sort_keys=False)
                 result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
                 _print(result, args.as_json)
+                return 0
+            if args.packet_command in {"review", "verification"}:
+                packet = _load_current_packet(args.packet)
+                payload = _load_object(args.input)
+                updated = (record_review(packet, payload) if args.packet_command == "review"
+                           else record_verification_plan(packet, payload))
+                updated = replace_packet(args.packet, packet, updated)
+                _print({"updated": str(args.packet), "semantic_snapshot": updated["snapshots"]["semantic"]}, args.as_json)
                 return 0
             if args.packet_command == "contract":
                 packet = _load_current_packet(args.packet)

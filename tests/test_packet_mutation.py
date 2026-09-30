@@ -169,3 +169,61 @@ class PacketMutationTests(unittest.TestCase):
             contract[key] = value
             with self.subTest(field=key), self.assertRaises(ValueError):
                 bind_contract(packet, contract)
+
+    def test_review_escalates_preserves_hard_stops_and_never_downgrades_learning(self) -> None:
+        from reviewworthy.packet_mutation import record_review
+        from reviewworthy.risk import assess_manifest
+        packet = valid_packet()
+        assessed = assess_manifest({"public_api": True, "security_issue": True})
+        updated = maintain_packet(packet, record_review(packet, assessed))
+        self.assertEqual(updated["review"]["profile"], "heightened")
+        self.assertEqual(updated["review"]["hard_stops"], assessed["hard_stops"])
+        self.assertEqual(updated["contract"]["approval"], packet["contract"]["approval"])
+        self.assertEqual(node(updated, "implementation")["status"], "passed")
+        self.assertEqual(updated["verification"]["receipts"], [])
+        low = {"profile": "standard", "signals": [], "hard_stops": []}
+        preserved = maintain_packet(updated, record_review(updated, low))
+        self.assertEqual(preserved["review"], updated["review"])
+        learned = maintain_packet(updated, record_review(updated, {"profile": "learning"}))
+        self.assertEqual(record_review(learned, low)["review"]["profile"], "learning")
+
+    def test_verification_plan_preserves_exact_command_and_invalidates_receipts(self) -> None:
+        from reviewworthy.git import verification_plan_digest
+        from reviewworthy.packet_mutation import record_verification_plan
+        packet = valid_packet()
+        plan = {"plan_version": "0.1", "checks": [
+            {"id": "special", "argv": ["python", "a b.py", "--literal=$HOME"], "cwd": "tests", "required": False},
+            {"id": "required", "argv": ["python", "-m", "unittest"], "cwd": ".", "required": True},
+        ]}
+        updated = maintain_packet(packet, record_verification_plan(packet, plan))
+        self.assertEqual(updated["verification"]["plan"], plan)
+        self.assertEqual(updated["verification"]["plan_digest"], verification_plan_digest(plan))
+        self.assertEqual(updated["verification"]["receipts"], [])
+        self.assertEqual(updated["contract"]["approval"], packet["contract"]["approval"])
+        self.assertEqual(node(updated, "verification")["status"], "not_run")
+        self.assertEqual(node(updated, "implementation")["status"], "passed")
+        unchanged = maintain_packet(packet, record_verification_plan(packet, packet["verification"]["plan"]))
+        self.assertEqual(unchanged["verification"], packet["verification"])
+        self.assertEqual(unchanged["understanding"], packet["understanding"])
+
+    def test_review_and_plan_commands_reject_arbitrary_records_and_bad_plan_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "packet.json"
+            source = Path(directory) / "input.json"
+            path.write_text(json.dumps(valid_packet()))
+            before = path.read_bytes()
+            cases = [
+                ("review", "record", {"profile": "standard", "results": []}),
+                ("verification", "plan", {"plan_version": "0.1", "checks": [], "receipts": []}),
+                ("verification", "plan", {"plan_version": "0.1", "checks": [{"id": "unit", "argv": ["python"], "cwd": "../escape", "required": True}]}),
+                ("verification", "plan", {"plan_version": "0.1", "checks": [{"id": "unit", "argv": [], "cwd": ".", "required": True}]}),
+            ]
+            for section, operation, payload in cases:
+                source.write_text(json.dumps(payload))
+                self.assertEqual(self.call("packet", section, operation, "--packet", str(path), "--input", str(source))[0], 2)
+                self.assertEqual(path.read_bytes(), before)
+            source.write_text(json.dumps({"profile": "heightened", "signals": [], "hard_stops": []}))
+            self.assertEqual(self.call("packet", "review", "record", "--packet", str(path), "--input", str(source))[0], 0)
+            self.assertEqual(json.loads(path.read_text())["review"]["profile"], "heightened")
+            source.write_text(json.dumps({"plan_version": "0.1", "checks": [{"id": "unit", "argv": ["python"], "cwd": ".", "required": True}]}))
+            self.assertEqual(self.call("packet", "verification", "plan", "--packet", str(path), "--input", str(source))[0], 0)
