@@ -83,3 +83,78 @@ class EvidenceMutationTests(unittest.TestCase):
                 passed = json.loads(path.read_text())
                 self.assertEqual(node(passed, 'verification')['status'], 'passed')
                 self.assertEqual(len(passed['verification']['receipts']), 1)
+
+
+    def test_ownership_records_explicit_outcome_and_preserves_receipts(self) -> None:
+        packet = valid_packet()
+        with tempfile.TemporaryDirectory() as directory:
+            path, source = Path(directory) / 'packet.json', Path(directory) / 'ownership.json'
+            path.write_text(json.dumps(packet))
+            ownership = deepcopy(packet['ownership'])
+            ownership['problem'] = 'The contributor explained the concrete failure.'
+            source.write_text(json.dumps(ownership))
+            self.assertEqual(self.call('packet', 'ownership', 'record', '--packet', str(path), '--input', str(source))[0], 0)
+            updated = json.loads(path.read_text())
+            self.assertEqual(updated['ownership'], ownership)
+            self.assertEqual(node(updated, 'ownership')['status'], 'passed')
+            self.assertEqual(updated['verification']['receipts'], packet['verification']['receipts'])
+            self.assertEqual(updated['understanding']['orientation']['status'], 'not_run')
+            self.assertFalse(updated['narrative']['final_preview_confirmed'])
+            for change in ({'problem': ''}, {'status': True}, {'receipts': []}):
+                malformed = {**ownership, **change}
+                source.write_text(json.dumps(malformed))
+                before = path.read_bytes()
+                self.assertEqual(self.call('packet', 'ownership', 'record', '--packet', str(path), '--input', str(source))[0], 2)
+                self.assertEqual(path.read_bytes(), before)
+            packet['verification']['receipts'] = []
+            path.write_text(json.dumps(packet))
+            source.write_text(json.dumps(ownership))
+            before = path.read_bytes()
+            self.assertEqual(self.call('packet', 'ownership', 'record', '--packet', str(path), '--input', str(source))[0], 2)
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_ai_record_preserves_stage_claims_and_resets_changed_disclosure_confirmation(self) -> None:
+        packet = valid_packet()
+        with tempfile.TemporaryDirectory() as directory:
+            path, source = Path(directory) / 'packet.json', Path(directory) / 'ai.json'
+            path.write_text(json.dumps(packet))
+            assistance = deepcopy(packet['ai_assistance'])
+            assistance['stages'][0]['human_verified'] = False
+            assistance['disclosure']['text'] = 'AI assistance was used for implementation.'
+            source.write_text(json.dumps(assistance))
+            args = ('packet', 'ai', 'record', '--packet', str(path), '--input', str(source))
+            self.assertEqual(self.call(*args)[0], 0)
+            updated = json.loads(path.read_text())
+            self.assertFalse(updated['ai_assistance']['stages'][0]['human_verified'])
+            self.assertFalse(updated['ai_assistance']['disclosure']['human_confirmed'])
+            self.assertFalse(updated['narrative']['final_preview_confirmed'])
+            self.assertEqual(updated['verification'], packet['verification'])
+            self.assertEqual(updated['understanding'], packet['understanding'])
+            # Same current content plus an explicit claim can confirm disclosure.
+            self.assertEqual(self.call(*args)[0], 0)
+            self.assertTrue(json.loads(path.read_text())['ai_assistance']['disclosure']['human_confirmed'])
+            assistance['disclosure']['locations'] = ['other']
+            source.write_text(json.dumps(assistance))
+            self.assertEqual(self.call(*args)[0], 0)
+            self.assertFalse(json.loads(path.read_text())['ai_assistance']['disclosure']['human_confirmed'])
+
+    def test_ai_record_requires_policy_stages_locations_and_truthful_verification_claim(self) -> None:
+        packet = valid_packet()
+        packet['policy']['authoritative_claims'].update(disclosure_required=True,
+            disclosure_locations=['pr_body'], disclosure_stages=['implementation', 'verification'])
+        with tempfile.TemporaryDirectory() as directory:
+            path, source = Path(directory) / 'packet.json', Path(directory) / 'ai.json'
+            path.write_text(json.dumps(packet))
+            for mutate in (
+                lambda data: data['disclosure'].update(locations=['other']),
+                lambda data: data.update(stages=[]),
+                lambda data: data['stages'][0].update(human_verified=False),
+                lambda data: data['disclosure'].update(human_confirmed='yes'),
+                lambda data: data.update(receipts=[]),
+            ):
+                assistance = deepcopy(packet['ai_assistance'])
+                mutate(assistance)
+                source.write_text(json.dumps(assistance))
+                before = path.read_bytes()
+                self.assertEqual(self.call('packet', 'ai', 'record', '--packet', str(path), '--input', str(source))[0], 2)
+                self.assertEqual(path.read_bytes(), before)

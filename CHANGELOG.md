@@ -2,6 +2,8 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Record explicit Ownership and AI-assistance claims through typed Packet operations, checking current verification and disclosure policy without inventing human approval.
+
 - Synchronize Diff and verification flow results from current receipts, preserve audit-only reruns, and invalidate downstream human evidence on material updates.
 
 - Record review escalation and exact verification plans through typed Packet operations, preserving hard stops and resetting affected evidence on material updates.

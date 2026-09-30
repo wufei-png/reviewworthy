@@ -361,6 +361,8 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(ai_assistance, dict):
         _error(errors, "invalid_ai_assistance", "ai_assistance must be an object", "ai_assistance")
     else:
+        for key in sorted(set(ai_assistance) - {"used", "stages", "disclosure"}):
+            _error(errors, "unknown_ai_assistance_field", "Unsupported AI-assistance field", f"ai_assistance.{key}")
         if not isinstance(ai_assistance.get("used"), bool):
             _error(errors, "invalid_ai_used", "ai_assistance.used must be boolean", "ai_assistance.used")
         stages = ai_assistance.get("stages", [])
@@ -373,6 +375,8 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(stage, dict):
                     _error(errors, "invalid_ai_stage", "Each AI-assistance stage must be an object", f"ai_assistance.stages[{index}]")
                     continue
+                for key in sorted(set(stage) - {"name", "level", "human_verified"}):
+                    _error(errors, "unknown_ai_stage_field", "Unsupported AI stage field", f"ai_assistance.stages[{index}].{key}")
                 if stage.get("name") not in DISCLOSURE_STAGES:
                     _error(errors, "invalid_ai_stage_name", "AI-assistance stage name is not supported", f"ai_assistance.stages[{index}].name")
                 if stage.get("level") not in ASSISTANCE_LEVELS:
@@ -386,9 +390,13 @@ def _validate_packet_object(packet: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(disclosure, dict):
                 _error(errors, "invalid_ai_disclosure", "ai_assistance.disclosure must be an object", "ai_assistance.disclosure")
             else:
+                for key in sorted(set(disclosure) - {"text", "locations", "human_confirmed"}):
+                    _error(errors, "unknown_ai_disclosure_field", "Unsupported disclosure field", f"ai_assistance.disclosure.{key}")
                 if not isinstance(disclosure.get("text"), str):
                     _error(errors, "invalid_ai_disclosure_text", "ai_assistance.disclosure.text must be a string", "ai_assistance.disclosure.text")
-                if not isinstance(disclosure.get("locations"), list):
+                if (not isinstance(disclosure.get("locations"), list)
+                        or not all(isinstance(item, str) and item in {"pr_body", "commit_message", "commit_trailer", "issue_body", "checklist", "other"}
+                                   for item in disclosure.get("locations", []))):
                     _error(errors, "invalid_ai_disclosure_locations", "ai_assistance.disclosure.locations must be a list", "ai_assistance.disclosure.locations")
                 if not isinstance(disclosure.get("human_confirmed"), bool):
                     _error(errors, "invalid_ai_disclosure_confirmation", "ai_assistance.disclosure.human_confirmed must be boolean", "ai_assistance.disclosure.human_confirmed")

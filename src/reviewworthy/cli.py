@@ -45,7 +45,7 @@ from .packet import (
     validate_packet,
 )
 from .packet_mutation import (
-    approve_contract, bind_contract, bind_policy, record_basis, record_review,
+    approve_contract, bind_contract, bind_policy, record_ai, record_basis, record_ownership, record_review,
     record_verification_plan, replace_packet,
 )
 from .policy import inspect_policy
@@ -255,7 +255,7 @@ def _build_parser() -> argparse.ArgumentParser:
             mutation.add_argument("--human-confirmed", action="store_true", required=True)
         _common_json(mutation)
 
-    for section, operation in (("review", "record"), ("verification", "plan")):
+    for section, operation in (("review", "record"), ("verification", "plan"), ("ownership", "record"), ("ai", "record")):
         section_parser = packet_commands.add_parser(section)
         section_commands = section_parser.add_subparsers(dest="packet_operation", required=True)
         mutation = section_commands.add_parser(operation)
@@ -923,13 +923,14 @@ def main(argv: list[str] | None = None) -> int:
                 result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
                 _print(result, args.as_json)
                 return 0
-            if args.packet_command in {"review", "verification"}:
+            if args.packet_command in {"review", "verification", "ownership", "ai"}:
                 packet = _load_current_packet(args.packet)
-                payload = _load_object(args.input)
-                updated = (record_review(packet, payload) if args.packet_command == "review"
-                           else record_verification_plan(packet, payload))
-                updated = replace_packet(args.packet, packet, updated)
-                _print({"updated": str(args.packet), "semantic_snapshot": updated["snapshots"]["semantic"]}, args.as_json)
+                source = _load_object(args.input)
+                operation = {"review": record_review, "verification": record_verification_plan,
+                             "ownership": record_ownership, "ai": record_ai}[args.packet_command]
+                updated = replace_packet(args.packet, packet, operation(packet, source))
+                _print({"updated": str(args.packet), "semantic_snapshot": updated["snapshots"]["semantic"],
+                        "status": workflow_status(updated, args.packet)}, args.as_json)
                 return 0
             if args.packet_command == "contract":
                 packet = _load_current_packet(args.packet)

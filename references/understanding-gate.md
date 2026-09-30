@@ -57,3 +57,16 @@ reviewworthy understanding validate .git/reviewworthy/v0.3/contributions/contrib
 ```
 
 Assessment recording requires a passed Orientation bound to the current snapshot. The Skill remains responsible for teaching and for choosing non-repeating questions.
+
+Record the light Ownership Check with the existing content and an explicit
+human/Skill outcome:
+
+```bash
+reviewworthy packet ownership record --packet "$PACKET" --input ownership.json --json
+```
+
+The input contains `status`, `problem`, `scope`, `verification`, and `risks`.
+A `passed` outcome requires nonempty explanations, current approved Diff and
+passing required receipts; the CLI checks evidence and structure, while the human
+or Skill evaluates the answers. Changing Ownership preserves receipts but resets
+Orientation, Assessment and final narrative approval.

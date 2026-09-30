@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .contract import CONTRACT_FIELDS, contract_snapshot, validate_contract
+from .disclosure import disclosure_errors
 from .git import verification_plan_digest
 from .packet import (
     current_verification_receipts, deterministic_evidence_checks, issue_basis_blockers, policy_violations, require_current_packet,
@@ -20,8 +21,10 @@ from .util import atomic_write_json
 
 def _set_result(packet: dict[str, Any], node: str, status: str, evidence: list[str] | None = None) -> None:
     records = packet["results"]
+    replacement = result_record(node, status, evidence)
+    position = next((index for index, record in enumerate(records) if record.get("node") == node), len(records))
     records[:] = [record for record in records if record.get("node") != node]
-    records.append(result_record(node, status, evidence))
+    records.insert(position, replacement)
 
 
 def basis_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
@@ -116,6 +119,17 @@ def maintain_packet(previous: dict[str, Any], updated: dict[str, Any]) -> dict[s
     else:
         _set_result(updated, "implementation", "not_run")
     synchronize_verification_result(updated)
+    ownership_errors = [error for error in validate_packet(updated)["errors"] if error["path"].startswith("ownership")]
+    ownership_status = updated["ownership"].get("status", "not_run")
+    _set_result(updated, "ownership", "blocked" if ownership_errors else ownership_status,
+                ["packet.ownership"] if ownership_status == "passed" and not ownership_errors else [])
+    if verification_inputs_changed or changed_section("verification"):
+        for stage in updated["ai_assistance"].get("stages", []):
+            stage["human_verified"] = False
+        updated["ai_assistance"]["disclosure"]["human_confirmed"] = False
+    if previous.get("ai_assistance") != updated.get("ai_assistance"):
+        updated["narrative"]["final_preview_confirmed"] = False
+        _set_result(updated, "narrative", "not_run")
     policy_errors = policy_violations(updated, enforce_disclosure=False)
     policy_errors = [error for error in policy_errors if not error["path"].startswith("narrative")]
     policy_passed = any(record.get("node") == "policy_check" and record.get("status") == "passed" and record.get("evidence") for record in records)
@@ -302,4 +316,58 @@ def record_verification_plan(packet: dict[str, Any], plan: dict[str, Any]) -> di
     errors = [error for error in validate_packet(updated)["errors"] if error["path"].startswith("verification.plan")]
     if errors:
         raise ValueError(f"Invalid verification plan: {errors}")
+    return updated
+
+
+def record_ownership(packet: dict[str, Any], ownership: dict[str, Any]) -> dict[str, Any]:
+    """Record the human/Skill check outcome, checking content and current evidence."""
+
+    if set(ownership) != {"status", "problem", "scope", "verification", "risks"}:
+        raise ValueError("Ownership input must contain status, problem, scope, verification and risks")
+    updated = deepcopy(packet)
+    updated["ownership"] = deepcopy(ownership)
+    errors = [error for error in validate_packet(updated)["errors"] if error["path"].startswith("ownership")]
+    if errors:
+        raise ValueError(f"Invalid Ownership Check: {errors}")
+    if ownership["status"] == "passed":
+        current = maintain_packet(packet, packet)
+        required_nodes = {"policy_check", "contribution_basis", "contribution_contract", "implementation", "verification"}
+        incomplete = [record["node"] for record in current["results"]
+                      if record["node"] in required_nodes and (record["status"] != "passed" or not record.get("evidence"))]
+        errors = approval_errors(packet)
+        if incomplete or errors:
+            raise ValueError(f"Ownership requires current approved implementation and verification: {incomplete}, {errors}")
+    return updated
+
+
+def record_ai(packet: dict[str, Any], assistance: dict[str, Any]) -> dict[str, Any]:
+    """Preserve explicit stage claims; changed disclosure requires fresh confirmation."""
+
+    if set(assistance) != {"used", "stages", "disclosure"}:
+        raise ValueError("AI input must contain only used, stages and disclosure")
+    stages = assistance.get("stages")
+    disclosure = assistance.get("disclosure")
+    if (not isinstance(stages, list) or any(not isinstance(stage, dict)
+            or set(stage) != {"name", "level", "human_verified"} for stage in stages)):
+        raise ValueError("AI stages must contain name, level and human_verified")
+    if not isinstance(disclosure, dict) or set(disclosure) != {"text", "locations", "human_confirmed"}:
+        raise ValueError("Disclosure must contain text, locations and human_confirmed")
+    if not isinstance(disclosure["locations"], list) or not all(isinstance(item, str) for item in disclosure["locations"]):
+        raise ValueError("Disclosure locations must be strings")
+    updated = deepcopy(packet)
+    updated["ai_assistance"] = deepcopy(assistance)
+    errors = [error for error in validate_packet(updated)["errors"] if error["path"].startswith("ai_assistance")]
+    if errors:
+        raise ValueError(f"Invalid AI-assistance record: {errors}")
+    policy_errors = [error for error in disclosure_errors(updated)
+                     if error["code"] not in {"disclosure_not_human_confirmed", "disclosure_not_in_pr_body"}]
+    if policy_errors:
+        raise ValueError(f"AI disclosure policy unresolved: {policy_errors}")
+    old = packet["ai_assistance"]
+    # A changed claim cannot carry confirmation from the prior disclosure.
+    old_unconfirmed, new_unconfirmed = deepcopy(old), deepcopy(assistance)
+    old_unconfirmed["disclosure"]["human_confirmed"] = False
+    new_unconfirmed["disclosure"]["human_confirmed"] = False
+    if old_unconfirmed != new_unconfirmed:
+        updated["ai_assistance"]["disclosure"]["human_confirmed"] = False
     return updated
