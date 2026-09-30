@@ -191,3 +191,37 @@ class OnboardingTests(unittest.TestCase):
                 self.assertEqual(resumed['status']['current_stage'], 'verification')
                 self.assertIn('invalid_focus_file', {error['code'] for error in resumed['brief_validation']['errors']})
                 self.assertEqual((path.read_bytes(), brief_path.read_bytes()), before)
+
+    def test_resume_uses_verification_from_the_existing_issue_signal(self) -> None:
+        from reviewworthy.signal import skeleton_signal
+        for verified in (True, False):
+            with self.subTest(verified=verified), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.repository(root)
+                transport = ReadOnlyTransport()
+                with patch('reviewworthy.cli.GhClient', side_effect=lambda: GhClient(transport)):
+                    code, started = self.start(root)
+                    self.assertEqual(code, 0)
+                    path = Path(started['packet'])
+                    signal = skeleton_signal('issue', 'bug_report', ISSUE)
+                    if verified:
+                        signal['verification'] = json.loads(path.read_text())['basis']['verification']
+                    source = path.parent / 'signal.json'
+                    source.write_text(json.dumps(signal))
+                    self.assertEqual(self.call('packet', 'basis', 'record', '--packet', str(path), '--signal', str(source))[0], 0)
+                    before = path.read_bytes()
+                    calls_before = len(transport.calls)
+                    transport.fail = verified  # Reuse must succeed even if the provider is unavailable.
+                    code, resumed = self.start(root)
+                self.assertEqual(code, 0, resumed)
+                self.assertEqual(resumed['status']['current_stage'], 'contract')
+                current = json.loads(path.read_text())
+                self.assertEqual(current['basis']['signal']['verification']['status'], 'verified')
+                self.assertNotIn('verification', current['basis'])
+                if verified:
+                    self.assertEqual(resumed['issue_verification']['source'], 'existing_packet')
+                    self.assertEqual(len(transport.calls), calls_before)
+                    self.assertEqual(path.read_bytes(), before)
+                else:
+                    self.assertEqual(len(transport.calls), calls_before + 2)
+                    self.assertEqual(resumed['issue_verification']['recorded'], str(path))

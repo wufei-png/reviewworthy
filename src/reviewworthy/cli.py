@@ -689,7 +689,9 @@ def main(argv: list[str] | None = None) -> int:
             result = prepare_start(args.root, args.contribution_id, args.issue, args.focus)
             path = Path(result["packet"])
             packet = _load_current_packet(path)
-            if packet["basis"].get("verification", {}).get("status") != "verified":
+            basis = packet["basis"]
+            issue_record = basis if basis.get("kind") == "issue" else basis.get("signal", {})
+            if issue_record.get("verification", {}).get("status") != "verified":
                 try:
                     result["issue_verification"] = _verify_and_record_issue(packet, path, record=True)
                 except GhError as exc:
