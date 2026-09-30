@@ -44,6 +44,7 @@ from .packet import (
     skeleton_packet,
     validate_packet,
 )
+from .packet_mutation import bind_policy, record_basis, replace_packet
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
 from .remote import find_creation_matches, inspect_created_operation, inspect_operation, load_creation_receipt, record_inspection
@@ -225,6 +226,19 @@ def _build_parser() -> argparse.ArgumentParser:
     packet_validate = packet_commands.add_parser("validate")
     packet_validate.add_argument("path", type=Path)
     _common_json(packet_validate)
+
+    for section, operation in (("policy", "bind"), ("basis", "record")):
+        section_parser = packet_commands.add_parser(section)
+        section_commands = section_parser.add_subparsers(dest="packet_operation", required=True)
+        mutation = section_commands.add_parser(operation)
+        mutation.add_argument("--packet", type=Path, required=True)
+        if section == "policy":
+            mutation.add_argument("--root", type=Path, default=Path("."))
+        else:
+            basis_source = mutation.add_mutually_exclusive_group(required=True)
+            basis_source.add_argument("--issue")
+            basis_source.add_argument("--signal", type=Path)
+        _common_json(mutation)
 
     action = commands.add_parser("action", help="Check the public pull-request Evidence Summary")
     action_commands = action.add_subparsers(dest="action_command", required=True)
@@ -437,6 +451,7 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
     errors = _issue_revalidation_errors(packet, remote)
     result: dict[str, Any] = {"valid": not errors, "verification": "github_public_reference", "remote": remote, "errors": errors}
     if record and result["valid"]:
+        previous = deepcopy(packet)
         basis = packet.get("basis")
         if not isinstance(basis, dict):
             raise ValueError("Packet basis must be an object")
@@ -458,8 +473,7 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
         repository = packet.get("repository")
         if isinstance(repository, dict) and repository.get("repository_id") is None:
             repository["repository_id"] = remote.get("repository_id")
-        packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-        _replace_json(path, packet)
+        replace_packet(path, previous, packet)
         result["recorded"] = str(path)
     return result
 
@@ -616,21 +630,6 @@ def _reconcile_signal_publication(args: argparse.Namespace) -> int:
             result.update({"signal": str(args.path), "published": True})
         _print(result, args.as_json)
         return 0 if result["outcome"] == "already_exists" else 1
-
-
-def _refresh_candidate_snapshot(packet: dict[str, Any]) -> str:
-    snapshot = semantic_snapshot(packet)
-    snapshots = packet.setdefault("snapshots", {})
-    if not isinstance(snapshots, dict):
-        raise ValueError("packet.snapshots must be an object")
-    snapshots["semantic"] = snapshot
-    understanding = packet.get("understanding", {})
-    if isinstance(understanding, dict):
-        for phase in ("orientation", "assessment"):
-            record = understanding.get(phase)
-            if isinstance(record, dict) and record.get("status") == "not_run":
-                record["semantic_snapshot"] = snapshot
-    return snapshot
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -901,6 +900,13 @@ def main(argv: list[str] | None = None) -> int:
                 result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
                 _print(result, args.as_json)
                 return 0
+            if args.packet_command in {"policy", "basis"}:
+                packet = _load_current_packet(args.packet)
+                updated = (bind_policy(packet, args.root) if args.packet_command == "policy"
+                           else record_basis(packet, issue=args.issue, signal=_load_object(args.signal) if args.signal else None))
+                updated = replace_packet(args.packet, packet, updated)
+                _print({"updated": str(args.packet), "semantic_snapshot": updated["snapshots"]["semantic"]}, args.as_json)
+                return 0
             result = validate_packet(_load_object(args.path))
             _print(result, args.as_json)
             return 0 if result["valid"] else 1
@@ -943,16 +949,16 @@ def main(argv: list[str] | None = None) -> int:
                 menu = _load_object(args.menu)
                 packet = _load_current_packet(args.packet)
                 updated = bind_candidate(menu, packet, args.candidate_id)
-                snapshot = _refresh_candidate_snapshot(updated)
                 target = args.packet
-                _replace_json(target, updated)
+                updated = replace_packet(target, packet, updated)
+                snapshot = updated["snapshots"]["semantic"]
                 _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "semantic_snapshot": snapshot}, args.as_json)
                 return 0
             if args.candidate_command == "transition":
                 packet = _load_current_packet(args.packet)
                 updated = transition_candidate(packet, to=args.to, reason=args.reason, human_confirmed=args.confirm)
-                snapshot = _refresh_candidate_snapshot(updated)
-                _replace_json(args.packet, updated)
+                updated = replace_packet(args.packet, packet, updated)
+                snapshot = updated["snapshots"]["semantic"]
                 _print({"updated": str(args.packet), "to": args.to, "semantic_snapshot": snapshot}, args.as_json)
                 return 0
             menu = _load_object(args.path)

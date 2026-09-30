@@ -2,6 +2,8 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Add typed Packet policy/basis operations with shared atomic replacement, derived node results and downstream evidence invalidation.
+
 - Check Python >=3.11 and Git before composite Action imports, pin CI Actions to verified full upstream commits, and disable persisted checkout credentials.
 - Parse Diff names and numstat with NUL records and strict canonical UTF-8 paths, preserving raw content identity across Git path quoting settings; unusual historical fields may need rebinding and reverification.
 - Bound policy sources by count and bytes, reject unsupported modes/encodings, share local/base-tree claim rules, and propagate input failures into readiness and Action enforcement.

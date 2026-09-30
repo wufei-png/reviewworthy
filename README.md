@@ -19,6 +19,22 @@ reviewworthy status --packet "$PACKET" --json
 reviewworthy next --packet "$PACKET" --json
 ```
 
+Bind the repository's policy directly and record the Issue basis without editing the
+Packet or inventing a Candidate Menu:
+
+```bash
+reviewworthy packet policy bind --root . --packet "$PACKET" --json
+reviewworthy packet basis record --packet "$PACKET" --issue https://github.com/OWNER/REPO/issues/123 --json
+reviewworthy issue verify --packet "$PACKET" --record --json
+```
+
+For an existing Signal artifact, use `packet basis record --packet "$PACKET" --signal FILE`.
+External Signals still need the existing read-only `signal verify FILE --record`
+operation before binding for readiness. Recording a basis preserves candidate
+recommendation and duplicate-work gates already present in the Packet. Material
+basis or policy changes reset Contract approval and affected downstream evidence;
+identical inputs and provider timestamp refreshes preserve current evidence.
+
 From there, follow `next`: inspect repository policy, record and verify the Issue-backed contribution basis, agree the bounded Contract, implement only after approval, bind the finished Diff, run the Packet's verification plan, demonstrate ownership, and review the exact PR narrative before any confirmed remote write. Re-run `status` or `next` after each transition instead of reconstructing progress from prose.
 
 After implementation, bind the exact clean current HEAD and merge-base Diff before verification:
