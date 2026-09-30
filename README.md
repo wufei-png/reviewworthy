@@ -31,6 +31,8 @@ reviewworthy issue verify --packet "$PACKET" --record --json
 For an existing Signal artifact, use `packet basis record --packet "$PACKET" --signal FILE`.
 Local Signals may supply `--repository OWNER/REPO` when the Packet has no identity;
 external references infer it and reject a conflicting established identity.
+Verified external Signals also populate an absent immutable repository ID from
+their validated provider evidence.
 External Signals still need the existing read-only `signal verify FILE --record`
 operation before binding for readiness. Recording a basis preserves candidate
 recommendation and duplicate-work gates already present in the Packet. Material

@@ -315,3 +315,28 @@ class PacketMutationTests(unittest.TestCase):
                 before = path.read_bytes()
                 self.assertEqual(self.call("packet", "review", "record", "--packet", str(path), "--input", str(source))[0], 2)
                 self.assertEqual(path.read_bytes(), before)
+
+    def test_verified_pr_and_discussion_signals_populate_immutable_identity_and_reject_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path, source = Path(directory) / "packet.json", Path(directory) / "signal.json"
+            for record_type, route in (("discussion", "discussions"), ("pull_request", "pull")):
+                with self.subTest(record_type=record_type):
+                    signal = skeleton_signal(record_type, "accepted_proposal", f"https://github.com/example/project/{route}/3")
+                    signal["verification"] = {
+                        "status": "verified", "provider": "github", "record_type": record_type,
+                        "reference": signal["reference"], "url": signal["reference"], "number": 3,
+                        "verified_at": "2026-09-30T00:00:00Z", "host": "github.com",
+                        "repository": "example/project", "repository_id": 101, "visibility": "public",
+                    }
+                    source.write_text(json.dumps(signal))
+                    path.write_text(json.dumps(skeleton_packet("signal-identity", "discovery")))
+                    self.assertEqual(self.call("packet", "basis", "record", "--packet", str(path), "--signal", str(source))[0], 0)
+                    packet = json.loads(path.read_text())
+                    self.assertEqual(packet["repository"]["repository_id"], 101)
+                    self.assertEqual(node(packet, "contribution_basis")["status"], "passed")
+                    self.assertEqual(packet["basis"]["signal"]["verification"], signal["verification"])
+                    before = path.read_bytes()
+                    signal["verification"]["repository_id"] = 202
+                    source.write_text(json.dumps(signal))
+                    self.assertEqual(self.call("packet", "basis", "record", "--packet", str(path), "--signal", str(source))[0], 2)
+                    self.assertEqual(path.read_bytes(), before)

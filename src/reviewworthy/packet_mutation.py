@@ -145,6 +145,10 @@ def record_basis(packet: dict[str, Any], *, issue: str | None = None, signal: di
             raise ValueError(f"Invalid Contribution Signal: {validation['errors']}")
         if signal.get("lifecycle") in {"rejected", "expired"}:
             raise ValueError("A rejected or expired Signal cannot be bound")
+        verification = signal.get("verification")
+        if (signal["record_type"] != "local_evidence" and isinstance(verification, dict)
+                and updated["repository"].get("repository_id") is None):
+            updated["repository"]["repository_id"] = verification["repository_id"]
         basis = {"kind": "discovery-evidence" if signal["record_type"] == "local_evidence" else "signal", "signal": deepcopy(signal)}
         mode = "discovery"
     updated["basis"] = basis
