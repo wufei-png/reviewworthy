@@ -571,7 +571,8 @@ def _reconcile_signal_publication(args: argparse.Namespace) -> int:
         else:
             original = require_current_signal(_load_object(args.path))
             body = operation.body.removesuffix("\n\n" + operation.marker)
-        current = require_current_signal(_load_object(args.path)) if args.path.exists() else original
+        target_existed = args.path.exists()
+        current = require_current_signal(_load_object(args.path)) if target_existed else original
         subject = current.get("publication_subject_id") or f"{current.get('record_type')}:{current.get('claim_type')}:{current.get('reference')}"
         if subject != operation.subject_id or current.get("record_type") != "issue":
             raise ValueError("Signal subject differs from the original publication")
@@ -609,6 +610,8 @@ def _reconcile_signal_publication(args: argparse.Namespace) -> int:
             save_operation_receipt(args.state, operation, remote, signal_recovery=recovery)
             updated = dict(current)
             updated.update({"reference": remote, "publication_subject_id": operation.subject_id, "publication": publication})
+            if args.path.exists() != target_existed or (target_existed and _load_object(args.path) != current):
+                raise ValueError("Signal target changed during remote inspection; preserve the new content and inspect manually before recovery")
             _replace_json(args.path, updated)
             result.update({"signal": str(args.path), "published": True})
         _print(result, args.as_json)

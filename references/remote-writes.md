@@ -115,6 +115,9 @@ Signal target's reference, stable publication subject and publication fields. It
 preserves pending lifecycle and human authority. New publication records retain the
 original Signal input, exact original Body and target path; materially edited or
 unrelated targets are refused, and a missing original output can be restored.
+Reconcile rechecks target existence and content immediately before replacement;
+a target edited, deleted or newly created during remote inspection is preserved
+for manual recovery rather than overwritten.
 Pre-existing current `0.3` records lack that snapshot: recovery can compare their
 stable subject, claim, pending lifecycle and recorded publication inputs, but cannot
 prove that unrecorded original evidence/authority fields were unchanged or recover

@@ -245,6 +245,42 @@ class SignalRecoveryTests(unittest.TestCase):
             self.assertEqual(json.loads(source.read_text())["publication"], publication)
             client.create.assert_not_called()
 
+    def test_signal_target_changes_during_remote_inspection_are_never_overwritten(self) -> None:
+        from reviewworthy.github import build_signal_operation
+        from reviewworthy.signal import skeleton_signal
+        for mode in ("edited", "deleted", "newly_created"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "signal.json"
+                signal = skeleton_signal()
+                if mode != "newly_created":
+                    source.write_text(json.dumps(signal))
+                operation = build_signal_operation(signal, "example/project", "Bug", "Body", 101)
+                state = root / "state.json"
+                save_operation_pending(state, operation, signal_recovery={"target": str(source.resolve()), "input": signal, "body": "Body"})
+                edited = {**signal, "evidence": ["new human evidence"]}
+                client = MagicMock(spec=GhClient)
+                client.find_existing.return_value = [{"url": "https://github.com/example/project/issues/9"}]
+
+                def inspect(*args):
+                    if mode == "deleted":
+                        source.unlink()
+                    else:
+                        source.write_text(json.dumps(edited))
+                    return {"title": operation.title, "body": operation.body}
+
+                client.read_operation_object.side_effect = inspect
+                output = io.StringIO()
+                with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(output):
+                    self.assertEqual(main(["signal", "publish", "reconcile", str(source), "--state", str(state), "--json"]), 2)
+                self.assertIn("changed during remote inspection", json.loads(output.getvalue())["error"])
+                if mode == "deleted":
+                    self.assertFalse(source.exists())
+                else:
+                    self.assertEqual(json.loads(source.read_text()), edited)
+                self.assertEqual(json.loads(state.read_text())["status"], "succeeded")
+                client.create.assert_not_called()
+
     def test_missing_original_signal_output_is_restored_from_saved_input(self) -> None:
         from reviewworthy.github import build_signal_operation
         from reviewworthy.signal import skeleton_signal
