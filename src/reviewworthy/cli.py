@@ -584,6 +584,12 @@ def _reconcile_signal_publication(args: argparse.Namespace) -> int:
             actual = current["publication"]
             if not isinstance(actual, dict) or any(actual.get(key) != publication[key] for key in ("operation_id", "repo", "title")) or not isinstance(actual.get("body"), str) or actual["body"].rstrip() != body.rstrip():
                 raise ValueError("Signal publication fields differ from the original operation")
+            if recovery is None:
+                body = actual["body"]
+                rebuilt = build_signal_operation(current, operation.repo, operation.title, body, operation.repository_id)
+                if rebuilt != operation:
+                    raise ValueError("Retained Signal publication inputs differ from the original operation")
+                publication["body"] = body
             if remote and current.get("reference") != remote:
                 raise ValueError("Signal reference differs from the original publication URL")
             expected.update({"reference": current["reference"], "publication_subject_id": operation.subject_id, "publication": actual})

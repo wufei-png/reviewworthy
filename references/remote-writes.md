@@ -118,8 +118,10 @@ unrelated targets are refused, and a missing original output can be restored.
 Pre-existing current `0.3` records lack that snapshot: recovery can compare their
 stable subject, claim, pending lifecycle and recorded publication inputs, but cannot
 prove that unrecorded original evidence/authority fields were unchanged or recover
-original trailing Body whitespace. These local records are unsigned implementation
-state, so preserve and inspect the original artifact during recovery.
+original trailing Body whitespace when no artifact retains it. When a matching
+publication already retains the exact original Body, reconcile validates and
+preserves it. These local records are unsigned implementation state, so preserve
+and inspect the original artifact during recovery.
 
 An uncertain object creation may be retried only after manual remote inspection,
 with the original create inputs, original operation-ID confirmation and explicit

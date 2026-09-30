@@ -219,6 +219,32 @@ class SignalRecoveryTests(unittest.TestCase):
             with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
                 self.assertEqual(main(args), 0)
 
+    def test_legacy_published_signal_preserves_exact_body_and_original_retry_inputs(self) -> None:
+        from reviewworthy.github import build_signal_operation
+        from reviewworthy.signal import skeleton_signal
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "signal.json"
+            body_path = root / "body.md"
+            body = "Body  \n"
+            body_path.write_text(body)
+            signal = skeleton_signal()
+            operation = build_signal_operation(signal, "example/project", "Bug", body, 101)
+            state = root / "local/v0.3/operations" / (operation.operation_id + ".json")
+            url = "https://github.com/example/project/issues/9"
+            save_operation_receipt(state, operation, url)
+            publication = {"operation_id": operation.operation_id, "repo": operation.repo, "title": operation.title, "body": body}
+            signal.update({"reference": url, "publication_subject_id": operation.subject_id, "publication": publication})
+            source.write_text(json.dumps(signal))
+            client = MagicMock(spec=GhClient)
+            client.find_existing.return_value = [{"url": url}]
+            client.read_operation_object.return_value = {"title": operation.title, "body": operation.body}
+            with patch("reviewworthy.cli.GhClient", return_value=client), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["signal", "publish", "reconcile", str(source), "--state", str(state), "--json"]), 0)
+                self.assertEqual(main(["signal", "publish", "create", str(source), "--repo", "example/project", "--repository-id", "101", "--title", operation.title, "--body-file", str(body_path), "--confirm-operation-id", operation.operation_id, "--json"]), 0)
+            self.assertEqual(json.loads(source.read_text())["publication"], publication)
+            client.create.assert_not_called()
+
     def test_missing_original_signal_output_is_restored_from_saved_input(self) -> None:
         from reviewworthy.github import build_signal_operation
         from reviewworthy.signal import skeleton_signal
