@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
 
-from reviewworthy.git import GitError, capture_bindable_pr_diff, capture_pr_diff, current_head, run_verification
+from reviewworthy.git import PR_DIFF_FIELDS, GitError, capture_bindable_pr_diff, capture_pr_diff, current_head, run_verification
+from reviewworthy.packet import deterministic_evidence_checks
+
+from helpers import valid_packet
 
 
 class GitEvidenceTests(unittest.TestCase):
@@ -247,3 +252,69 @@ class GitEvidenceTests(unittest.TestCase):
             self.assertEqual(receipt["head_sha_before"], expected)
             self.assertNotEqual(receipt["head_sha_after"], expected)
             self.assertEqual(receipt["failure_reason"], "head_changed_after_execution")
+
+    def test_nul_paths_counts_and_scope_are_independent_of_quote_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "test@example.invalid")
+            self._git(root, "config", "user.name", "Reviewworthy Test")
+            self._git(root, "branch", "-M", "main")
+            removed = "删除\t文件.txt"
+            modified = "mod\nline.txt"
+            added = "src/规则\t新\n'x [ok];$().py"
+            for name, content in ((removed, "one\ntwo\nthree\n"), ("move old.txt", "move\ncontent\n"), (modified, "base\n")):
+                (root / name).write_text(content, encoding="utf-8")
+            (root / "binary.dat").write_bytes(b"\0before")
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-qm", "base")
+            self._git(root, "checkout", "-qb", "feature")
+            (root / removed).unlink()
+            (root / "move old.txt").rename(root / "move new.txt")
+            (root / modified).write_text("base\nhead\n", encoding="utf-8")
+            (root / "src").mkdir()
+            (root / added).write_text("new\ncontent\n", encoding="utf-8")
+            (root / " name ").write_text("spaces\n", encoding="utf-8")
+            (root / "binary.dat").write_bytes(b"\0after")
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-qm", "paths")
+            expected = sorted([removed, modified, added, "move old.txt", "move new.txt", "binary.dat", " name "])
+            snapshots = []
+            for setting in ("true", "false"):
+                self._git(root, "config", "core.quotePath", setting)
+                diff = capture_pr_diff(root, "main", "feature")
+                self.assertEqual(diff["changed_files"], expected)
+                self.assertEqual((diff["additions"], diff["deletions"]), (6, 5))
+                self.assertEqual(diff["fingerprint_algorithm"], "git-raw-content-v1")
+                snapshots.append({field: diff[field] for field in PR_DIFF_FIELDS})
+                packet = valid_packet()
+                packet["diff"] = diff
+                packet["contract"]["scope"]["files"] = expected
+                self.assertEqual(deterministic_evidence_checks(packet, strict=True), ([], []))
+                packet["contract"]["scope"]["files"] = [name for name in expected if name != added]
+                violations, _ = deterministic_evidence_checks(packet, strict=True)
+                self.assertEqual([item["code"] for item in violations], ["out_of_scope_files"])
+            self.assertEqual(snapshots[0], snapshots[1])
+            # Only hash seed varies in this focused cross-process comparison.
+            program = "import json,sys; from pathlib import Path; from reviewworthy.git import capture_pr_diff,PR_DIFF_FIELDS; d=capture_pr_diff(Path(sys.argv[1]),'main','feature'); print(json.dumps({k:d[k] for k in PR_DIFF_FIELDS},sort_keys=True))"
+            for seed in ("1", "17"):
+                completed = subprocess.run([sys.executable, "-c", program, str(root)], env={**os.environ, "PYTHONHASHSEED": seed}, capture_output=True, text=True, check=True)
+                self.assertEqual(json.loads(completed.stdout), snapshots[0])
+
+    def test_unsupported_git_byte_names_and_noncanonical_names_fail_explicitly(self) -> None:
+        for name in (b"bad-\xff.txt", b"back\\slash.txt", b"C:drive.txt"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._git(root, "init", "-q")
+                self._git(root, "config", "user.email", "test@example.invalid")
+                self._git(root, "config", "user.name", "Reviewworthy Test")
+                self._git(root, "branch", "-M", "main")
+                self._git(root, "commit", "--allow-empty", "-qm", "base")
+                self._git(root, "checkout", "-qb", "feature")
+                # macOS rejects non-UTF8 worktree names; create a real Git
+                # tree entry through the index so the immutable Diff can test it.
+                blob = subprocess.run(["git", "-C", str(root), "hash-object", "-w", "--stdin"], input=b"content\n", capture_output=True, check=True).stdout.strip()
+                subprocess.run(["git", "-C", str(root), "update-index", "-z", "--index-info"], input=b"100644 " + blob + b"\t" + name + b"\0", capture_output=True, check=True)
+                self._git(root, "commit", "-qm", "unsupported path")
+                with self.assertRaisesRegex(GitError, "UTF-8|canonical repository-relative"):
+                    capture_pr_diff(root, "main", "feature")

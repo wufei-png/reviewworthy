@@ -540,7 +540,7 @@ def _validated_structured(data: dict[str, Any]) -> tuple[dict[str, Any], list[di
             valid = isinstance(value, list) and all(isinstance(item, str) for item in value)
             if valid:
                 if normalized[-1] == "authoritative_documents":
-                    valid = all(is_canonical_repository_relative_path(item) and item != "." and "\x00" not in item and not any(char in item for char in "*?[]") for item in value)
+                    valid = all(is_canonical_repository_relative_path(item) and item != "." and "\x00" not in item for item in value)
                 else:
                     choices = DISCLOSURE_LOCATIONS if normalized[-1] == "disclosure_locations" else DISCLOSURE_STAGES
                     valid = all(item in choices for item in value)

@@ -517,3 +517,18 @@ class ActionEvidenceTests(unittest.TestCase):
                 else:
                     self.assertEqual(result["conclusion"], "success")
                     self.assertTrue(any("source does not exist" in value for value in result["unknowns"]))
+
+    def test_action_recomputes_unusual_paths_without_quote_path_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository, _ = self._repository(Path(directory))
+            name = "src/规则\tnewline\n.py"
+            (repository / name).write_text("extra\n", encoding="utf-8")
+            self._git(repository, "add", ".")
+            self._git(repository, "commit", "-qm", "unusual path")
+            self._git(repository, "config", "core.quotePath", "true")
+            diff = capture_pr_diff(repository, "main", "feature")
+            body = self._body(diff)
+            self._git(repository, "config", "core.quotePath", "false")
+            result = check_evidence(body, root=repository, event_name="pull_request", event_repository="example/project", event_repository_id=101, event_base_sha=diff["base_tip_sha"], event_head_sha=diff["head_sha"], mode="evidence-enforce")
+            self.assertEqual(result["conclusion"], "success", result["violations"])
+            self.assertIn(name, result["verified_facts"]["diff"]["changed_files"])

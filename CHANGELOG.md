@@ -2,6 +2,7 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Parse Diff names and numstat with NUL records and strict canonical UTF-8 paths, preserving raw content identity across Git path quoting settings; unusual historical fields may need rebinding and reverification.
 - Bound policy sources by count and bytes, reject unsupported modes/encodings, share local/base-tree claim rules, and propagate input failures into readiness and Action enforcement.
 - Narrow policy discovery to contributor documents and Issue/PR templates, support exact additional authoritative documents, and validate structured policy keys, values and accepted aliases.
 

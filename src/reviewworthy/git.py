@@ -71,6 +71,12 @@ def is_canonical_repository_relative_path(value: Any) -> bool:
 
     if not isinstance(value, str) or not value.strip() or "\\" in value:
         return False
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        return False
+    if "\x00" in value:
+        return False
     posix_path = PurePosixPath(value)
     windows_path = PureWindowsPath(value)
     if (
@@ -93,17 +99,39 @@ def _worktree_status(root: Path) -> list[str]:
     return [line for line in str(completed.stdout).splitlines() if line]
 
 
-def _parse_numstat(output: str) -> tuple[int, int]:
+def _nul_records(output: bytes, command: str) -> list[bytes]:
+    if not output:
+        return []
+    if not output.endswith(b"\0"):
+        raise GitError(f"{command} returned an incomplete NUL record")
+    return output[:-1].split(b"\0")
+
+
+def _decode_diff_path(value: bytes) -> str:
+    try:
+        path = value.decode("utf-8")
+    except UnicodeError as exc:
+        raise GitError("Git Diff path is not supported UTF-8 text") from exc
+    if not is_canonical_repository_relative_path(path) or path == ".":
+        raise GitError(f"Git Diff path is outside the canonical repository-relative contract: {path!r}")
+    return path
+
+
+def _parse_numstat(output: bytes) -> tuple[int, int]:
     additions = 0
     deletions = 0
-    for line in output.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 2:
+    for record in _nul_records(output, "git diff --numstat"):
+        fields = record.split(b"\t", 2)
+        if len(fields) != 3:
+            raise GitError("git diff --numstat returned an unsupported record")
+        added, deleted, path = fields
+        _decode_diff_path(path)
+        if added == deleted == b"-":
             continue
-        if parts[0].isdigit():
-            additions += int(parts[0])
-        if parts[1].isdigit():
-            deletions += int(parts[1])
+        if not added.isdigit() or not deleted.isdigit():
+            raise GitError("git diff --numstat returned invalid line counts")
+        additions += int(added)
+        deletions += int(deleted)
     return additions, deletions
 
 
@@ -112,13 +140,13 @@ def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str
     if patch.returncode != 0:
         detail = (patch.stderr or patch.stdout or b"git diff failed").decode("utf-8", errors="replace").strip()
         raise GitError(detail)
-    names = _run_git(root, ["diff", "--name-only", "--no-ext-diff", "--no-renames", start_sha, head_sha])
+    names = _run_git(root, ["diff", "--name-only", "-z", "--no-ext-diff", "--no-renames", start_sha, head_sha], text=False)
     if names.returncode != 0:
-        raise GitError((names.stderr or names.stdout or "git diff --name-only failed").strip())
-    numstat = _run_git(root, ["diff", "--numstat", "--no-ext-diff", "--no-renames", start_sha, head_sha])
+        raise GitError((names.stderr or names.stdout or b"git diff --name-only failed").decode("utf-8", errors="replace").strip())
+    numstat = _run_git(root, ["diff", "--numstat", "-z", "--no-ext-diff", "--no-renames", start_sha, head_sha], text=False)
     if numstat.returncode != 0:
-        raise GitError((numstat.stderr or numstat.stdout or "git diff --numstat failed").strip())
-    additions, deletions = _parse_numstat(str(numstat.stdout))
+        raise GitError((numstat.stderr or numstat.stdout or b"git diff --numstat failed").decode("utf-8", errors="replace").strip())
+    additions, deletions = _parse_numstat(bytes(numstat.stdout))
     patch_bytes = bytes(patch.stdout)
     raw = _run_git(
         root,
@@ -128,13 +156,14 @@ def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str
     if raw.returncode != 0:
         detail = (raw.stderr or raw.stdout or b"git diff --raw failed").decode("utf-8", errors="replace").strip()
         raise GitError(detail)
-    parts = bytes(raw.stdout).split(b"\0")
+    parts = _nul_records(bytes(raw.stdout), "git diff --raw")
     entries: list[dict[str, str]] = []
     index = 0
-    while index < len(parts) and parts[index]:
+    while index < len(parts):
         metadata = parts[index]
         if index + 1 >= len(parts) or not parts[index + 1]:
             raise GitError("git diff --raw returned an incomplete path record")
+        _decode_diff_path(parts[index + 1])
         fields = metadata.split()
         if len(fields) != 5 or not fields[0].startswith(b":"):
             raise GitError("git diff --raw returned an unsupported record")
@@ -155,7 +184,7 @@ def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str
         "subject_digest": subject_digest,
         "fingerprint_algorithm": FINGERPRINT_ALGORITHM,
         "patch_sha256": sha256(patch_bytes).hexdigest(),
-        "changed_files": sorted(line for line in str(names.stdout).splitlines() if line),
+        "changed_files": sorted(_decode_diff_path(path) for path in _nul_records(bytes(names.stdout), "git diff --name-only")),
         "additions": additions,
         "deletions": deletions,
         "captured_at": utc_now(),

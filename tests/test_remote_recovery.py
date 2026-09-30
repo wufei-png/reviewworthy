@@ -93,6 +93,16 @@ class RemoteRecoveryTests(unittest.TestCase):
         self.set_live()
         save_operation_pr_created(self.state, self.operation, self.url)
 
+    def test_historical_quoted_diff_paths_recover_without_recomputing_or_rendering(self) -> None:
+        self.packet["diff"]["changed_files"] = ['"src/quoted\\tname.py"']
+        self.prepare_pr()
+        retained = json.loads(self.state.read_text())
+        self.client.find_issue_link_note.return_value = [{"id": 1}]
+        with patch("reviewworthy.cli.capture_pr_diff", side_effect=AssertionError("must not recapture historical Diff")), patch("reviewworthy.cli.build_operation", side_effect=AssertionError("must not render historical operation")):
+            self.assertEqual(self.run_cli()[0], 0)
+        self.assertEqual(json.loads(self.state.read_text())["operation_id"], retained["operation_id"])
+        self.client.add_issue_note.assert_not_called()
+
     def test_pr_note_requires_original_confirmation_and_existing_note_is_never_reposted(self) -> None:
         self.prepare_pr()
         code, result = self.run_cli()

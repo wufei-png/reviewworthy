@@ -123,5 +123,11 @@ class SchemaTests(unittest.TestCase):
 
     def test_policy_schema_covers_canonical_discovery_and_supported_values(self) -> None:
         self._assert_valid("contribution-policy.schema.json", {"ai": {"allowed": "unknown"}, "discovery": {"authoritative_documents": ["docs/contributing.md"]}})
-        for value in ({"ai": {"allowed": 1}}, {"ai": {"allowd": True}}, {"discovery": {"authoritative_documents": ["../policy.md"]}}, {"discovery": {"authoritative_documents": ["docs/*.md"]}}):
+        for value in ({"ai": {"allowed": 1}}, {"ai": {"allowd": True}}, {"discovery": {"authoritative_documents": ["../policy.md"]}}):
             self._assert_invalid("contribution-policy.schema.json", value)
+
+    def test_policy_discovery_schema_preserves_unusual_canonical_path_boundaries(self) -> None:
+        for name in ("docs/规则\tpolicy\n.md", "docs/\n", " name ", "docs/[policy].md", "docs/*.md"):
+            self._assert_valid("contribution-policy.schema.json", {"discovery": {"authoritative_documents": [name]}})
+        for name in (" ", "docs/\n/../policy.md", "docs/\n//policy.md", "docs/\n/", "docs/\0policy.md", "bad-\udcff.md"):
+            self._assert_invalid("contribution-policy.schema.json", {"discovery": {"authoritative_documents": [name]}})

@@ -446,7 +446,7 @@ class PolicyInspectionTests(unittest.TestCase):
                 self.assertEqual(result["diagnostics"][0]["path"], ".reviewworthy/policy.toml" + suffix)
 
     def test_explicit_paths_require_exact_canonical_file_names(self) -> None:
-        for name in ("../policy.md", "/policy.md", "./policy.md", "docs//policy.md", "docs/*.md", ".", "docs/", "C:policy.md", " "):
+        for name in ("../policy.md", "/policy.md", "./policy.md", "docs//policy.md", ".", "docs/", "C:policy.md", " "):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / ".reviewworthy").mkdir()
@@ -643,3 +643,17 @@ class PolicyInspectionTests(unittest.TestCase):
             brief = build_project_brief(root)
             self.assertEqual(brief["policy"]["result"], "blocked")
             self.assertNotIn("docs/policy.md", {source["path"] for source in brief["sources"]})
+
+    def test_explicit_sources_are_literal_paths_without_glob_expansion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".reviewworthy").mkdir()
+            (root / "docs").mkdir()
+            (root / "docs/[policy].md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            config = root / ".reviewworthy/policy.toml"
+            config.write_text('[discovery]\nauthoritative_documents = ["docs/[policy].md"]\n', encoding="utf-8")
+            self.assertEqual(self._commit_and_compare(root)["result"], "passed")
+            config.write_text('[discovery]\nauthoritative_documents = ["docs/*.md"]\n', encoding="utf-8")
+            result = self._commit_and_compare(root)
+            self.assertEqual(result["diagnostics"][0]["code"], "policy_source_missing")
+            self.assertNotIn("docs/[policy].md", {source["path"] for source in result["sources"]})
