@@ -35,8 +35,10 @@ class EvidenceMutationTests(unittest.TestCase):
         partial = maintain_packet(packet, packet)
         self.assertEqual(node(partial, 'verification')['status'], 'not_run')
         self.assertEqual(len(partial['verification']['receipts']), 1)
-        from reviewworthy.evidence import build_evidence_summary
-        self.assertEqual(build_evidence_summary(partial, partial['diff'])['claims']['verification']['claimed_outcome'], 'not_recorded')
+        from reviewworthy.evidence import build_evidence_summary, validate_evidence_summary
+        summary = build_evidence_summary(partial, partial['diff'])
+        self.assertEqual(summary['claims']['verification'], {'claimed_outcome': 'not_recorded', 'receipt_count': 0})
+        self.assertTrue(validate_evidence_summary(summary)['valid'])
         self.assertIn('--check-id second', workflow_status(partial, Path('packet.json'))['next'][0]['command'])
         second = deepcopy(partial['verification']['receipts'][0])
         second.update(check_id='second', exit_code=1, command_outcome='failed')
@@ -316,3 +318,29 @@ class EvidenceMutationTests(unittest.TestCase):
                 current = json.loads(path.read_text())
                 self.assertEqual(current['understanding']['assessment']['status'], 'not_run')
                 self.assertFalse(current['narrative']['final_preview_confirmed'])
+
+
+    def test_partial_required_verification_still_previews_and_plans_valid_public_summary(self) -> None:
+        from reviewworthy.evidence import extract_evidence_summary
+        packet = valid_packet()
+        second = deepcopy(packet['verification']['plan']['checks'][0])
+        second['id'] = 'second'
+        packet['verification']['plan']['checks'].append(second)
+        packet['verification']['plan_digest'] = verification_plan_digest(packet['verification']['plan'])
+        packet['verification']['receipts'][0]['plan_digest'] = packet['verification']['plan_digest']
+        packet = maintain_packet(packet, packet)
+        with tempfile.TemporaryDirectory() as directory:
+            path, body = Path(directory) / 'packet.json', Path(directory) / 'body.md'
+            path.write_text(json.dumps(packet))
+            body.write_text(packet['narrative']['body'])
+            code, preview = self.call('packet', 'narrative', 'preview', '--packet', str(path))
+            self.assertEqual(code, 0)
+            self.assertIn('required_verification_missing', {error['code'] for error in preview['confirmation_blockers']})
+            self.assertEqual(extract_evidence_summary(preview['public_body'])['claims']['verification'],
+                             {'claimed_outcome': 'not_recorded', 'receipt_count': 0})
+            with patch('reviewworthy.cli.capture_pr_diff', return_value=packet['diff']):
+                code, plan = self.call('remote', 'plan', '--packet', str(path), '--repo', 'example/project', '--kind', 'pull_request', '--title', packet['narrative']['title'], '--body-file', str(body), '--base', 'main', '--head', 'HEAD')
+            self.assertEqual(code, 0)
+            self.assertIn('required_verification_missing', {error['code'] for error in plan['readiness_blockers']})
+            self.assertEqual(extract_evidence_summary(plan['body'])['claims']['verification'],
+                             {'claimed_outcome': 'not_recorded', 'receipt_count': 0})

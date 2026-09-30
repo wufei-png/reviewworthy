@@ -55,7 +55,7 @@ def _claim_summary(packet: dict[str, Any]) -> dict[str, Any]:
     return {
         "verification": {
             "claimed_outcome": "passed" if verified else "not_recorded",
-            "receipt_count": len(passed_receipts),
+            "receipt_count": len(passed_receipts) if verified else 0,
         },
         "ownership": {
             "profile": review.get("profile", "standard"),
