@@ -425,9 +425,49 @@ def _is_template_container(name: str) -> bool:
     return name == ".github" or (len(parts) == 2 and parts[0] == ".github" and parts[1].lower() in {"issue_template", "pull_request_template"})
 
 
-def _local_info(root: Path, name: str) -> _SourceInfo | None:
+def _local_gitlinks(root: Path) -> set[str]:
+    """Read index modes so checked-out submodules never supply local policy."""
+
+    def git(*args: str) -> Any:
+        try:
+            return run_bounded(["git", "-C", str(root), *args], timeout_seconds=60, max_capture_bytes=16 * 1024 * 1024)
+        except (OSError, CommandTimeoutError, CommandOutputLimitError) as exc:
+            raise PolicyTreeError("Local policy Git metadata is unavailable.") from exc
+
+    has_metadata = any((parent / ".git").exists() or (parent / ".git").is_symlink() for parent in (root, *root.parents))
+    if not has_metadata and not os.environ.get("GIT_DIR"):
+        return set()
+    probe = git("rev-parse", "--show-toplevel")
+    if probe.returncode != 0:
+        # Policy inspection also supports plain directories without a Git repo.
+        if has_metadata:
+            raise PolicyTreeError("Local policy Git metadata is unavailable.")
+        return set()
+    completed = git("ls-files", "--stage", "--full-name", "-z")
+    if completed.returncode != 0:
+        raise PolicyTreeError("Local policy Git metadata is unavailable.")
+    try:
+        git_root = Path(probe.stdout.decode("utf-8").removesuffix("\n")).resolve()
+        links: set[str] = set()
+        for record in completed.stdout.split(b"\0"):
+            if not record:
+                continue
+            metadata, path = record.split(b"\t", 1)
+            if metadata.split()[0] != b"160000":
+                continue
+            absolute = git_root / path.decode("utf-8", errors="surrogateescape")
+            if absolute == root or root in absolute.parents:
+                links.add(absolute.relative_to(root).as_posix())
+        return links
+    except (UnicodeError, ValueError, IndexError) as exc:
+        raise PolicyTreeError("Local policy Git metadata is invalid.") from exc
+
+
+def _local_info(root: Path, name: str, gitlinks: set[str]) -> _SourceInfo | None:
     for index in range(len(PurePosixPath(name).parts)):
         path = root.joinpath(*PurePosixPath(name).parts[:index + 1])
+        if path.relative_to(root).as_posix() in gitlinks:
+            return _SourceInfo("160000", 0)
         try:
             info = path.lstat()
         except FileNotFoundError:
@@ -442,9 +482,9 @@ def _local_info(root: Path, name: str) -> _SourceInfo | None:
     return _SourceInfo(mode, info.st_size)
 
 
-def _local_document_names(root: Path) -> list[str]:
-    names = [name for name in DEFAULT_DOCUMENTS if _local_info(root, name) is not None]
-    github_info = _local_info(root, ".github")
+def _local_document_names(root: Path, gitlinks: set[str]) -> list[str]:
+    names = [name for name in DEFAULT_DOCUMENTS if _local_info(root, name, gitlinks) is not None]
+    github_info = _local_info(root, ".github", gitlinks)
     if github_info is None:
         return names
     if github_info.mode != "040000":
@@ -459,14 +499,14 @@ def _local_document_names(root: Path) -> list[str]:
                     names.append(name)
                 elif _is_template_container(name) and not entry.is_dir(follow_symlinks=False):
                     names.append(name)
-                if entry.is_dir(follow_symlinks=False):
+                if entry.is_dir(follow_symlinks=False) and name not in gitlinks:
                     visit(path)
 
     with os.scandir(root / ".github") as entries:
         for entry in sorted(entries, key=lambda item: item.name):
             path = Path(entry.path)
             name = path.relative_to(root).as_posix()
-            if _is_template_container(name) and entry.is_dir(follow_symlinks=False):
+            if _is_template_container(name) and entry.is_dir(follow_symlinks=False) and name not in gitlinks:
                 visit(path)
             elif _is_default_document_path(name) or _is_template_container(name):
                 names.append(name)
@@ -687,12 +727,17 @@ def _structured_match(text: str, path: tuple[str, ...]) -> re.Match[str] | None:
 def inspect_policy(root: Path) -> dict[str, Any]:
     root = root.resolve()
     diagnostics: list[dict[str, str]] = []
+    gitlinks: set[str] = set()
     try:
-        names = _local_document_names(root)
+        gitlinks = _local_gitlinks(root)
+        names = _local_document_names(root, gitlinks)
+    except PolicyTreeError:
+        names = []
+        diagnostics.append(_diagnostic("policy_scan_unavailable", ".", "Local policy Git metadata could not be read within its limits."))
     except OSError:
         names = []
         diagnostics.append(_diagnostic("policy_scan_unavailable", ".github", "Policy source inventory could not be read."))
-    return _inspect_policy(root, names, lambda name: _local_info(root, name), lambda name: _local_read(root, name), diagnostics)
+    return _inspect_policy(root, names, lambda name: _local_info(root, name, gitlinks), lambda name: _local_read(root, name), diagnostics)
 
 
 def _inspect_policy(

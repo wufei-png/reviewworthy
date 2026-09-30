@@ -668,3 +668,55 @@ class PolicyInspectionTests(unittest.TestCase):
                 self.assertEqual(result["result"], "blocked")
                 self.assertEqual(result["diagnostics"][0]["code"], "policy_invalid_configuration")
                 self.assertEqual(result["diagnostics"][0]["path"], ".reviewworthy/policy.toml")
+
+    def test_initialized_gitlinks_are_not_local_policy_sources(self) -> None:
+        for sub_path in ("docs", ".github/ISSUE_TEMPLATE", ".github/ISSUE_TEMPLATE/vendor"):
+            with self.subTest(sub_path=sub_path), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                sub = home / "sub"
+                root = home / "root"
+                sub.mkdir()
+                root.mkdir()
+
+                def git(repo: Path, *args: str) -> str:
+                    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+                for repo in (sub, root):
+                    git(repo, "init", "-q")
+                    git(repo, "config", "user.email", "test@example.invalid")
+                    git(repo, "config", "user.name", "Reviewworthy Test")
+                (sub / "policy.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+                git(sub, "add", ".")
+                git(sub, "commit", "-qm", "submodule policy")
+                (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+                git(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), sub_path)
+                if sub_path == "docs":
+                    (root / ".reviewworthy").mkdir()
+                    (root / ".reviewworthy/policy.toml").write_text('[discovery]\nauthoritative_documents = ["docs/policy.md"]\n', encoding="utf-8")
+                result = self._commit_and_compare(root)
+                if sub_path.endswith("vendor"):
+                    self.assertEqual(result["result"], "passed")
+                    self.assertEqual([source["path"] for source in result["sources"]], ["README.md"])
+                else:
+                    self.assertEqual(result["result"], "blocked")
+                    expected = "docs/policy.md" if sub_path == "docs" else sub_path
+                    self.assertEqual(result["diagnostics"][0]["path"], expected)
+                    self.assertEqual(result["diagnostics"][0]["code"], "policy_source_unsupported")
+                    self.assertIsNone(result["authoritative_claims"]["ai_assistance"])
+
+    def test_unavailable_local_git_modes_block_positive_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            with patch("reviewworthy.policy._local_gitlinks", side_effect=PolicyTreeError("unavailable")):
+                result = inspect_policy(root)
+            self.assertEqual(result["result"], "blocked")
+            self.assertEqual(result["diagnostics"][0]["code"], "policy_scan_unavailable")
+            self.assertIsNone(result["authoritative_claims"]["ai_assistance"])
+
+    def test_plain_directory_policy_does_not_require_a_git_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("AI assistance is allowed.\n", encoding="utf-8")
+            with patch("reviewworthy.policy.run_bounded", side_effect=AssertionError("must not query Git for a plain directory")):
+                self.assertEqual(inspect_policy(root)["result"], "passed")
