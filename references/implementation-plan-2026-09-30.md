@@ -13,4 +13,4 @@ The [decision record](../docs/adr/0020-recovery-and-low-burden-workflow.md) expl
 - [05 — 验证、Ownership 与公开叙述](../docs/plans/05-evidence-and-narrative.md)
 - [06 — Onboarding 与完整旅程](../docs/plans/06-onboarding-journey.md)
 
-Each session uses implement-in-stages followed by delegated-change-review, and updates its own execution record plus the queue after accepted fixes are verified. All implementation sessions are **Not started**.
+Each session uses implement-in-stages followed by delegated-change-review, and updates its own execution record plus the queue after accepted fixes are verified. All implementation sessions are **Complete**; the shared queue and session records contain their commits, checks, review fixes and unverified items.

@@ -83,3 +83,42 @@ The plan numbers 01–06 correspond to the approved design's original S1–S6. N
 | [06 — Onboarding 与完整旅程](./06-onboarding-journey.md) | Complete (2026-09-30) | `afe0dab`, `72457ea`, `96bc23e`; review fixes `77a62a4`, `3f3d077`; final documentation commit closes the record | 338 unit tests, 11 evals, compileall, schema/artifact and full-range diff checks passed. One fresh read-only review completed after a usage-limit interruption; both P2 findings independently reproduced, accepted and fixed separately; 24/25 focused rechecks passed. Local Action report smoke passed without a PR event. Rebuilt wheel with setuptools 84.0.0; clean no-deps install, seven onboarding and four E2E methods passed outside the checkout. All 27 documentation/artifact closure tests passed. | Start and ready-boundary next/recovery delivered without new schemas/session state. Repeated start retains approved decisions/prose and reports missing focus; both plain Issue and Issue Signal evidence reuse covered. Tooling shapes do not prove npm/Go execution; Python 3.12/3.13, live provider/runner and a published release unverified; no remote writes/push. |
 
 Implementation evidence may revise only unfinished stages within the approved contracts. A necessary change conflicting with a fixed constraint requires a concrete grilling decision; do not implement it by rewriting the constraint. Necessary compatible work cannot be discarded only because it is lower priority.
+
+## Follow-up alignment audit — 2026-10-02
+
+Compared the approved chat decisions and ADR 0020 with the implementation from
+`61b83d3` through `93ded71`, then checked current failure paths. The original
+documentation-only conclusion missed actionable code defects. The user explicitly
+authorized repairs, commits and push for this follow-up.
+
+- P2: verification execution exceptions and interruption retained a previous passing
+  receipt and readiness. Withdraw only the selected check's receipt before execution;
+  shared invalidation revokes affected human evidence if execution never completes.
+  Identical successful reruns preserve confirmations; subsequent success after a
+  failed execution still requires renewed human evidence. Other checks retain receipts.
+- P2: recorded negative Issue refreshes retained prior verified basis evidence.
+  Remove the obsolete verification and invalidate affected Packet approvals, Diff,
+  receipts and confirmations. Cover plain Issue and Issue Signal bases. The adjacent
+  standalone Signal provider-refresh path also withdraws obsolete verification.
+  Queries without `--record` stay read-only; lifecycle and authority are not inferred.
+- P2: current contribution Issue operations accepted optional `--head` when planning
+  and creating, but the saved-state reader rejected those same records after the
+  remote create. Accept the existing optional ref inputs for contribution Issues,
+  preserving operation IDs and immediate retry/reconciliation behavior. Signal
+  publication still rejects refs.
+- P3: correct the reference plan's obsolete “Not started” status to match the completed
+  queue and individual session records.
+
+These repairs retain artifact version 0.3, original operation identities, private
+Packets, explicit remote confirmation, and the read-only Action boundary. No new
+product decision or grilling clarification was required. Provider recovery tests use
+fake clients; live GitHub mutation, Python 3.12/3.13 and GitHub runner checks remain
+unverified by this audit.
+
+Repairs: `0b3f199` (verification and basis evidence), `ee85e01` (optional Issue ref
+recovery). Python 3.11.5 passed all 345 unit tests and
+11 eval fixtures. Focused rechecks passed 92 recovery/evidence tests, 53 CLI/evidence
+tests, then 65 CLI/documentation/artifact tests after help and documentation updates.
+Compileall and diff whitespace checks passed. Action report smoke returned success
+with `checked=false` because no PR event was supplied; this is not runner enforcement
+or live-provider evidence.
