@@ -201,9 +201,9 @@ def _build_parser() -> argparse.ArgumentParser:
     signal_validate.add_argument("path", type=Path)
     signal_validate.add_argument("--require-confirmed", action="store_true")
     _common_json(signal_validate)
-    signal_verify = signal_commands.add_parser("verify", help="Verify a public reference read-only, or record a successful result with --record")
+    signal_verify = signal_commands.add_parser("verify", help="Verify a public reference read-only, or refresh stored evidence with --record")
     signal_verify.add_argument("path", type=Path)
-    signal_verify.add_argument("--record", action="store_true", help="Persist a successful verification record for remote readiness")
+    signal_verify.add_argument("--record", action="store_true", help="Persist successful verification or withdraw old evidence on a failed provider check")
     _common_json(signal_verify)
     signal_publish = signal_commands.add_parser("publish", help="Publish an explicit GitHub Issue signal operation")
     signal_publish_commands = signal_publish.add_subparsers(dest="signal_publish_command", required=True)
@@ -397,7 +397,7 @@ def _build_parser() -> argparse.ArgumentParser:
     issue_commands = issue.add_subparsers(dest="issue_command", required=True)
     issue_verify = issue_commands.add_parser("verify")
     issue_verify.add_argument("--packet", type=Path, required=True)
-    issue_verify.add_argument("--record", action="store_true", help="Persist successful verification in the packet basis")
+    issue_verify.add_argument("--record", action="store_true", help="Refresh Packet basis verification, withdrawing old evidence on failed revalidation")
     _common_json(issue_verify)
 
     remote = commands.add_parser("remote", help="Plan or explicitly execute a GitHub write")
@@ -500,6 +500,13 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
     remote = GhClient().verify_public_reference(reference)
     errors = _issue_revalidation_errors(packet, remote)
     result: dict[str, Any] = {"valid": not errors, "verification": "github_public_reference", "remote": remote, "errors": errors}
+    if record and errors:
+        updated = deepcopy(packet)
+        basis = updated["basis"]
+        target = basis if basis.get("kind") == "issue" else basis.get("signal", {})
+        target.pop("verification", None)
+        replace_packet(path, packet, updated)
+        result["recorded"] = str(path)
     if record and result["valid"]:
         previous = deepcopy(packet)
         basis = packet.get("basis")
@@ -850,6 +857,11 @@ def main(argv: list[str] | None = None) -> int:
                         "remote": remote,
                         "errors": errors,
                     }
+                if args.record and not result["valid"] and not structural_errors and "verification" in signal_value:
+                    updated_signal = dict(signal_value)
+                    updated_signal.pop("verification")
+                    _replace_json(args.path, updated_signal)
+                    result["recorded"] = str(args.path)
                 if args.record and result["valid"]:
                     updated_signal = dict(signal_value)
                     if signal_value.get("record_type") == "local_evidence":
@@ -1172,6 +1184,16 @@ def main(argv: list[str] | None = None) -> int:
             mismatched = [field for field in PR_DIFF_FIELDS if packet_diff.get(field) != actual_diff.get(field)]
             if mismatched:
                 raise ValueError(f"Packet Diff is not current for verification: {mismatched}")
+            receipts = verification.get("receipts")
+            if not isinstance(receipts, list):
+                raise ValueError("packet.verification.receipts must be a list")
+            # Withdraw the old result before executing: timeout, startup failure
+            # or interruption must not leave the previous passing check current.
+            pending = deepcopy(packet)
+            pending["verification"]["receipts"] = [
+                item for item in receipts if not isinstance(item, dict) or item.get("check_id") != args.check_id
+            ]
+            replace_packet(args.packet, packet, pending)
             receipt = run_verification(
                 args.root,
                 actual_diff["head_sha"],

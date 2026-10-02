@@ -104,6 +104,42 @@ class PacketMutationTests(unittest.TestCase):
         self.assertEqual(node(updated, "contribution_basis")["status"], "passed")
         self.assertEqual(updated["repository"]["repository_id"], 101)
 
+    def test_failed_issue_refresh_revokes_old_plain_and_signal_evidence_only_when_recording(self) -> None:
+        from reviewworthy.workflow import workflow_status
+        for signal_backed in (False, True):
+            for drift in ({"labels": ["duplicate"]}, {"state_reason": "not_planned"},
+                          {"repository_id": 202}, {"verified": False}):
+                with self.subTest(signal_backed=signal_backed, drift=drift), tempfile.TemporaryDirectory() as directory:
+                    packet = valid_packet()
+                    remote = {**packet["basis"]["verification"], "verified": True, "labels": [], **drift}
+                    if signal_backed:
+                        signal = skeleton_signal("issue", "bug_report", packet["basis"]["references"][0])
+                        signal["verification"] = deepcopy(packet["basis"]["verification"])
+                        packet["basis"] = {"kind": "signal", "signal": signal}
+                        snapshot = semantic_snapshot(packet)
+                        packet["snapshots"]["semantic"] = snapshot
+                        for phase in packet["understanding"].values():
+                            phase["semantic_snapshot"] = snapshot
+                    path = Path(directory) / "packet.json"
+                    path.write_text(json.dumps(packet))
+                    before = path.read_bytes()
+                    self.assertTrue(workflow_status(packet, path)["ready"])
+                    with patch("reviewworthy.cli.GhClient") as provider:
+                        provider.return_value.verify_public_reference.return_value = remote
+                        self.assertEqual(self.call("issue", "verify", "--packet", str(path))[0], 1)
+                        self.assertEqual(path.read_bytes(), before)
+                        self.assertEqual(self.call("issue", "verify", "--packet", str(path), "--record")[0], 1)
+                    current = json.loads(path.read_text())
+                    target = current["basis"]["signal"] if signal_backed else current["basis"]
+                    self.assertNotIn("verification", target)
+                    self.assertEqual(current["contract"]["approval"]["status"], "not_run")
+                    self.assertEqual(current["verification"]["receipts"], [])
+                    self.assertFalse(current["narrative"]["final_preview_confirmed"])
+                    self.assertFalse(workflow_status(current, path)["ready"])
+                    if signal_backed:
+                        self.assertEqual(target["authority"], signal["authority"])
+                        self.assertEqual(target["lifecycle"], signal["lifecycle"])
+
     def test_contract_bind_does_not_import_approval_and_approve_hashes_embedded_fields(self) -> None:
         packet = valid_packet()
         with tempfile.TemporaryDirectory() as directory:

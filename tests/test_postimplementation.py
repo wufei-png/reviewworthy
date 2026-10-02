@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from reviewworthy.cli import main
-from reviewworthy.git import verification_plan_digest
+from reviewworthy.git import GitError, verification_plan_digest
 from reviewworthy.packet import semantic_snapshot
 from reviewworthy.packet_mutation import maintain_packet
 from reviewworthy.workflow import workflow_status
@@ -87,6 +87,75 @@ class EvidenceMutationTests(unittest.TestCase):
                 passed = json.loads(path.read_text())
                 self.assertEqual(node(passed, 'verification')['status'], 'passed')
                 self.assertEqual(len(passed['verification']['receipts']), 1)
+
+    def test_verification_execution_errors_and_interruptions_withdraw_old_receipt(self) -> None:
+        for failure in (GitError('Could not execute verification command: timed out'),
+                        GitError('Could not execute verification command: executable missing'),
+                        KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as directory:
+                packet = valid_packet()
+                path = Path(directory) / 'packet.json'
+                path.write_text(json.dumps(packet))
+                args = ('verify', 'run', '--packet', str(path), '--check-id', 'unit')
+                with patch('reviewworthy.cli.capture_pr_diff', return_value=packet['diff']), patch(
+                        'reviewworthy.cli.run_verification', side_effect=failure):
+                    if isinstance(failure, KeyboardInterrupt):
+                        with self.assertRaises(KeyboardInterrupt):
+                            self.call(*args)
+                    else:
+                        self.assertEqual(self.call(*args)[0], 2)
+                current = json.loads(path.read_text())
+                self.assertEqual(current['verification']['receipts'], [])
+                self.assertEqual(node(current, 'verification')['status'], 'not_run')
+                self.assertEqual(current['ownership']['status'], 'not_run')
+                self.assertFalse(current['ai_assistance']['disclosure']['human_confirmed'])
+                self.assertFalse(current['narrative']['final_preview_confirmed'])
+                status = workflow_status(current, path)
+                self.assertFalse(status['ready'])
+                self.assertIn('--check-id unit', status['next'][0]['command'])
+                # A later successful check restores verification, but cannot
+                # silently reapprove the human evidence revoked by the failure.
+                with patch('reviewworthy.cli.capture_pr_diff', return_value=packet['diff']), patch(
+                        'reviewworthy.cli.run_verification', return_value=packet['verification']['receipts'][0]):
+                    self.assertEqual(self.call(*args)[0], 0)
+                self.assertEqual(self.call('next', '--packet', str(path))[1]['current_stage'], 'ownership')
+
+    def test_identical_successful_cli_rerun_preserves_confirmed_human_evidence(self) -> None:
+        packet = valid_packet()
+        receipt = deepcopy(packet['verification']['receipts'][0])
+        receipt.update(started_at='later', finished_at='later', stdout_sha256='new-output')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'packet.json'
+            path.write_text(json.dumps(packet))
+            with patch('reviewworthy.cli.capture_pr_diff', return_value=packet['diff']), patch(
+                    'reviewworthy.cli.run_verification', return_value=receipt):
+                self.assertEqual(self.call('verify', 'run', '--packet', str(path), '--check-id', 'unit')[0], 0)
+            current = json.loads(path.read_text())
+            self.assertTrue(workflow_status(current, path)['ready'])
+            self.assertEqual(current['ownership'], packet['ownership'])
+            self.assertEqual(current['understanding'], packet['understanding'])
+            self.assertEqual(current['narrative'], packet['narrative'])
+            self.assertEqual(current['ai_assistance'], packet['ai_assistance'])
+
+    def test_failed_rerun_keeps_other_required_check_receipts(self) -> None:
+        packet = valid_packet()
+        second = deepcopy(packet['verification']['plan']['checks'][0])
+        second['id'] = 'second'
+        packet['verification']['plan']['checks'].append(second)
+        packet['verification']['plan_digest'] = verification_plan_digest(packet['verification']['plan'])
+        first_receipt = packet['verification']['receipts'][0]
+        first_receipt['plan_digest'] = packet['verification']['plan_digest']
+        second_receipt = {**first_receipt, 'check_id': 'second'}
+        packet['verification']['receipts'].append(second_receipt)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'packet.json'
+            path.write_text(json.dumps(packet))
+            with patch('reviewworthy.cli.capture_pr_diff', return_value=packet['diff']), patch(
+                    'reviewworthy.cli.run_verification', side_effect=GitError('execution failed')):
+                self.assertEqual(self.call('verify', 'run', '--packet', str(path), '--check-id', 'unit')[0], 2)
+            current = json.loads(path.read_text())
+            self.assertEqual(current['verification']['receipts'], [second_receipt])
+            self.assertEqual(node(current, 'verification')['status'], 'not_run')
 
 
     def test_ownership_records_explicit_outcome_and_preserves_receipts(self) -> None:

@@ -109,6 +109,16 @@ the public evidence projection; `remote plan` additionally renders the operation
 marker and recomputes Git identity. Remote title/Body inputs must match the Packet
 exactly, including whitespace. Material edits require appropriate human reapproval;
 audit-only receipt timestamps and output hashes preserve evidence.
+Before a check executes, its previous receipt is withdrawn. If execution times out,
+cannot start, or is interrupted, rerun that check and renew the affected human
+evidence; an identical successful rerun preserves existing confirmations. Other
+checks' receipts are retained.
+
+When returned provider evidence fails validation, `issue verify --record`
+withdraws the Packet's prior Issue verification and invalidates affected downstream
+evidence. `signal verify --record` likewise withdraws prior standalone Signal
+verification. Queries without `--record` leave stored evidence unchanged;
+neither command infers Signal lifecycle or authority.
 
 `diff bind` is intentionally separate from generic `diff capture`: it checks the Packet's approved scope and Diff budget, records the implementation result, updates the semantic snapshot, and deterministically routes the workflow into verification. It does not create another persisted readiness field.
 

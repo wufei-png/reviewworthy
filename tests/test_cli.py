@@ -312,6 +312,31 @@ class CliBoundaryTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(json.loads(signal_path.read_text()), signal)
 
+    def test_failed_signal_refresh_withdraws_success_only_when_recording(self) -> None:
+        for record_type, segment in (("issue", "issues"), ("pull_request", "pull"), ("discussion", "discussions")):
+            for drift in ({"verified": False, "error": "repository_not_public"}, {"repository": "other/project"}):
+                with self.subTest(record_type=record_type, drift=drift), tempfile.TemporaryDirectory() as directory:
+                    signal_path = Path(directory) / "signal.json"
+                    signal = skeleton_signal(record_type, "bug_report", f"https://github.com/example/project/{segment}/2")
+                    verification = {
+                        "status": "verified", "provider": "github", "host": "github.com",
+                        "repository": "example/project", "repository_id": 101,
+                        "record_type": record_type, "number": 2, "url": signal["reference"],
+                        "reference": signal["reference"], "visibility": "public", "verified_at": "earlier",
+                    }
+                    signal["verification"] = verification
+                    signal_path.write_text(json.dumps(signal), encoding="utf-8")
+                    before = signal_path.read_bytes()
+                    with patch("reviewworthy.cli.GhClient") as provider, redirect_stdout(io.StringIO()):
+                        provider.return_value.verify_public_reference.return_value = {**verification, "verified": True, **drift}
+                        self.assertEqual(main(["signal", "verify", str(signal_path), "--json"]), 1)
+                        self.assertEqual(signal_path.read_bytes(), before)
+                        self.assertEqual(main(["signal", "verify", str(signal_path), "--record", "--json"]), 1)
+                    current = json.loads(signal_path.read_text())
+                    self.assertNotIn("verification", current)
+                    self.assertEqual(current["authority"], signal["authority"])
+                    self.assertEqual(current["lifecycle"], signal["lifecycle"])
+
     def test_issue_revalidation_normalizes_state_reason_and_duplicate_label(self) -> None:
         packet = valid_packet()
         base_remote = {
