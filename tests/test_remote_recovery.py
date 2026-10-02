@@ -53,6 +53,16 @@ class RemoteRecoveryTests(unittest.TestCase):
         self.client.verify_repository_identity.assert_called_once_with("example/project", 101)
         self.client.add_issue_note.assert_not_called()
 
+    def test_existing_current_issue_state_retains_optional_ref_inputs(self) -> None:
+        self.operation = build_operation(self.packet, "example/project", "issue", "Fix", "Body", "main", "feature")
+        self.set_live()
+        save_operation_pending(self.state, self.operation)
+        code, result = self.run_cli()
+        self.assertEqual(code, 0, result)
+        retained = json.loads(self.state.read_text())
+        self.assertEqual(retained["operation"], self.operation.as_dict())
+        self.assertEqual(retained["status"], "succeeded")
+
     def test_known_url_survives_list_delay_and_drift_is_not_repaired_publicly(self) -> None:
         save_operation_receipt(self.state, self.operation, self.url)
         self.client.find_existing.return_value = []
@@ -347,6 +357,21 @@ class UncertainRetryTests(unittest.TestCase):
         self.client.create.assert_called_once_with(self.operation)
         self.assertEqual(self.run_cli()[0], 2)
         self.assertEqual(self.client.create.call_count, 1)
+
+    def test_issue_create_with_head_records_success_and_immediate_retry_reuses_it(self) -> None:
+        self.operation = build_operation(self.packet, "example/project", "issue", self.packet["narrative"]["title"],
+                                         self.body.read_text(), "main", "feature")
+        self.state = self.root / "local/v0.3/operations" / (self.operation.operation_id + ".json")
+        self.args[self.args.index("--confirm-operation-id") + 1] = self.operation.operation_id
+        self.args.extend(["--head", "feature"])
+        code, result = self.run_cli(False)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["outcome"], "created")
+        self.assertEqual(json.loads(self.state.read_text())["status"], "succeeded")
+        code, result = self.run_cli(False)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["source"], "local_receipt")
+        self.client.create.assert_called_once_with(self.operation)
 
     def test_appearing_match_is_reconciled_and_multiple_matches_block(self) -> None:
         save_operation_pending(self.state, self.operation)

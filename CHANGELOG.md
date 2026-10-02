@@ -2,6 +2,10 @@
 
 ## 0.3.0a1 - Unreleased
 
+- Withdraw old check receipts before verification execution so timeout, startup failure and interruption cannot retain passing readiness; identical successful reruns still preserve human evidence.
+- Revoke prior Issue/Signal verification when an explicitly recorded provider refresh fails, invalidating affected Packet approvals without changing Signal lifecycle or authority.
+- Recover current contribution Issue operations with optional base/head identity inputs accepted by planning and creation, preserving their operation IDs.
+
 - Guide ready Packets to explicit PR target decisions or exact-current saved-operation reconciliation without replacing derived readiness; exercise complete Python/Node/Go-shaped hermetic CLI journeys.
 
 - Start an Issue-backed contribution with reusable Git-private Packet/Brief artifacts and read-only provider verification, preserving bound decisions and contributor prose on retry, including missing focus files and already verified Issue Signals.

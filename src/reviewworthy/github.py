@@ -391,9 +391,11 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
         for key in ("base_tip_sha", "merge_base_sha", "head_sha", "subject_digest", "fingerprint_algorithm"):
             if not isinstance(payload.get(key), str) or not payload[key].strip():
                 invalid(key)
-    elif payload["head"] is not None or payload["draft"] or payload["subject_digest"] is not None:
+    elif payload["draft"] or payload["subject_digest"] is not None:
         invalid("issue fields")
-    if purpose == "signal_publication" and (payload["base"] is not None or issue_url is not None):
+    # Contribution Issue plans have always retained optional base/head inputs in
+    # their identity even though gh issue create does not use those refs.
+    if purpose == "signal_publication" and (payload["base"] is not None or payload["head"] is not None or issue_url is not None):
         invalid("signal fields")
     try:
         operation = RemoteOperation(**{**payload, "permissions": tuple(permissions)})
