@@ -19,17 +19,28 @@ def read(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def check_shape(value: Any, schema: dict[str, Any], path: str = "$") -> None:
+def check_shape(value: Any, schema: dict[str, Any], path: str = "$", document: dict[str, Any] | None = None) -> None:
     """Validate the deliberately limited schema vocabulary used by this pilot.
 
     Schemas are maintained with this validator and cross-checked with jsonschema
     in tests. This is not a general JSON Schema implementation.
     """
+    if document is None:
+        document = schema
+    if "$ref" in schema:
+        reference = schema["$ref"]
+        if not reference.startswith("#/"):
+            raise ValueError("Pilot schemas support only local references")
+        target = document
+        for component in reference[2:].split("/"):
+            target = target[component]
+        check_shape(value, target, path, document)
+        return
     if "oneOf" in schema:
         matches = 0
         for variant in schema["oneOf"]:
             try:
-                check_shape(value, variant, path)
+                check_shape(value, variant, path, document)
                 matches += 1
             except ValueError:
                 pass
@@ -51,14 +62,14 @@ def check_shape(value: Any, schema: dict[str, Any], path: str = "$") -> None:
             raise ValueError(f"{path}: unknown fields")
         for key, item in value.items():
             if key in properties:
-                check_shape(item, properties[key], f"{path}.{key}")
+                check_shape(item, properties[key], f"{path}.{key}", document)
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", len(value)):
             raise ValueError(f"{path}: invalid item count")
         if schema.get("uniqueItems") and len({json.dumps(v, sort_keys=True) for v in value}) != len(value):
             raise ValueError(f"{path}: duplicate items")
         for index, item in enumerate(value):
-            check_shape(item, schema.get("items", {}), f"{path}[{index}]")
+            check_shape(item, schema.get("items", {}), f"{path}[{index}]", document)
     if isinstance(value, str) and len(value) < schema.get("minLength", 0):
         raise ValueError(f"{path}: empty string")
     if isinstance(value, str) and "pattern" in schema and re.search(schema["pattern"], value) is None:
@@ -85,12 +96,18 @@ def load_suite(root: Path) -> dict[str, Any]:
         if case["case_id"] != case_id or case["baseline_commit_sha"] != manifest["baseline_commit"]:
             raise ValueError("Pilot case identity mismatch")
         cases[case_id] = case
-        oracles[case_id] = read(assets / f"hidden-oracle/{case_id}.json")
+        oracle = read(assets / f"hidden-oracle/{case_id}.json")
+        check_shape(oracle, read(root / "schemas/pilot-oracle.schema.json"))
+        if oracle["case_id"] != case_id or oracle["baseline_commit_sha"] != manifest["baseline_commit"]:
+            raise ValueError("Pilot oracle identity mismatch")
+        oracles[case_id] = oracle
     return {"manifest": manifest, "cases": cases, "oracles": oracles, "assets": assets}
 
 
 def load_traces(path: Path, root: Path) -> dict[str, Any]:
     value = read(path)
+    if isinstance(value, dict) and "case_id" in value and "traces" not in value:
+        value = {"schema_version": "1.0", "origin": "candidate_answer", "traces": [value]}
     check_shape(value, read(root / "schemas/pilot-trace.schema.json"))
     ids = [trace["case_id"] for trace in value["traces"]]
     if len(ids) != len(set(ids)):

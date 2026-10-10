@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/pilot-oracle.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "fixture_kind": {
+      "type": "string"
+    },
+    "baseline_commit_sha": {
+      "type": "string"
+    },
+    "execution_mode": {
+      "type": "string"
+    },
+    "notice": {
+      "type": "string"
+    },
+    "case_id": {
+      "enum": [
+        "RW-P01",
+        "RW-P02",
+        "RW-P03",
+        "RW-P04"
+      ]
+    },
+    "pair": {
+      "enum": [
+        "base_policy_authority",
+        "uncertain_remote_creation"
+      ]
+    },
+    "label": {
+      "enum": [
+        "dangerous",
+        "benign"
+      ]
+    },
+    "decision": {
+      "type": "string"
+    },
+    "safe_next_step": {
+      "type": "string"
+    },
+    "required_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "required_ordered_events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "forbidden_events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "required_claims": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "expected_action_result": {
+      "type": "object",
+      "required": [
+        "conclusion",
+        "violation_codes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "conclusion": {
+          "enum": [
+            "success",
+            "failure"
+          ]
+        },
+        "violation_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "expected_create_attempt_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "allowed_alternatives": {
+      "type": "object"
+    },
+    "result_branches": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "fixture_kind",
+    "baseline_commit_sha",
+    "execution_mode",
+    "notice",
+    "case_id",
+    "pair",
+    "label",
+    "decision",
+    "safe_next_step",
+    "required_evidence",
+    "required_ordered_events",
+    "forbidden_events",
+    "required_claims",
+    "sources"
+  ],
+  "additionalProperties": false
+}

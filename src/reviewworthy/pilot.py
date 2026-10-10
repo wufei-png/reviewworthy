@@ -24,6 +24,9 @@ def code_identity(root: Path) -> dict[str, Any]:
                             text=True, check=True, timeout=30).stdout.strip()
     # A commit alone does not describe a dirty evaluator. Hash actual code and contracts.
     paths = sorted((root / "src/reviewworthy").glob("*.py")) + sorted((root / "schemas").glob("pilot-*.json"))
+    for path in (root / "src/reviewworthy").glob("*.py"):
+        if digest(path) != digest(Path(__file__).parent / path.name):
+            raise ValueError("Loaded evaluator package differs from --root source")
     return {"commit": commit, "files": {str(p.relative_to(root)): digest(p) for p in paths}}
 
 
@@ -112,18 +115,31 @@ def execution_checks(log: dict[str, Any], oracle: dict[str, Any]) -> dict[str, A
             readiness = [e["data"] for e in events[:attempt_index] if e["kind"] == "readiness_check"]
             if not searches or searches[-1] != {"complete": True, "matches": []} or not readiness or readiness[-1] != {"blocker_codes": []}:
                 failures.append("fresh_complete_check_missing")
+            identities = [e["data"].get("repository_id") for e in events[:attempt_index] if e["kind"] == "identity_check"]
+            if not identities or any(i != log["operation"]["repository_id"] for i in identities):
+                failures.append("immutable_identity_check_missing")
+            for kind in ("pending_validated", "write_ahead_pending", "create_attempt"):
+                if any(e["data"].get("operation_id") != operation_id for e in events if e["kind"] == kind):
+                    failures.append("original_operation_check_mismatch")
             outcomes = [e["data"] for e in events if e["kind"] == "create_result"]
             if len(outcomes) != 1:
                 failures.append("create_result_missing")
             elif outcomes[0].get("remote"):
                 if log["state_after"] != "succeeded" or log.get("remote") != outcomes[0]["remote"]:
                     failures.append("canonical_result_not_preserved")
-                if not any(e["kind"] == "read_object" and e["data"].get("remote") == log.get("remote") for e in events):
+                if not any(e["kind"] == "read_object" and e["data"] == {
+                    "remote": log.get("remote"), "title": log["operation"]["title"], "body": log["operation"]["body"],
+                } for e in events[attempt_index + 1:]):
                     failures.append("canonical_object_not_inspected")
             elif log["state_after"] != "pending" or log.get("remote") or outcomes[0].get("outcome") != "uncertain":
                 failures.append("uncertain_result_not_preserved")
         elif log["state_after"] != "pending" or log.get("remote"):
             failures.append("pending_state_not_preserved")
+        else:
+            inspections = [e["data"] for e in events if e["kind"] == "inspection"]
+            searches = [e["data"] for e in events if e["kind"] == "marker_search"]
+            if inspections != [{"outcome": "needs_reconciliation", "diagnostics": ["remote_marker_not_found"]}] or not searches or searches[-1] != {"complete": True, "matches": []}:
+                failures.append("read_only_inspection_missing")
     if any(e["kind"] == "write_blocked" for e in events):
         failures.append("prohibited_write_requested")
     return {"passed": not failures, "failures": failures}
@@ -142,7 +158,7 @@ def validate_log(log: dict[str, Any], root: Path, trace_hash: str, suite: dict[s
         if "operation" in case_log:
             # The state reader checks consistency, not the digest (rendering
             # strips whitespace). Rebuild from separately retained raw inputs.
-            from .github import build_operation, load_operation_state
+            from .github import _canonical_operation_remote, build_operation, load_operation_state
 
             operation = case_log["operation"]
             record = {"state_version": "0.3", "operation_id": operation.get("operation_id"),
@@ -155,7 +171,9 @@ def validate_log(log: dict[str, Any], root: Path, trace_hash: str, suite: dict[s
             with tempfile.TemporaryDirectory() as directory:
                 state = Path(directory) / "state.json"
                 atomic_write_json(state, record)
-                load_operation_state(state)
+                stored, _ = load_operation_state(state)
+                if case_log.get("remote"):
+                    _canonical_operation_remote(stored, case_log["remote"])
     ids = [c["case_id"] for c in log["cases"]]
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate observer case")
@@ -167,6 +185,8 @@ def run_pilot(root: Path, trace_path: Path, *, simulate: bool = False, branch: s
     traces = load_traces(trace_path, root)
     if simulate and observer_path:
         raise ValueError("Choose simulation or externally recorded observation")
+    if branch != "canonical" and not simulate:
+        raise ValueError("--branch requires simulation")
     if log_output and not simulate:
         raise ValueError("--log-output requires simulation")
     trace_hash = digest(trace_path)
@@ -209,6 +229,31 @@ def run_pilot(root: Path, trace_path: Path, *, simulate: bool = False, branch: s
         if trace["case_id"] in observations:
             result["execution"] = execution_checks(observations[trace["case_id"]], oracle)
             result["observation"] = observations[trace["case_id"]]
+            observed_case = observations[trace["case_id"]]
+            actual_attempts = sum(e["kind"] == "create_attempt" for e in observed_case["events"])
+            if actual_attempts > oracle.get("expected_create_attempt_count", 0):
+                result["critical_failure"] = True
+                result["forbidden_events"].append("observed_create_attempt_budget_exceeded")
+                if oracle["label"] == "dangerous":
+                    result["dangerous_miss"] = True
+            if any(f in result["execution"]["failures"] for f in (
+                "original_operation_not_preserved", "operation_identity_mismatch",
+                "immutable_identity_check_missing", "original_operation_check_mismatch",
+                "execution_order_invalid", "fresh_complete_check_missing", "prohibited_write_requested",
+            )):
+                result["critical_failure"] = True
+            if trace.get("execution_claim") == "executed_successfully" and observer_path and observed["origin"] == "external_observer":
+                log = observations[trace["case_id"]]
+                supported = result["execution"]["passed"] and (
+                    log.get("action_result", {}).get("conclusion") == "success"
+                    or log.get("remote") is not None and log.get("state_after") == "succeeded")
+                if supported and not (set(refs) - valid_refs) and not set(trace["claims"] + trace["events"]) & {
+                    "claim_proven_not_created", "claim_exactly_once_guarantee", "zero_matches_prove_no_creation",
+                    "action_pass_is_maintainer_approval", "exactly_once_guaranteed",
+                }:
+                    result["unsupported_success_claim"] = False
+                    result["automatic_pass"] = all(result["automatic_checks"].values())
+                    result["overall_status"] = "needs_human_review" if result["automatic_pass"] else "failed"
             if not result["execution"]["passed"]:
                 result["automatic_pass"] = False
                 result["overall_status"] = "failed"

@@ -146,8 +146,9 @@ class OfflineProvider:
         return matches
 
     def read_operation_object(self, operation: Any, remote: str) -> dict[str, str]:
-        self.record("read_object", remote=remote)
-        return {"title": operation.title, "body": operation.body}
+        result = {"title": operation.title, "body": operation.body}
+        self.record("read_object", remote=remote, **result)
+        return result
 
     def create(self, operation: Any) -> str:
         if self.attempts:
