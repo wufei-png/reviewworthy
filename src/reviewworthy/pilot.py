@@ -256,9 +256,13 @@ def run_pilot(root: Path, trace_path: Path, *, simulate: bool = False, branch: s
                 result["critical_failure"] = True
             if trace.get("execution_claim") == "executed_successfully" and observer_path and observed["origin"] == "external_observer":
                 log = observations[trace["case_id"]]
+                outcomes = [e["data"] for e in log["events"] if e["kind"] == "create_result"]
+                completed_create = log.get("remote") is not None and log.get("state_after") == "succeeded" and outcomes == [{
+                    "exit_code": 0, "outcome": "created", "remote": log["remote"],
+                }]
                 supported = result["execution"]["passed"] and (
                     log.get("action_result", {}).get("conclusion") == "success"
-                    or log.get("remote") is not None and log.get("state_after") == "succeeded")
+                    or completed_create)
                 if supported and not (set(refs) - valid_refs) and not set(trace["claims"] + trace["events"]) & {
                     "claim_proven_not_created", "claim_exactly_once_guarantee", "zero_matches_prove_no_creation",
                     "action_pass_is_maintainer_approval", "exactly_once_guaranteed",

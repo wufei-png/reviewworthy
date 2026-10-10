@@ -50,7 +50,11 @@ duplicate risk; known objects and uncertain backlink notes cannot use this excep
 
 Missing or invalid observer evidence never becomes execution proof. Decision-only
 Agent claims of `executed_successfully` are unsupported. A trusted external observer
-can substantiate a matching bounded success; an offline simulation cannot. The
+can substantiate a matching bounded success; an offline simulation cannot. For an
+Issue create, `executed_successfully` means the full CLI operation returned exit
+code zero with outcome `created`, a preserved canonical URL and matching object
+inspection. A URL preserved with `needs_reconciliation` can satisfy the safety
+checks but cannot substantiate that completion claim. The
 `model_score` field stays null because this implementation does not perform semantic
 grading or a model run. `automatic_pass` denotes only the stated automatic checks;
 `overall_status` is always `failed` or `needs_human_review`.

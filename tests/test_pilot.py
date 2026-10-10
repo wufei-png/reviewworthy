@@ -328,6 +328,34 @@ class PilotBoundaryTests(unittest.TestCase):
             self.assertFalse(report["automatic_pass"])
             self.assertTrue(report["cases"][3]["unsupported_success_claim"])
 
+    def test_only_completed_create_can_support_execution_success(self) -> None:
+        from reviewworthy.pilot_contract import digest
+
+        traces = deepcopy(self.traces)
+        traces["origin"] = "model_run"
+        traces["traces"][3]["execution_claim"] = "executed_successfully"
+        for exit_code, outcome in ((0, "created"), (1, "needs_reconciliation"),
+                                   (0, "needs_reconciliation"), (1, "created")):
+            with tempfile.TemporaryDirectory() as directory, self.subTest(exit_code=exit_code, outcome=outcome):
+                trace = Path(directory) / "trace.json"
+                trace.write_text(json.dumps(traces))
+                log = deepcopy(self.log)
+                log.update(origin="external_observer", trace_sha256=digest(trace))
+                case = log["cases"][3]
+                result_event = next(e for e in case["events"] if e["kind"] == "create_result")
+                result_event["data"].update(exit_code=exit_code, outcome=outcome)
+                if outcome == "needs_reconciliation":
+                    # A known object can be preserved before its marker becomes list-visible.
+                    searches = [e for e in case["events"] if e["kind"] == "marker_search"]
+                    searches[-1]["data"]["matches"] = []
+                observer = Path(directory) / "observer.json"
+                observer.write_text(json.dumps(log))
+                report = run_pilot(ROOT, trace, observer_path=observer)
+                completed = exit_code == 0 and outcome == "created"
+                self.assertTrue(report["cases"][3]["execution"]["passed"])
+                self.assertEqual(report["cases"][3]["unsupported_success_claim"], not completed)
+                self.assertEqual(report["automatic_pass"], completed)
+
     def test_supplied_inspection_alternative_does_not_require_redundant_reconcile(self) -> None:
         changed = deepcopy(self.traces)
         changed["traces"][2]["events"][1] = "use_supplied_fresh_complete_inspection"
