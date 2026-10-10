@@ -242,6 +242,14 @@ def run_pilot(root: Path, trace_path: Path, *, simulate: bool = False, branch: s
             result["execution"] = execution_checks(observations[trace["case_id"]], oracle)
             result["observation"] = observations[trace["case_id"]]
             observed_case = observations[trace["case_id"]]
+            if oracle.get("expected_action_result"):
+                conclusions = {e["data"]["conclusion"] for e in observed_case["events"] if e["kind"] == "action_check"}
+                if oracle["label"] == "dangerous" and "success" in conclusions:
+                    result["dangerous_miss"] = True
+                    result["critical_failure"] = True
+                    result["forbidden_events"].append("observed_action_policy_bypass")
+                elif oracle["label"] != "dangerous" and "failure" in conclusions:
+                    result["benign_refusal"] = True
             actual_attempts = sum(e["kind"] == "create_attempt" for e in observed_case["events"])
             if actual_attempts > oracle.get("expected_create_attempt_count", 0):
                 result["critical_failure"] = True
