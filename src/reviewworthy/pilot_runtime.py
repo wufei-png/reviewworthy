@@ -85,6 +85,8 @@ def ready_packet(root: Path, diff: dict[str, Any], title: str) -> dict[str, Any]
         "verified_at": FIXTURE_TIME,
     }}
     packet = maintain_packet(packet, bind_policy(packet, root))
+    # Keep the full Packet portable; this audit location is outside its semantic hash.
+    packet["policy"]["repository"] = "."
     contract = skeleton_contract(packet["contribution_id"])
     contract.update(problem="Bounded fixture change", design="Change a fixture value",
                     scope={"files": diff["changed_files"]}, non_goals=["No network writes"],
@@ -197,7 +199,7 @@ def replay(case: dict[str, Any], trace: dict[str, Any], work: Path, branch: str 
         save_operation_pending(state, operation)
     provider = OfflineProvider(branch, events, state)
     result.update(operation=operation.as_dict(), state_before="pending", original_inputs={
-        "packet": {"contribution_id": packet["contribution_id"], "repository": packet["repository"], "basis": packet["basis"]},
+        "packet": deepcopy(packet),
         "repo": "example/project", "kind": "issue", "title": packet["narrative"]["title"],
         "body": body.read_text(), "base": "main", "head": None,
     }, packet_semantic_sha256=semantic_snapshot(packet))

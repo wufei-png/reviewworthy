@@ -703,7 +703,7 @@
               "pattern": "^[0-9a-f]{64}$"
             },
             "diff": {
-              "type": "object"
+              "$ref": "#/$defs/diff"
             },
             "events": {
               "type": "array",
@@ -770,7 +770,7 @@
               "pattern": "^[0-9a-f]{64}$"
             },
             "diff": {
-              "type": "object"
+              "$ref": "#/$defs/diff"
             },
             "events": {
               "type": "array",
@@ -865,6 +865,80 @@
           "additionalProperties": false
         }
       ]
+    },
+    "diff": {
+      "type": "object",
+      "properties": {
+        "comparison": {
+          "const": "merge_base"
+        },
+        "base_tip_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "merge_base_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "subject_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "patch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "fingerprint_algorithm": {
+          "const": "git-raw-content-v1"
+        },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "captured_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "const": "cli_executed"
+        }
+      },
+      "required": [
+        "comparison",
+        "base_tip_sha",
+        "merge_base_sha",
+        "head_sha",
+        "subject_digest",
+        "patch_sha256",
+        "fingerprint_algorithm",
+        "changed_files",
+        "additions",
+        "deletions",
+        "captured_at",
+        "root",
+        "provenance"
+      ],
+      "additionalProperties": false
     }
   }
 }

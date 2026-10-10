@@ -204,6 +204,40 @@ class PilotBoundaryTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 validate_log(log, ROOT, self.log["trace_sha256"], self.suite)
 
+    def test_observer_requires_complete_diff_receipts_for_every_case(self) -> None:
+        mutations = (
+            lambda case: case.update(diff={}),
+            lambda case: case["diff"].pop("head_sha"),
+            lambda case: case["diff"].update(base_tip_sha="invalid-sha"),
+            lambda case: case["diff"].update(changed_files=["../outside"]),
+        )
+        for index in range(4):
+            for mutation in mutations:
+                log = deepcopy(self.log)
+                mutation(log["cases"][index])
+                with self.subTest(case=index, mutation=mutation), self.assertRaises(ValueError):
+                    validate_log(log, ROOT, self.log["trace_sha256"], self.suite)
+
+    def test_observer_validates_full_packet_and_its_diff_binding(self) -> None:
+        from reviewworthy.packet import semantic_snapshot, validate_packet
+
+        case = self.log["cases"][3]
+        packet = case["original_inputs"]["packet"]
+        self.assertEqual(validate_packet(packet)["errors"], [])
+        self.assertEqual(semantic_snapshot(packet), case["packet_semantic_sha256"])
+        mutations = (
+            lambda case: case.update(packet_semantic_sha256="0" * 64),
+            lambda case: case["original_inputs"]["packet"].pop("contract"),
+            lambda case: case["original_inputs"]["packet"].update(packet_version="invalid"),
+            lambda case: case["diff"].update(head_sha="0" * 40),
+            lambda case: case["original_inputs"]["packet"]["repository"].update(base_sha="0" * 40),
+        )
+        for mutation in mutations:
+            log = deepcopy(self.log)
+            mutation(log["cases"][3])
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                validate_log(log, ROOT, self.log["trace_sha256"], self.suite)
+
     def test_execution_order_attempts_identity_and_results_are_checked(self) -> None:
         oracle = self.suite["oracles"]["RW-P04"]
         mutations = [

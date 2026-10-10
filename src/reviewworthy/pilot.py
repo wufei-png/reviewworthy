@@ -155,10 +155,15 @@ def validate_log(log: dict[str, Any], root: Path, trace_hash: str, suite: dict[s
             raise ValueError("Observer log input binding mismatch")
         if [e["sequence"] for e in case_log["events"]] != list(range(len(case_log["events"]))):
             raise ValueError("Observer event sequence is not contiguous")
+        from .git import is_canonical_repository_relative_path
+
+        if any(not is_canonical_repository_relative_path(p) for p in case_log["diff"]["changed_files"]):
+            raise ValueError("Observer Diff contains an invalid repository-relative path")
         if "operation" in case_log:
             # The state reader checks consistency, not the digest (rendering
             # strips whitespace). Rebuild from separately retained raw inputs.
             from .github import _canonical_operation_remote, build_operation, load_operation_state
+            from .packet import semantic_snapshot, validate_packet
 
             operation = case_log["operation"]
             record = {"state_version": "0.3", "operation_id": operation.get("operation_id"),
@@ -166,7 +171,14 @@ def validate_log(log: dict[str, Any], root: Path, trace_hash: str, suite: dict[s
                       "kind": operation.get("kind"), "operation": operation, "status": "pending",
                       "recorded_at": "offline-observer", "issue_url": operation.get("issue_url") or ""}
             original = case_log.get("original_inputs")
-            if not isinstance(original, dict) or build_operation(**original).as_dict() != operation:
+            packet = original["packet"]
+            if validate_packet(packet)["errors"]:
+                raise ValueError("Observer original Packet is invalid")
+            if semantic_snapshot(packet) != case_log["packet_semantic_sha256"]:
+                raise ValueError("Observer Packet semantic hash mismatch")
+            if packet["diff"] != case_log["diff"] or packet["repository"].get("base_sha") != case_log["diff"]["base_tip_sha"]:
+                raise ValueError("Observer Packet/Diff binding mismatch")
+            if build_operation(**original).as_dict() != operation:
                 raise ValueError("Observer original operation inputs mismatch")
             with tempfile.TemporaryDirectory() as directory:
                 state = Path(directory) / "state.json"

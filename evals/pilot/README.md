@@ -90,8 +90,12 @@ tests also validate them with the declared test-only `jsonschema` package.
 
 Reports bind each result to the input's canonical JSON hash, oracle bytes, raw trace
 bytes, manifest, evaluator Git commit and actual source/schema file hashes. Observer
-logs also retain generated Git object identities, original operation inputs, Packet semantic
-hash, contiguous events, attempted writes and terminal state. The fixed clock is a
+logs also retain complete Diff receipts, generated Git object identities, original
+operation inputs including the full Packet, its validated semantic hash and Diff
+binding, contiguous events, attempted writes and terminal state. Logs with the older
+trimmed Packet must be regenerated; their missing evidence is not inferred. The
+fixture's policy audit directory is recorded as `.` for portability; it is outside
+the product semantic hash. The fixed clock is a
 simulation fixture clock, not a claim about an actual provider event time. In one
 Python/Git environment, repeated simulations produce identical reports. Changing
 the evaluator commit, code, Python executable used by the fixture check, or Git
