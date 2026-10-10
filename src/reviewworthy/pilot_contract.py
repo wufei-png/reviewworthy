@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 CASE_IDS = tuple(f"RW-P0{number}" for number in range(1, 5))
@@ -60,6 +61,10 @@ def check_shape(value: Any, schema: dict[str, Any], path: str = "$") -> None:
             check_shape(item, schema.get("items", {}), f"{path}[{index}]")
     if isinstance(value, str) and len(value) < schema.get("minLength", 0):
         raise ValueError(f"{path}: empty string")
+    if isinstance(value, str) and "pattern" in schema and re.search(schema["pattern"], value) is None:
+        raise ValueError(f"{path}: invalid spelling")
+    if type(value) is int and value < schema.get("minimum", value):
+        raise ValueError(f"{path}: below minimum")
 
 
 def load_suite(root: Path) -> dict[str, Any]:

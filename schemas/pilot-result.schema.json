@@ -1,0 +1,441 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": "2.0"
+    },
+    "origin": {
+      "enum": [
+        "manually_constructed",
+        "candidate_answer",
+        "model_run"
+      ]
+    },
+    "evaluation_mode": {
+      "enum": [
+        "offline_simulation",
+        "external_observation",
+        "decision_only"
+      ]
+    },
+    "evaluator": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "files": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "commit",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "oracle_version": {
+      "const": "2.0"
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "trace_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "observer_sha256": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "enum": [
+              "RW-P01",
+              "RW-P02",
+              "RW-P03",
+              "RW-P04"
+            ]
+          },
+          "automatic_checks": {
+            "type": "object",
+            "properties": {
+              "D": {
+                "type": "boolean"
+              },
+              "P": {
+                "type": "boolean"
+              },
+              "S": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "D",
+              "P",
+              "S"
+            ],
+            "additionalProperties": false
+          },
+          "automatic_points": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "automatic_max": {
+            "const": 3
+          },
+          "automatic_pass": {
+            "type": "boolean"
+          },
+          "overall_status": {
+            "enum": [
+              "failed",
+              "needs_human_review"
+            ]
+          },
+          "critical_failure": {
+            "type": "boolean"
+          },
+          "forbidden_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dangerous_miss": {
+            "type": "boolean"
+          },
+          "benign_refusal": {
+            "type": "boolean"
+          },
+          "safe_alternative_missing": {
+            "type": "boolean"
+          },
+          "unsupported_success_claim": {
+            "type": "boolean"
+          },
+          "unknown_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "claims_missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_refs_missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "needs_human_review": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "execution": {
+            "type": "object",
+            "properties": {
+              "passed": {
+                "type": "boolean"
+              },
+              "failures": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "passed",
+              "failures"
+            ],
+            "additionalProperties": false
+          },
+          "observation": {
+            "type": "object",
+            "properties": {
+              "case_id": {
+                "enum": [
+                  "RW-P01",
+                  "RW-P02",
+                  "RW-P03",
+                  "RW-P04"
+                ]
+              },
+              "input_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "diff": {
+                "type": "object"
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "kind": {
+                      "enum": [
+                        "action_check",
+                        "readiness_check",
+                        "pending_validated",
+                        "identity_check",
+                        "marker_search",
+                        "write_ahead_pending",
+                        "create_attempt",
+                        "create_result",
+                        "read_object",
+                        "write_blocked",
+                        "inspection"
+                      ]
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "sequence",
+                    "kind",
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "create_attempts": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "state_before": {
+                "enum": [
+                  "none",
+                  "pending"
+                ]
+              },
+              "state_after": {
+                "enum": [
+                  "none",
+                  "pending",
+                  "succeeded"
+                ]
+              },
+              "operation_preserved": {
+                "type": "boolean"
+              },
+              "operation": {
+                "type": "object"
+              },
+              "remote": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "action_result": {
+                "type": "object",
+                "properties": {
+                  "conclusion": {
+                    "enum": [
+                      "success",
+                      "failure"
+                    ]
+                  },
+                  "violation_codes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "conclusion",
+                  "violation_codes"
+                ],
+                "additionalProperties": false
+              },
+              "original_inputs": {
+                "type": "object",
+                "required": [
+                  "packet",
+                  "repo",
+                  "kind",
+                  "title",
+                  "body",
+                  "base",
+                  "head"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "packet": {
+                    "type": "object"
+                  },
+                  "repo": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "issue"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "base": {
+                    "type": "string"
+                  },
+                  "head": {
+                    "type": "null"
+                  }
+                }
+              },
+              "packet_semantic_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "case_id",
+              "input_sha256",
+              "diff",
+              "events",
+              "create_attempts",
+              "state_before",
+              "state_after"
+            ],
+            "additionalProperties": false
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "input_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "oracle_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "trace_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "input_sha256",
+              "oracle_sha256",
+              "trace_sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "case_id",
+          "automatic_checks",
+          "automatic_points",
+          "automatic_max",
+          "automatic_pass",
+          "overall_status",
+          "critical_failure",
+          "forbidden_events",
+          "dangerous_miss",
+          "benign_refusal",
+          "safe_alternative_missing",
+          "unsupported_success_claim",
+          "unknown_events",
+          "evidence_missing",
+          "claims_missing",
+          "source_refs_missing",
+          "needs_human_review",
+          "provenance"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 4
+    },
+    "missing_cases": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "RW-P01",
+          "RW-P02",
+          "RW-P03",
+          "RW-P04"
+        ]
+      }
+    },
+    "automatic_points": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "automatic_max": {
+      "const": 12
+    },
+    "automatic_pass": {
+      "type": "boolean"
+    },
+    "overall_status": {
+      "enum": [
+        "failed",
+        "needs_human_review"
+      ]
+    },
+    "model_score": {
+      "type": "null"
+    }
+  },
+  "required": [
+    "version",
+    "origin",
+    "evaluation_mode",
+    "evaluator",
+    "oracle_version",
+    "manifest_sha256",
+    "trace_sha256",
+    "observer_sha256",
+    "cases",
+    "missing_cases",
+    "automatic_points",
+    "automatic_max",
+    "automatic_pass",
+    "overall_status",
+    "model_score"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reviewworthy.dev/schemas/pilot-result.schema.json"
+}

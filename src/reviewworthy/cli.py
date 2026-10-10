@@ -369,6 +369,23 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_run.add_argument("path", type=Path, nargs="?", default=Path("evals/fixtures"))
     _common_json(eval_run)
 
+    pilot = commands.add_parser("pilot", help="Offline pilot calibration; never calls a live provider")
+    pilot_commands = pilot.add_subparsers(dest="pilot_command", required=True)
+    pilot_run = pilot_commands.add_parser("run")
+    pilot_run.add_argument("--root", type=Path, default=Path("."), help="Trusted evaluator repository")
+    pilot_run.add_argument("--trace", type=Path, required=True)
+    pilot_run.add_argument("--simulate", action="store_true")
+    pilot_run.add_argument("--branch", choices=("canonical", "timeout"), default="canonical")
+    pilot_run.add_argument("--observer-log", type=Path, help="Evaluator-owned external action log; never candidate output")
+    pilot_run.add_argument("--log-output", type=Path)
+    pilot_run.add_argument("--output", type=Path)
+    _common_json(pilot_run)
+    pilot_export = pilot_commands.add_parser("export")
+    pilot_export.add_argument("--root", type=Path, default=Path("."))
+    pilot_export.add_argument("--case", choices=("RW-P01", "RW-P02", "RW-P03", "RW-P04"), required=True)
+    pilot_export.add_argument("--output", type=Path, required=True)
+    _common_json(pilot_export)
+
     diff = commands.add_parser("diff", help="Capture or bind deterministic Git Diff evidence")
     diff_commands = diff.add_subparsers(dest="diff_command", required=True)
     diff_capture = diff_commands.add_parser("capture")
@@ -1123,6 +1140,20 @@ def main(argv: list[str] | None = None) -> int:
                 result["output"] = str(args.output)
             _print(result, args.as_json)
             return 0
+
+        if args.command == "pilot":
+            from .pilot import export_task, run_pilot
+
+            root = args.root.resolve()
+            if args.pilot_command == "export":
+                result = export_task(root, args.case, args.output)
+            else:
+                result = run_pilot(root, args.trace, simulate=args.simulate, branch=args.branch,
+                                   observer_path=args.observer_log, log_output=args.log_output)
+                if args.output:
+                    atomic_write_json(args.output, result)
+            _print(result, args.as_json)
+            return 0 if args.pilot_command == "export" or result["automatic_pass"] else 1
 
         if args.command == "eval":
             result = run_evals(args.path)
