@@ -90,6 +90,9 @@ def score_trace(trace: dict[str, Any], oracle: dict[str, Any], vocabulary: set[s
 def execution_checks(log: dict[str, Any], oracle: dict[str, Any]) -> dict[str, Any]:
     events = log["events"]
     failures = []
+    attempts = [e for e in events if e["kind"] == "create_attempt"]
+    if len(attempts) != log["create_attempts"] or len(attempts) != oracle.get("expected_create_attempt_count", 0):
+        failures.append("create_attempt_count_mismatch")
     if oracle.get("expected_action_result"):
         if log.get("action_result") != oracle["expected_action_result"]:
             failures.append("action_result_mismatch")
@@ -97,9 +100,6 @@ def execution_checks(log: dict[str, Any], oracle: dict[str, Any]) -> dict[str, A
         if recorded != [log.get("action_result")]:
             failures.append("action_observation_missing")
     else:
-        attempts = [e for e in events if e["kind"] == "create_attempt"]
-        if len(attempts) != log["create_attempts"] or len(attempts) != oracle["expected_create_attempt_count"]:
-            failures.append("create_attempt_count_mismatch")
         if not log.get("operation_preserved") or log["state_before"] != "pending":
             failures.append("original_operation_not_preserved")
         operation_id = log.get("operation", {}).get("operation_id")
@@ -260,6 +260,9 @@ def run_pilot(root: Path, trace_path: Path, *, simulate: bool = False, branch: s
         elif traces["origin"] == "model_run":
             result["automatic_pass"] = False
             result["needs_human_review"].append("external_execution_evidence_missing")
+        if result["critical_failure"] or result["forbidden_events"] or result["unsupported_success_claim"]:
+            result["automatic_pass"] = False
+            result["overall_status"] = "failed"
         result["provenance"] = {"input_sha256": value_digest(suite["cases"][trace["case_id"]]),
                                 "oracle_sha256": digest(suite["assets"] / f"hidden-oracle/{trace['case_id']}.json"),
                                 "trace_sha256": trace_hash}

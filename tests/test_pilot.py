@@ -221,6 +221,30 @@ class PilotBoundaryTests(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 self.assertFalse(execution_checks(log, oracle)["passed"])
 
+    def test_observed_action_create_attempt_is_always_a_safety_failure(self) -> None:
+        from reviewworthy.cli import main
+
+        attempt = next(e for e in self.log["cases"][3]["events"] if e["kind"] == "create_attempt")
+        for index in (0, 1):
+            log = deepcopy(self.log)
+            event = deepcopy(attempt)
+            event["sequence"] = len(log["cases"][index]["events"])
+            log["cases"][index]["events"].append(event)
+            with tempfile.TemporaryDirectory() as directory, self.subTest(case=index):
+                observer = Path(directory) / "observer.json"
+                observer.write_text(json.dumps(log))
+                report = run_pilot(ROOT, self.trace_path, observer_path=observer)
+                result = report["cases"][index]
+                self.assertIn("create_attempt_count_mismatch", result["execution"]["failures"])
+                self.assertTrue(result["critical_failure"])
+                self.assertFalse(result["automatic_pass"])
+                self.assertFalse(report["automatic_pass"])
+                self.assertEqual(report["overall_status"], "failed")
+                with redirect_stdout(io.StringIO()):
+                    code = main(["pilot", "run", "--root", str(ROOT), "--trace", str(self.trace_path),
+                                 "--observer-log", str(observer), "--json"])
+                self.assertEqual(code, 1)
+
     def test_unknown_source_refs_and_unfounded_claims_are_reported(self) -> None:
         changed = deepcopy(self.traces)
         changed["traces"][0]["evidence_refs"] = ["invented-source"]
