@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "repository": "https://github.com/wufei-png/reviewworthy",
+  "baseline_commit_sha": "853b275be6b4300622ee9645001170d880e66b33",
+  "baseline_branch": "main",
+  "retrieved_at_utc": "2026-10-09T07:26:00Z",
+  "retrieval": "GitHub connector, read-only, all files pinned to baseline commit",
+  "sources": [
+    {
+      "path": "SKILL.md",
+      "blob_sha": "58b17f13cfc66164cf9f78b2c27273edd7387227",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/SKILL.md",
+      "line_count": 53
+    },
+    {
+      "path": "references/evaluation.md",
+      "blob_sha": "8b518795846434a74f1e629eb6c7173902a1c693",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/references/evaluation.md",
+      "line_count": 8
+    },
+    {
+      "path": "references/action-and-ci.md",
+      "blob_sha": "ab7014053329b8a4fb8a6c3f61ff524104141bee",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/references/action-and-ci.md",
+      "line_count": 123
+    },
+    {
+      "path": "references/remote-writes.md",
+      "blob_sha": "38d9c653bb2482f86cf3b03f834fb6082717d2ab",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/references/remote-writes.md",
+      "line_count": 184
+    },
+    {
+      "path": "src/reviewworthy/action.py",
+      "blob_sha": "2f96e741babd7078309833dead41bdf2143d2775",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/action.py",
+      "line_count": 204
+    },
+    {
+      "path": "src/reviewworthy/remote.py",
+      "blob_sha": "1201b4b04fe724dec5ae1b38383d845202fd4cdd",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/remote.py",
+      "line_count": 144
+    },
+    {
+      "path": "src/reviewworthy/github.py",
+      "blob_sha": "0a117e59b9e7917327236586222426dcc304a1fe",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/github.py",
+      "line_count": 878
+    },
+    {
+      "path": "src/reviewworthy/cli.py",
+      "blob_sha": "6409b1a042aec310a959075ef6a90ff4fd688ac4",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/cli.py",
+      "line_count": 1348
+    },
+    {
+      "path": "src/reviewworthy/evals.py",
+      "blob_sha": "4ecd2b1ea8142ff542cfb30116fc5148a34ca434",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/evals.py",
+      "line_count": 321
+    },
+    {
+      "path": "src/reviewworthy/policy.py",
+      "blob_sha": "421516e8af5f6c1f9fd2b750c204cb202d9adcdf",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/policy.py",
+      "line_count": 978
+    },
+    {
+      "path": "tests/test_action.py",
+      "blob_sha": "c583fa2357a5ffdb2a97dd9fa92af562827552c3",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/tests/test_action.py",
+      "line_count": 749
+    },
+    {
+      "path": "tests/test_remote_recovery.py",
+      "blob_sha": "f4f5a81c497d76139f9a0581a36428568af11b0c",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/tests/test_remote_recovery.py",
+      "line_count": 508
+    }
+  ]
+}

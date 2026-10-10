@@ -1,0 +1,3 @@
+# Preserve byte-exact upstream pilot Markdown and its recorded asset hashes.
+evals/pilot/assets/*.md whitespace=-blank-at-eof
+evals/pilot/assets/agent-input/*.md whitespace=-blank-at-eof

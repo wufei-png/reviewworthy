@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0",
+  "checked_at_utc": "2026-10-09T07:31:43.588797+00:00",
+  "status": "passed_data_consistency_only",
+  "checks_passed": [
+    "All JSON parse as UTF-8 JSON",
+    "Exactly four agent fixtures and four matching oracle IDs",
+    "No top-level expected/label/pair fields in agent fixtures",
+    "Policy pair differs only in case ID and base TOML",
+    "Remote pair observations/proposal are identical; user retry authorization differs",
+    "All fixture baseline SHAs match provenance",
+    "All evidence and oracle source IDs resolve",
+    "Source links are pinned and blob SHA values are present",
+    "All three manual trace sets contain exactly the four case IDs",
+    "Manual scoring arithmetic matches 20, 10, 5 and critical-failure counts"
+  ],
+  "not_performed": [
+    "Repository code, CLI, tests or native eval execution",
+    "Any model evaluation or paid model/API/CLI call",
+    "Real GitHub write, retry, remote reconciliation or integration test",
+    "Real Git object / Packet / operation hash construction",
+    "Statistical success-rate measurement"
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "82641ef85c3fc0786e7d05a3e07de7cea4c71e2c4f3399ff9b82178d3c5729fa"
+    },
+    {
+      "path": "SCORING.md",
+      "sha256": "c9a0a8ed1ce8a82cd1ecf880496a8398da28518afcee1bb841aef9e60a873952"
+    },
+    {
+      "path": "agent-input/PROTOCOL.md",
+      "sha256": "10dc615378696c5b8483e5d17583d21e7d2705e70df9453a5d523d785572c756"
+    },
+    {
+      "path": "agent-input/RW-P01.json",
+      "sha256": "51ade413f1273f9448cac7bb8e657e72946670968e0df84ff25779b6cdf6b398"
+    },
+    {
+      "path": "agent-input/RW-P02.json",
+      "sha256": "e94655b5a0119341a3130d0105c5d46558ae519663812a33010ba896f422e99a"
+    },
+    {
+      "path": "agent-input/RW-P03.json",
+      "sha256": "5fde25df42e0be2ba7494c61ed2ba07d741a1d90bdcd66fb84e07a4cdd47fcd4"
+    },
+    {
+      "path": "agent-input/RW-P04.json",
+      "sha256": "24adcbca33cff797b274525437f2013e5f2b852d07b685def9f07f6a9e6a833a"
+    },
+    {
+      "path": "agent-input/source-map.json",
+      "sha256": "31992c8148aedba07bf6ec2809e3c951a938a6eb091bc2ffbddaac63122c3890"
+    },
+    {
+      "path": "hidden-oracle/RW-P01.json",
+      "sha256": "4ecd5754bbc58a3830bb1022dd5a229d0bdc6adf4fd328c3c6f706ca4c59c60b"
+    },
+    {
+      "path": "hidden-oracle/RW-P02.json",
+      "sha256": "b84b2ca2b951b44c2fa9e55a802d47074511af8067530c6a5d2412207e416484"
+    },
+    {
+      "path": "hidden-oracle/RW-P03.json",
+      "sha256": "2981570db741713cfed9ca27f8ef4ec2773d3cf25500d7470cc00d3c61b67d22"
+    },
+    {
+      "path": "hidden-oracle/RW-P04.json",
+      "sha256": "2816f5faa9af1a2fb7adfda6f7aa1aef37c10b5d9aed7caa749b37bfa99b4900"
+    },
+    {
+      "path": "hidden-oracle/scoring-spec.json",
+      "sha256": "8a46c7c7aef46bd839a4a00017a475dbd241e68cff1a74f129e95644da57ebb1"
+    },
+    {
+      "path": "manual-traces/blanket-refusal.json",
+      "sha256": "192fae42b12675951bfa69c01dc19141becfdd1cea5d585426aef30ea29850df"
+    },
+    {
+      "path": "manual-traces/correct.json",
+      "sha256": "af19437a9a3e228e0ea63dda0b6bc487b259592020a8eb65cff2485101d5655b"
+    },
+    {
+      "path": "manual-traces/dangerous-miss.json",
+      "sha256": "f7ed7710fd1830cb23b346220ae96321a834cc276441cdb5c5f3ce2be5b63661"
+    },
+    {
+      "path": "manual-traces/score-demonstration.json",
+      "sha256": "0560fe15c2448a5a97343273e36616891302ff3c0e27d63b19389fd0ff1027ba"
+    },
+    {
+      "path": "provenance.json",
+      "sha256": "d8ac43a665c81ca078a0a4a914fd845e98b2ae5fb8ed60d1bf181371cd808c5c"
+    }
+  ],
+  "review": "Independent static review completed; requested corrections incorporated (conditional retry result handling, no redundant reconcile requirement, Action output format, semantic normalization)."
+}

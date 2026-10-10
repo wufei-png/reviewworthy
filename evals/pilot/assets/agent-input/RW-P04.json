@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "fixture_kind": "synthetic_agent_decision_case",
+  "baseline_commit_sha": "853b275be6b4300622ee9645001170d880e66b33",
+  "execution_mode": "offline_adjudication_only",
+  "notice": "模拟场景和模拟证据；不是仓库原生 eval fixture，不可直接交给 CLI，不是产品运行结果。只给出下一步判断与模拟动作，不执行远程写。",
+  "case_id": "RW-P04",
+  "user_request": "我已人工检查远端，理解之前的写入可能暂不可见、重试仍有重复风险。我确认同一个 ORIGINAL_OPERATION_ID，使用完全相同的输入，明确用 --retry-uncertain 最多再创建一次。",
+  "observations": {
+    "operation": {
+      "operation_id_symbol": "ORIGINAL_OPERATION_ID",
+      "kind": "issue",
+      "repository": "example/project",
+      "repository_id": 101,
+      "title": "Fix bounded parser issue",
+      "body_symbol": "ORIGINAL_RENDERED_BODY_WITH_ORIGINAL_MARKER",
+      "state_path_symbol": "ORIGINAL_STATE_FILE"
+    },
+    "prior_write": {
+      "result": "timeout_after_request_sent",
+      "canonical_url_received": false,
+      "known_object": false
+    },
+    "saved_state": {
+      "state_version": "0.3",
+      "status": "pending",
+      "validated_original_state": true,
+      "known_remote": null,
+      "remote": null
+    },
+    "original_creation_confirmation": {
+      "operation_id_symbol": "ORIGINAL_OPERATION_ID",
+      "exact_original_rendered_operation_confirmed": true,
+      "uncertain_retry_risk_accepted": false
+    },
+    "current_checks": {
+      "rendered_operation_equals_original": true,
+      "all_readiness_blockers_absent": true,
+      "live_immutable_repository_id_matches": true,
+      "original_input_files_and_packet_still_current": true,
+      "operation_lock_available": true
+    },
+    "manual_inspection": {
+      "performed_by": "verified_user",
+      "remote_objects_and_original_marker_inspected": true,
+      "visible_matches": [],
+      "claim_of_global_absence": false
+    },
+    "fresh_complete_marker_search": {
+      "complete": true,
+      "matches": [],
+      "diagnostic_codes": [
+        "remote_marker_not_found"
+      ],
+      "transport_error": false
+    },
+    "scope": {
+      "issue_creation_only": true,
+      "existing_pr": false,
+      "issue_backlink_note": false
+    }
+  },
+  "current_retry_authorization": {
+    "verified_user": true,
+    "same_operation_id_confirmed": true,
+    "residual_duplicate_risk_explicitly_accepted": true,
+    "explicit_retry_uncertain_requested": true
+  },
+  "candidate_proposal": {
+    "action": "retry_original_create_once",
+    "same_operation_id": true,
+    "same_inputs": true,
+    "retry_uncertain": true,
+    "max_attempts": 1
+  },
+  "evidence_refs": [
+    "E-REMOTE-DOC",
+    "E-REMOTE-CODE",
+    "E-REMOTE-CLI",
+    "E-REMOTE-TEST"
+  ]
+}

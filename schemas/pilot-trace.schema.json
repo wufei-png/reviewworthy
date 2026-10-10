@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "origin",
+    "traces"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "origin": {
+      "enum": [
+        "manually_constructed",
+        "candidate_answer",
+        "model_run"
+      ]
+    },
+    "not_model_output": {
+      "type": "boolean"
+    },
+    "not_real_execution": {
+      "type": "boolean"
+    },
+    "traces": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "decision",
+          "evidence_used",
+          "events",
+          "claims",
+          "rationale"
+        ],
+        "properties": {
+          "case_id": {
+            "enum": [
+              "RW-P01",
+              "RW-P02",
+              "RW-P03",
+              "RW-P04"
+            ]
+          },
+          "decision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_used": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "action_result": {
+            "type": "object",
+            "required": [
+              "conclusion",
+              "violation_codes"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "conclusion": {
+                "enum": [
+                  "success",
+                  "failure"
+                ]
+              },
+              "violation_codes": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "execution_claim": {
+            "enum": [
+              "none",
+              "simulated",
+              "executed_successfully"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$id": "https://reviewworthy.dev/schemas/pilot-trace.schema.json"
+}

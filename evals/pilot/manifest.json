@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "oracle_version": "2.0",
+  "baseline_commit": "853b275be6b4300622ee9645001170d880e66b33",
+  "assets": {
+    "README.md": "82641ef85c3fc0786e7d05a3e07de7cea4c71e2c4f3399ff9b82178d3c5729fa",
+    "SCORING.md": "c9a0a8ed1ce8a82cd1ecf880496a8398da28518afcee1bb841aef9e60a873952",
+    "agent-input/PROTOCOL.md": "10dc615378696c5b8483e5d17583d21e7d2705e70df9453a5d523d785572c756",
+    "agent-input/RW-P01.json": "51ade413f1273f9448cac7bb8e657e72946670968e0df84ff25779b6cdf6b398",
+    "agent-input/RW-P02.json": "e94655b5a0119341a3130d0105c5d46558ae519663812a33010ba896f422e99a",
+    "agent-input/RW-P03.json": "5fde25df42e0be2ba7494c61ed2ba07d741a1d90bdcd66fb84e07a4cdd47fcd4",
+    "agent-input/RW-P04.json": "24adcbca33cff797b274525437f2013e5f2b852d07b685def9f07f6a9e6a833a",
+    "agent-input/source-map.json": "31992c8148aedba07bf6ec2809e3c951a938a6eb091bc2ffbddaac63122c3890",
+    "hidden-oracle/RW-P01.json": "4ecd5754bbc58a3830bb1022dd5a229d0bdc6adf4fd328c3c6f706ca4c59c60b",
+    "hidden-oracle/RW-P02.json": "b84b2ca2b951b44c2fa9e55a802d47074511af8067530c6a5d2412207e416484",
+    "hidden-oracle/RW-P03.json": "2981570db741713cfed9ca27f8ef4ec2773d3cf25500d7470cc00d3c61b67d22",
+    "hidden-oracle/RW-P04.json": "2816f5faa9af1a2fb7adfda6f7aa1aef37c10b5d9aed7caa749b37bfa99b4900",
+    "hidden-oracle/scoring-spec.json": "8a46c7c7aef46bd839a4a00017a475dbd241e68cff1a74f129e95644da57ebb1",
+    "manual-traces/blanket-refusal.json": "192fae42b12675951bfa69c01dc19141becfdd1cea5d585426aef30ea29850df",
+    "manual-traces/correct.json": "af19437a9a3e228e0ea63dda0b6bc487b259592020a8eb65cff2485101d5655b",
+    "manual-traces/dangerous-miss.json": "f7ed7710fd1830cb23b346220ae96321a834cc276441cdb5c5f3ce2be5b63661",
+    "manual-traces/score-demonstration.json": "0560fe15c2448a5a97343273e36616891302ff3c0e27d63b19389fd0ff1027ba",
+    "provenance.json": "d8ac43a665c81ca078a0a4a914fd845e98b2ae5fb8ed60d1bf181371cd808c5c",
+    "validation-report.json": "c39236879c0ea4cbe92214880088b5110659cf18db9cd81f524b6b4527c516f8"
+  }
+}

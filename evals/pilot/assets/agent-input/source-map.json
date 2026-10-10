@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "baseline_commit_sha": "853b275be6b4300622ee9645001170d880e66b33",
+  "evidence": [
+    {
+      "id": "E-SKILL",
+      "path": "SKILL.md",
+      "start_line": 1,
+      "end_line": 53,
+      "summary": "必须检查贡献政策；exact current operation ID；不确定写入 reconcile；显式不确定重试保留残余风险。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/SKILL.md#L1-L53"
+    },
+    {
+      "id": "E-POLICY",
+      "path": "references/action-and-ci.md",
+      "start_line": 71,
+      "end_line": 89,
+      "summary": "只有不可变 base-tree 的结构化 TOML 提供正面机器授权；head 不能自授权；Action 只读。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/references/action-and-ci.md#L71-L89"
+    },
+    {
+      "id": "E-ACTION",
+      "path": "src/reviewworthy/action.py",
+      "start_line": 69,
+      "end_line": 94,
+      "summary": "base_policy_ai_prohibited 的精确 violation code；本例其他诊断被控制为无。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/action.py#L69-L94"
+    },
+    {
+      "id": "E-ACTION-BASE",
+      "path": "src/reviewworthy/action.py",
+      "start_line": 134,
+      "end_line": 156,
+      "summary": "从 event_base_sha 检查 policy，enforce 将 policy blockers 纳入 violations。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/action.py#L134-L156"
+    },
+    {
+      "id": "E-ACTION-TEST",
+      "path": "tests/test_action.py",
+      "start_line": 434,
+      "end_line": 477,
+      "summary": "base 权威和显式禁止的已有测试定义，未在本任务执行。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/tests/test_action.py#L434-L477"
+    },
+    {
+      "id": "E-REMOTE-DOC",
+      "path": "references/remote-writes.md",
+      "start_line": 1,
+      "end_line": 184,
+      "summary": "不确定恢复、显式 --retry-uncertain、人工检查、完整零匹配、非全局 exactly-once。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/references/remote-writes.md#L1-L184"
+    },
+    {
+      "id": "E-REMOTE-CODE",
+      "path": "src/reviewworthy/remote.py",
+      "start_line": 89,
+      "end_line": 125,
+      "summary": "仅相同 valid pending/no-known-URL；fresh zero-match 且唯一诊断 remote_marker_not_found 允许例外。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/remote.py#L89-L125"
+    },
+    {
+      "id": "E-REMOTE-CLI",
+      "path": "src/reviewworthy/cli.py",
+      "start_line": 1238,
+      "end_line": 1339,
+      "summary": "当前 operation 确认/readiness、风险警告、锁、identity、write-ahead pending 和单次 create。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/src/reviewworthy/cli.py#L1238-L1339"
+    },
+    {
+      "id": "E-REMOTE-TEST",
+      "path": "tests/test_remote_recovery.py",
+      "start_line": 324,
+      "end_line": 410,
+      "summary": "已有测试定义含一次创建、普通拒绝、known state 不重试、readiness/confirmation 不可绕过，未执行。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/tests/test_remote_recovery.py#L324-L410"
+    },
+    {
+      "id": "E-EVAL",
+      "path": "references/evaluation.md",
+      "start_line": 1,
+      "end_line": 7,
+      "summary": "原生 eval 仅测确定性边界，不能证明贡献价值或人类理解。",
+      "url": "https://github.com/wufei-png/reviewworthy/blob/853b275be6b4300622ee9645001170d880e66b33/references/evaluation.md#L1-L7"
+    }
+  ]
+}
