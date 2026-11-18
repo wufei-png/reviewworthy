@@ -108,12 +108,18 @@ class ActionWrapperTests(unittest.TestCase):
             encoding="utf-8"
         )
         dependencies = re.findall(r"uses: (actions/[^\s]+)", workflow)
-        self.assertEqual(len(dependencies), 2)
+        self.assertEqual(
+            {dependency.split("@", 1)[0] for dependency in dependencies},
+            {"actions/checkout", "actions/setup-python"},
+        )
         for dependency in dependencies:
             self.assertRegex(
                 dependency, r"^actions/(checkout|setup-python)@[0-9a-f]{40}$"
             )
-        self.assertIn("persist-credentials: false", workflow)
+        self.assertEqual(
+            workflow.count("uses: actions/checkout@"),
+            workflow.count("persist-credentials: false"),
+        )
         self.assertIn("fetch-depth: 0", workflow)
         self.assertNotIn("uses:", (root / "action.yml").read_text(encoding="utf-8"))
 
@@ -415,7 +421,12 @@ class ActionEvidenceTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                def read_base(args: list[str], **kwargs: object) -> object:
+                def read_base(
+                    args: list[str],
+                    case: str = case,
+                    readme_blob: str = readme_blob,
+                    **kwargs: object,
+                ) -> object:
                     if case == "unreadable" and args[-3:] == [
                         "cat-file",
                         "blob",

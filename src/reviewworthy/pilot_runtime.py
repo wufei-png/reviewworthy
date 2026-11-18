@@ -390,8 +390,10 @@ def replay(
 
         original_load = cli.load_creation_receipt
 
-        def checked_pending(*args: Any, **kwargs: Any) -> Any:
-            receipt = original_load(*args, **kwargs)
+        def checked_pending(
+            *args: Any, _load: Any = original_load, **kwargs: Any
+        ) -> Any:
+            receipt = _load(*args, **kwargs)
             provider.record("pending_validated", operation_id=operation.operation_id)
             return receipt
 

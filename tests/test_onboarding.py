@@ -324,7 +324,8 @@ class OnboardingTests(unittest.TestCase):
                 self.repository(root)
                 transport = ReadOnlyTransport()
                 with patch(
-                    "reviewworthy.cli.GhClient", side_effect=lambda: GhClient(transport)
+                    "reviewworthy.cli.GhClient",
+                    side_effect=lambda transport=transport: GhClient(transport),
                 ):
                     code, started = self.start(root)
                     self.assertEqual(code, 0)

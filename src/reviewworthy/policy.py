@@ -1309,7 +1309,7 @@ def _inspect_policy(
         )
 
     if diagnostics:
-        authoritative = {key: None for key in CLAIM_KEYS}
+        authoritative = dict.fromkeys(CLAIM_KEYS)
         unknown = list(CLAIM_KEYS)
         for record in claim_records.values():
             record.update(value=None, state="unknown")

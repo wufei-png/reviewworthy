@@ -11,6 +11,22 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install pinned Ruff
+        run: python -m pip install "ruff==0.16.5"
+      - name: Check Ruff lint
+        run: python -m ruff check --no-cache src tests
+      - name: Check Ruff formatting
+        run: python -m ruff format --check .
+
   reviewworthy:
     runs-on: ubuntu-latest
     strategy:
@@ -62,8 +78,12 @@ jobs:
         env:
           PYTHONPATH: src:tests
         run: python -m unittest discover -s tests -p 'test_schema.py' -v
-      - name: Build and install wheel
+      - name: Build and install wheel in an isolated environment
         run: |
           python -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/reviewworthy-wheel" .
-          python -m pip install --force-reinstall "$RUNNER_TEMP"/reviewworthy-wheel/*.whl
-          reviewworthy --version
+          python -m venv "$RUNNER_TEMP/reviewworthy-venv"
+          "$RUNNER_TEMP/reviewworthy-venv/bin/python" -m pip install --no-deps "$RUNNER_TEMP"/reviewworthy-wheel/*.whl
+          mkdir -p "$RUNNER_TEMP/reviewworthy-smoke"
+          cd "$RUNNER_TEMP/reviewworthy-smoke"
+          unset PYTHONPATH
+          "$RUNNER_TEMP/reviewworthy-venv/bin/reviewworthy" --version

@@ -72,7 +72,7 @@ def disclosure_errors(packet: dict[str, Any]) -> list[dict[str, str]]:
     if not isinstance(locations, list):
         locations = []
     invalid_locations = sorted(
-        set(str(value) for value in locations) - DISCLOSURE_LOCATIONS
+        {str(value) for value in locations} - DISCLOSURE_LOCATIONS
     )
     if invalid_locations:
         errors.append(

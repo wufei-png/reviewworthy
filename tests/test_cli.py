@@ -16,12 +16,7 @@ from reviewworthy.contract import contract_snapshot
 from reviewworthy.evidence import append_evidence_summary, build_evidence_summary
 from reviewworthy.git import PR_DIFF_FIELDS, capture_pr_diff, verification_plan_digest
 from reviewworthy.github import GhError
-from reviewworthy.packet import (
-    semantic_snapshot,
-    readiness_blockers,
-    skeleton_packet,
-    validate_packet,
-)
+from reviewworthy.packet import semantic_snapshot, readiness_blockers, skeleton_packet
 from reviewworthy.signal import skeleton_signal, validate_signal
 
 from helpers import configure_created_object, valid_packet
@@ -1229,7 +1224,6 @@ class CliBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repository_root, actual_diff = self._pr_repository(root)
-            expected_head = self._git(repository_root, "rev-parse", "HEAD")
             packet_path = root / "packet.json"
             command = (
                 "from pathlib import Path; import subprocess; "

@@ -389,7 +389,6 @@ class GitHubOperationTests(unittest.TestCase):
 
         def fake_runner(argv, **kwargs):
             calls.append(argv)
-            current_kind = argv[1]
             body = [
                 {
                     "number": 1,

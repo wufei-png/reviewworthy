@@ -2194,9 +2194,6 @@ def _readiness_blockers_object(
                 "path": "verification.plan.checks",
             }
         )
-    receipts = (
-        verification.get("receipts", []) if isinstance(verification, dict) else []
-    )
     usable_receipts = current_verification_receipts(packet)
     if not usable_receipts:
         blockers.append(

@@ -536,7 +536,13 @@ class SignalRecoveryTests(unittest.TestCase):
                     {"url": "https://github.com/example/project/issues/9"}
                 ]
 
-                def inspect(*args):
+                def inspect(
+                    *args,
+                    mode=mode,
+                    source=source,
+                    edited=edited,
+                    operation=operation,
+                ):
                     if mode == "deleted":
                         source.unlink()
                     else:
