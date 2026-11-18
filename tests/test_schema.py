@@ -42,13 +42,16 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [],
-            "Schema errors for %s: %s" % (schema_name, [error.message for error in errors]),
+            "Schema errors for %s: %s"
+            % (schema_name, [error.message for error in errors]),
         )
 
     def _assert_invalid(self, schema_name: str, value: dict) -> None:
         schema = self.schemas[schema_name]
         resolver = RefResolver.from_schema(schema, store=self.store)
-        errors = list(Draft202012Validator(schema, resolver=resolver).iter_errors(value))
+        errors = list(
+            Draft202012Validator(schema, resolver=resolver).iter_errors(value)
+        )
         self.assertTrue(errors, f"Expected {schema_name} to reject {value!r}")
 
     def test_all_schemas_are_valid_draft_2020_12_documents(self) -> None:
@@ -57,23 +60,34 @@ class SchemaTests(unittest.TestCase):
 
     def test_generated_artifacts_validate_against_portable_schemas(self) -> None:
         packet = valid_packet()
-        signal = skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/1")
+        signal = skeleton_signal(
+            "issue", "bug_report", "https://github.com/example/project/issues/1"
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "README.md").write_text("Example project.\n", encoding="utf-8")
             brief = build_project_brief(root, ["README.md"])
 
         self._assert_valid("ai-assistance.schema.json", packet["ai_assistance"])
-        self._assert_valid("candidate-menu.schema.json", skeleton_menu("example/project"))
+        self._assert_valid(
+            "candidate-menu.schema.json", skeleton_menu("example/project")
+        )
         self._assert_valid("contribution-contract.schema.json", packet["contract"])
         self._assert_valid("contribution-packet.schema.json", packet)
-        self._assert_valid("evidence-summary.schema.json", build_evidence_summary(packet, packet["diff"]))
+        self._assert_valid(
+            "evidence-summary.schema.json",
+            build_evidence_summary(packet, packet["diff"]),
+        )
         self._assert_valid("contribution-signal.schema.json", signal)
         self._assert_valid("project-brief.schema.json", brief)
         self._assert_valid("understanding.schema.json", packet["understanding"])
 
-    def test_signal_schema_binds_verification_record_type_to_signal_record_type(self) -> None:
-        signal = skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/1")
+    def test_signal_schema_binds_verification_record_type_to_signal_record_type(
+        self,
+    ) -> None:
+        signal = skeleton_signal(
+            "issue", "bug_report", "https://github.com/example/project/issues/1"
+        )
         signal["verification"] = {
             "status": "verified",
             "provider": "github",
@@ -121,13 +135,46 @@ class SchemaTests(unittest.TestCase):
 
         self._assert_invalid("evidence-summary.schema.json", summary)
 
-    def test_policy_schema_covers_canonical_discovery_and_supported_values(self) -> None:
-        self._assert_valid("contribution-policy.schema.json", {"ai": {"allowed": "unknown"}, "discovery": {"authoritative_documents": ["docs/contributing.md"]}})
-        for value in ({"ai": {"allowed": 1}}, {"ai": {"allowd": True}}, {"discovery": {"authoritative_documents": ["../policy.md"]}}):
+    def test_policy_schema_covers_canonical_discovery_and_supported_values(
+        self,
+    ) -> None:
+        self._assert_valid(
+            "contribution-policy.schema.json",
+            {
+                "ai": {"allowed": "unknown"},
+                "discovery": {"authoritative_documents": ["docs/contributing.md"]},
+            },
+        )
+        for value in (
+            {"ai": {"allowed": 1}},
+            {"ai": {"allowd": True}},
+            {"discovery": {"authoritative_documents": ["../policy.md"]}},
+        ):
             self._assert_invalid("contribution-policy.schema.json", value)
 
-    def test_policy_discovery_schema_preserves_unusual_canonical_path_boundaries(self) -> None:
-        for name in ("docs/规则\tpolicy\n.md", "docs/\n", " name ", "docs/[policy].md", "docs/*.md"):
-            self._assert_valid("contribution-policy.schema.json", {"discovery": {"authoritative_documents": [name]}})
-        for name in (" ", "docs/\n/../policy.md", "docs/\n//policy.md", "docs/\n/", "docs/\0policy.md", "bad-\udcff.md"):
-            self._assert_invalid("contribution-policy.schema.json", {"discovery": {"authoritative_documents": [name]}})
+    def test_policy_discovery_schema_preserves_unusual_canonical_path_boundaries(
+        self,
+    ) -> None:
+        for name in (
+            "docs/规则\tpolicy\n.md",
+            "docs/\n",
+            " name ",
+            "docs/[policy].md",
+            "docs/*.md",
+        ):
+            self._assert_valid(
+                "contribution-policy.schema.json",
+                {"discovery": {"authoritative_documents": [name]}},
+            )
+        for name in (
+            " ",
+            "docs/\n/../policy.md",
+            "docs/\n//policy.md",
+            "docs/\n/",
+            "docs/\0policy.md",
+            "bad-\udcff.md",
+        ):
+            self._assert_invalid(
+                "contribution-policy.schema.json",
+                {"discovery": {"authoritative_documents": [name]}},
+            )

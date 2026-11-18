@@ -12,12 +12,27 @@ from typing import Any
 from . import __version__
 from .action import check_evidence, github_event_context
 from .brief import build_project_brief, render_project_brief, validate_project_brief
-from .candidate import bind_candidate, render_candidate_menu, select_candidate, skeleton_menu, transition_candidate, validate_candidate_menu
+from .candidate import (
+    bind_candidate,
+    render_candidate_menu,
+    select_candidate,
+    skeleton_menu,
+    transition_candidate,
+    validate_candidate_menu,
+)
 from .contract import render_contract, skeleton_contract, validate_contract
 from .disclosure import render_disclosure
 from .evidence import append_evidence_summary, build_evidence_summary
 from .evals import run_evals
-from .git import GitError, PR_DIFF_FIELDS, capture_bindable_pr_diff, capture_pr_diff, local_state_path, run_verification, verification_plan_digest
+from .git import (
+    GitError,
+    PR_DIFF_FIELDS,
+    capture_bindable_pr_diff,
+    capture_pr_diff,
+    local_state_path,
+    run_verification,
+    verification_plan_digest,
+)
 from .github import (
     GhClient,
     GhError,
@@ -47,13 +62,28 @@ from .packet import (
     validate_packet,
 )
 from .packet_mutation import (
-    approve_contract, bind_contract, bind_policy, confirm_narrative, narrative_confirmation_candidate,
-    record_ai, record_basis, record_narrative, record_ownership, record_review,
-    record_verification_plan, replace_packet,
+    approve_contract,
+    bind_contract,
+    bind_policy,
+    confirm_narrative,
+    narrative_confirmation_candidate,
+    record_ai,
+    record_basis,
+    record_narrative,
+    record_ownership,
+    record_review,
+    record_verification_plan,
+    replace_packet,
 )
 from .policy import inspect_policy
 from .repository import parse_public_record, repository_matches, repository_slugs_match
-from .remote import find_creation_matches, inspect_created_operation, inspect_operation, load_creation_receipt, record_inspection
+from .remote import (
+    find_creation_matches,
+    inspect_created_operation,
+    inspect_operation,
+    load_creation_receipt,
+    record_inspection,
+)
 from .risk import assess_manifest
 from .signal import (
     SIGNAL_AUTHORITY_KINDS,
@@ -65,7 +95,14 @@ from .signal import (
     validate_signal,
 )
 from .understanding import record_understanding, validate_understanding
-from .util import atomic_write_json, atomic_write_text, has_normalized_label, normalize_label, read_json, utc_now
+from .util import (
+    atomic_write_json,
+    atomic_write_text,
+    has_normalized_label,
+    normalize_label,
+    read_json,
+    utc_now,
+)
 from .workflow import workflow_status
 
 
@@ -91,23 +128,31 @@ def _load_current_packet(path: Path) -> dict[str, Any]:
     return require_current_packet(_load_object(path))
 
 
-def _private_packet_output(root: Path, output: Path | None, contribution_id: str) -> Path:
+def _private_packet_output(
+    root: Path, output: Path | None, contribution_id: str
+) -> Path:
     private_root = local_state_path(root, "reviewworthy/v0.3/contributions").resolve()
     target = (output or (private_root / contribution_id / "packet.json")).resolve()
     if not target.is_relative_to(private_root):
-        raise ValueError("Packet 0.3 output must stay in Git-private reviewworthy/v0.3/contributions state")
+        raise ValueError(
+            "Packet 0.3 output must stay in Git-private reviewworthy/v0.3/contributions state"
+        )
     return target
 
 
 def _write_json(path: Path, value: dict[str, Any], force: bool = False) -> None:
     if path.exists() and not force:
-        raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
+        raise ValueError(
+            f"Refusing to overwrite existing file: {path}; use --force to replace it"
+        )
     atomic_write_json(path, value)
 
 
 def _write_text(path: Path, value: str, force: bool = False) -> None:
     if path.exists() and not force:
-        raise ValueError(f"Refusing to overwrite existing file: {path}; use --force to replace it")
+        raise ValueError(
+            f"Refusing to overwrite existing file: {path}; use --force to replace it"
+        )
     atomic_write_text(path, value)
 
 
@@ -116,15 +161,26 @@ def _replace_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def _common_json(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--json", action="store_true", dest="as_json", help="Print machine-readable JSON")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Print machine-readable JSON",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="reviewworthy", description="Contributor-side evidence for reviewworthy AI-assisted contributions")
+    parser = argparse.ArgumentParser(
+        prog="reviewworthy",
+        description="Contributor-side evidence for reviewworthy AI-assisted contributions",
+    )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
 
-    start = commands.add_parser("start", help="Initialize or resume an Issue-backed contribution without remote writes")
+    start = commands.add_parser(
+        "start",
+        help="Initialize or resume an Issue-backed contribution without remote writes",
+    )
     start.add_argument("--root", type=Path, default=Path("."))
     start.add_argument("--contribution-id", required=True)
     start.add_argument("--issue", required=True)
@@ -132,109 +188,190 @@ def _build_parser() -> argparse.ArgumentParser:
     _common_json(start)
 
     for name in ("status", "next"):
-        workflow_command = commands.add_parser(name, help=f"Show derived workflow {name} from a current Packet 0.3")
+        workflow_command = commands.add_parser(
+            name, help=f"Show derived workflow {name} from a current Packet 0.3"
+        )
         workflow_command.add_argument("--packet", type=Path, required=True)
         _common_json(workflow_command)
 
-    policy = commands.add_parser("policy", help="Inspect repository contribution policy")
+    policy = commands.add_parser(
+        "policy", help="Inspect repository contribution policy"
+    )
     policy_commands = policy.add_subparsers(dest="policy_command", required=True)
     policy_inspect = policy_commands.add_parser("inspect")
     policy_inspect.add_argument("path", nargs="?", default=".")
     _common_json(policy_inspect)
 
-    brief = commands.add_parser("brief", help="Create or validate deterministic project-brief facts")
+    brief = commands.add_parser(
+        "brief", help="Create or validate deterministic project-brief facts"
+    )
     brief_commands = brief.add_subparsers(dest="brief_command", required=True)
-    brief_create = brief_commands.add_parser("create", help="Collect repository facts for Skill-owned orientation")
+    brief_create = brief_commands.add_parser(
+        "create", help="Collect repository facts for Skill-owned orientation"
+    )
     brief_create.add_argument("--root", type=Path, default=Path("."))
-    brief_create.add_argument("--output", type=Path, default=Path(".reviewworthy/project-brief.json"))
+    brief_create.add_argument(
+        "--output", type=Path, default=Path(".reviewworthy/project-brief.json")
+    )
     brief_create.add_argument("--focus", action="append", default=[])
     brief_create.add_argument("--force", action="store_true")
     _common_json(brief_create)
     brief_validate = brief_commands.add_parser("validate")
     brief_validate.add_argument("path", type=Path)
-    brief_validate.add_argument("--root", type=Path, help="Also compare the brief with the current repository source manifest")
+    brief_validate.add_argument(
+        "--root",
+        type=Path,
+        help="Also compare the brief with the current repository source manifest",
+    )
     _common_json(brief_validate)
-    brief_render = brief_commands.add_parser("render", help="Render a validated brief as Markdown")
+    brief_render = brief_commands.add_parser(
+        "render", help="Render a validated brief as Markdown"
+    )
     brief_render.add_argument("path", type=Path)
     brief_render.add_argument("--output", type=Path, required=True)
     brief_render.add_argument("--force", action="store_true")
     _common_json(brief_render)
 
-    understanding = commands.add_parser("understanding", help="Record and validate material-bound understanding gates")
-    understanding_commands = understanding.add_subparsers(dest="understanding_command", required=True)
+    understanding = commands.add_parser(
+        "understanding", help="Record and validate material-bound understanding gates"
+    )
+    understanding_commands = understanding.add_subparsers(
+        dest="understanding_command", required=True
+    )
     understanding_validate = understanding_commands.add_parser("validate")
     understanding_validate.add_argument("path", type=Path)
     _common_json(understanding_validate)
     understanding_record = understanding_commands.add_parser("record")
     understanding_record.add_argument("path", type=Path)
-    understanding_record.add_argument("--phase", choices=("orientation", "assessment"), required=True)
-    understanding_record.add_argument("--status", choices=("passed", "failed", "blocked", "unknown", "not_run"), required=True)
+    understanding_record.add_argument(
+        "--phase", choices=("orientation", "assessment"), required=True
+    )
+    understanding_record.add_argument(
+        "--status",
+        choices=("passed", "failed", "blocked", "unknown", "not_run"),
+        required=True,
+    )
     understanding_record.add_argument("--summary", default="")
     understanding_record.add_argument("--topic", action="append", default=[])
     understanding_record.add_argument("--evidence", action="append", default=[])
     understanding_record.add_argument("--question", action="append", default=[])
     understanding_record.add_argument("--answer", action="append", default=[])
-    understanding_record.add_argument("--rubric", action="append", default=[], help="Human evidence as category=text; repeat for each rubric category")
+    understanding_record.add_argument(
+        "--rubric",
+        action="append",
+        default=[],
+        help="Human evidence as category=text; repeat for each rubric category",
+    )
     _common_json(understanding_record)
 
-    risk = commands.add_parser("risk", help="Assess deterministic review-profile signals")
+    risk = commands.add_parser(
+        "risk", help="Assess deterministic review-profile signals"
+    )
     risk_commands = risk.add_subparsers(dest="risk_command", required=True)
     risk_assess = risk_commands.add_parser("assess")
     risk_assess.add_argument("manifest", type=Path)
     _common_json(risk_assess)
 
-    signal = commands.add_parser("signal", help="Record and validate a Contribution Signal")
+    signal = commands.add_parser(
+        "signal", help="Record and validate a Contribution Signal"
+    )
     signal_commands = signal.add_subparsers(dest="signal_command", required=True)
-    signal_init = signal_commands.add_parser("init", help="Create a pending Contribution Signal artifact")
-    signal_init.add_argument("--record-type", choices=sorted(SIGNAL_RECORD_TYPES), default="issue")
-    signal_init.add_argument("--claim-type", choices=sorted(SIGNAL_CLAIM_TYPES), default="bug_report")
+    signal_init = signal_commands.add_parser(
+        "init", help="Create a pending Contribution Signal artifact"
+    )
+    signal_init.add_argument(
+        "--record-type", choices=sorted(SIGNAL_RECORD_TYPES), default="issue"
+    )
+    signal_init.add_argument(
+        "--claim-type", choices=sorted(SIGNAL_CLAIM_TYPES), default="bug_report"
+    )
     signal_init.add_argument("--reference", default="")
     signal_init.add_argument("--evidence", action="append", default=[])
-    signal_init.add_argument("--lifecycle", choices=sorted(SIGNAL_LIFECYCLES), default="pending")
-    signal_init.add_argument("--authority-kind", choices=sorted(SIGNAL_AUTHORITY_KINDS), default="contributor")
+    signal_init.add_argument(
+        "--lifecycle", choices=sorted(SIGNAL_LIFECYCLES), default="pending"
+    )
+    signal_init.add_argument(
+        "--authority-kind",
+        choices=sorted(SIGNAL_AUTHORITY_KINDS),
+        default="contributor",
+    )
     signal_init.add_argument("--authority-actor", default="")
     signal_init.add_argument("--asserted-at", default="")
-    signal_init.add_argument("--output", type=Path, default=Path(".reviewworthy/contribution-signal.json"))
+    signal_init.add_argument(
+        "--output", type=Path, default=Path(".reviewworthy/contribution-signal.json")
+    )
     signal_init.add_argument("--force", action="store_true")
     _common_json(signal_init)
     signal_validate = signal_commands.add_parser("validate")
     signal_validate.add_argument("path", type=Path)
     signal_validate.add_argument("--require-confirmed", action="store_true")
     _common_json(signal_validate)
-    signal_verify = signal_commands.add_parser("verify", help="Verify a public reference read-only, or refresh stored evidence with --record")
+    signal_verify = signal_commands.add_parser(
+        "verify",
+        help="Verify a public reference read-only, or refresh stored evidence with --record",
+    )
     signal_verify.add_argument("path", type=Path)
-    signal_verify.add_argument("--record", action="store_true", help="Persist successful verification or withdraw old evidence on a failed provider check")
+    signal_verify.add_argument(
+        "--record",
+        action="store_true",
+        help="Persist successful verification or withdraw old evidence on a failed provider check",
+    )
     _common_json(signal_verify)
-    signal_publish = signal_commands.add_parser("publish", help="Publish an explicit GitHub Issue signal operation")
-    signal_publish_commands = signal_publish.add_subparsers(dest="signal_publish_command", required=True)
+    signal_publish = signal_commands.add_parser(
+        "publish", help="Publish an explicit GitHub Issue signal operation"
+    )
+    signal_publish_commands = signal_publish.add_subparsers(
+        dest="signal_publish_command", required=True
+    )
     for name in ("plan", "create"):
         command = signal_publish_commands.add_parser(name)
         command.add_argument("path", type=Path)
         command.add_argument("--repo", required=True, help="owner/name")
-        command.add_argument("--repository-id", type=int, required=True, help="Immutable GitHub numeric repository ID")
+        command.add_argument(
+            "--repository-id",
+            type=int,
+            required=True,
+            help="Immutable GitHub numeric repository ID",
+        )
         command.add_argument("--title", required=True)
         command.add_argument("--body-file", type=Path, required=True)
-        command.add_argument("--output", type=Path, help="Updated signal path for create; defaults to the input path")
+        command.add_argument(
+            "--output",
+            type=Path,
+            help="Updated signal path for create; defaults to the input path",
+        )
         command.add_argument("--force", action="store_true")
         if name == "create":
             command.add_argument("--confirm-operation-id", required=True)
-            command.add_argument("--retry-uncertain", action="store_true", help="After manual inspection, accept residual duplicate risk and retry one pending create")
+            command.add_argument(
+                "--retry-uncertain",
+                action="store_true",
+                help="After manual inspection, accept residual duplicate risk and retry one pending create",
+            )
         _common_json(command)
 
-    signal_reconcile = signal_publish_commands.add_parser("reconcile", help="Recover a saved Signal publication")
+    signal_reconcile = signal_publish_commands.add_parser(
+        "reconcile", help="Recover a saved Signal publication"
+    )
     signal_reconcile.add_argument("path", type=Path)
     signal_reconcile.add_argument("--state", type=Path, required=True)
     _common_json(signal_reconcile)
 
     packet = commands.add_parser("packet", help="Validate a Contribution Packet")
     packet_commands = packet.add_subparsers(dest="packet_command", required=True)
-    packet_init = packet_commands.add_parser("init", help="Create an incomplete Contribution Packet skeleton")
+    packet_init = packet_commands.add_parser(
+        "init", help="Create an incomplete Contribution Packet skeleton"
+    )
     packet_init.add_argument("--output", type=Path)
     packet_init.add_argument("--root", type=Path, default=Path("."))
     packet_init.add_argument("--contribution-id", default="contribution-001")
-    packet_init.add_argument("--mode", choices=("issue-backed", "discovery"), default="issue-backed")
+    packet_init.add_argument(
+        "--mode", choices=("issue-backed", "discovery"), default="issue-backed"
+    )
     packet_init.add_argument("--repository", help="github.com owner/name")
-    packet_init.add_argument("--force", action="store_true", help="Overwrite an existing output file")
+    packet_init.add_argument(
+        "--force", action="store_true", help="Overwrite an existing output file"
+    )
     _common_json(packet_init)
     packet_validate = packet_commands.add_parser("validate")
     packet_validate.add_argument("path", type=Path)
@@ -242,73 +379,123 @@ def _build_parser() -> argparse.ArgumentParser:
 
     for section, operation in (("policy", "bind"), ("basis", "record")):
         section_parser = packet_commands.add_parser(section)
-        section_commands = section_parser.add_subparsers(dest="packet_operation", required=True)
+        section_commands = section_parser.add_subparsers(
+            dest="packet_operation", required=True
+        )
         mutation = section_commands.add_parser(operation)
         mutation.add_argument("--packet", type=Path, required=True)
         if section == "policy":
             mutation.add_argument("--root", type=Path, default=Path("."))
         else:
-            mutation.add_argument("--repository", help="github.com owner/name when the basis cannot supply identity")
+            mutation.add_argument(
+                "--repository",
+                help="github.com owner/name when the basis cannot supply identity",
+            )
             basis_source = mutation.add_mutually_exclusive_group(required=True)
             basis_source.add_argument("--issue")
             basis_source.add_argument("--signal", type=Path)
         _common_json(mutation)
 
     packet_contract = packet_commands.add_parser("contract")
-    packet_contract_commands = packet_contract.add_subparsers(dest="packet_operation", required=True)
+    packet_contract_commands = packet_contract.add_subparsers(
+        dest="packet_operation", required=True
+    )
     for operation in ("bind", "approve"):
         mutation = packet_contract_commands.add_parser(operation)
         mutation.add_argument("--packet", type=Path, required=True)
         if operation == "bind":
             mutation.add_argument("--contract", type=Path, required=True)
         else:
-            mutation.add_argument("--human-confirmed", action="store_true", required=True)
+            mutation.add_argument(
+                "--human-confirmed", action="store_true", required=True
+            )
         _common_json(mutation)
 
-    for section, operation in (("review", "record"), ("verification", "plan"), ("ownership", "record"), ("ai", "record")):
+    for section, operation in (
+        ("review", "record"),
+        ("verification", "plan"),
+        ("ownership", "record"),
+        ("ai", "record"),
+    ):
         section_parser = packet_commands.add_parser(section)
-        section_commands = section_parser.add_subparsers(dest="packet_operation", required=True)
+        section_commands = section_parser.add_subparsers(
+            dest="packet_operation", required=True
+        )
         mutation = section_commands.add_parser(operation)
         mutation.add_argument("--packet", type=Path, required=True)
         mutation.add_argument("--input", type=Path, required=True)
         _common_json(mutation)
 
     narrative_parser = packet_commands.add_parser("narrative")
-    narrative_commands = narrative_parser.add_subparsers(dest="packet_operation", required=True)
+    narrative_commands = narrative_parser.add_subparsers(
+        dest="packet_operation", required=True
+    )
     for operation in ("record", "preview", "confirm"):
         mutation = narrative_commands.add_parser(operation)
         mutation.add_argument("--packet", type=Path, required=True)
         if operation == "record":
             mutation.add_argument("--title", required=True)
             mutation.add_argument("--body-file", type=Path, required=True)
-            mutation.add_argument("--human-expression-file", type=Path,
-                                  help="Contributor-authored motivation, trade-offs and risks")
+            mutation.add_argument(
+                "--human-expression-file",
+                type=Path,
+                help="Contributor-authored motivation, trade-offs and risks",
+            )
         elif operation == "confirm":
-            mutation.add_argument("--human-confirmed", action="store_true", required=True)
+            mutation.add_argument(
+                "--human-confirmed", action="store_true", required=True
+            )
         else:
-            mutation.add_argument("--output", type=Path, help="Save exact narrative Body for remote plan/create")
+            mutation.add_argument(
+                "--output",
+                type=Path,
+                help="Save exact narrative Body for remote plan/create",
+            )
             mutation.add_argument("--force", action="store_true")
         _common_json(mutation)
 
-    action = commands.add_parser("action", help="Check the public pull-request Evidence Summary")
+    action = commands.add_parser(
+        "action", help="Check the public pull-request Evidence Summary"
+    )
     action_commands = action.add_subparsers(dest="action_command", required=True)
     action_check = action_commands.add_parser("check")
-    action_check.add_argument("--body-file", type=Path, help="PR Body input for local checks; defaults to the pull_request event Body")
-    action_check.add_argument("--mode", choices=("report", "evidence-enforce"), default="report")
-    action_check.add_argument("--root", type=Path, default=Path("."), help="Git checkout used to recompute the current pull-request Diff")
+    action_check.add_argument(
+        "--body-file",
+        type=Path,
+        help="PR Body input for local checks; defaults to the pull_request event Body",
+    )
+    action_check.add_argument(
+        "--mode", choices=("report", "evidence-enforce"), default="report"
+    )
+    action_check.add_argument(
+        "--root",
+        type=Path,
+        default=Path("."),
+        help="Git checkout used to recompute the current pull-request Diff",
+    )
     _common_json(action_check)
 
-    candidate = commands.add_parser("candidate", help="Collect read-only duplicate-work evidence")
-    candidate_commands = candidate.add_subparsers(dest="candidate_command", required=True)
+    candidate = commands.add_parser(
+        "candidate", help="Collect read-only duplicate-work evidence"
+    )
+    candidate_commands = candidate.add_subparsers(
+        dest="candidate_command", required=True
+    )
     candidate_search = candidate_commands.add_parser("search")
     candidate_search.add_argument("--repo", required=True, help="owner/name")
     candidate_search.add_argument("--query", required=True)
-    candidate_search.add_argument("--kind", choices=("issue", "pull_request", "both"), default="both")
+    candidate_search.add_argument(
+        "--kind", choices=("issue", "pull_request", "both"), default="both"
+    )
     _common_json(candidate_search)
-    candidate_init = candidate_commands.add_parser("init", help="Create an empty evidence-first candidate menu")
+    candidate_init = candidate_commands.add_parser(
+        "init", help="Create an empty evidence-first candidate menu"
+    )
     candidate_init.add_argument("--repository", required=True)
     candidate_init.add_argument("--project-brief", default="")
-    candidate_init.add_argument("--output", type=Path, default=Path(".reviewworthy/candidates.json"))
+    candidate_init.add_argument(
+        "--output", type=Path, default=Path(".reviewworthy/candidates.json")
+    )
     candidate_init.add_argument("--force", action="store_true")
     _common_json(candidate_init)
     candidate_validate = candidate_commands.add_parser("validate")
@@ -319,30 +506,40 @@ def _build_parser() -> argparse.ArgumentParser:
     candidate_render.add_argument("--output", type=Path, required=True)
     candidate_render.add_argument("--force", action="store_true")
     _common_json(candidate_render)
-    candidate_select = candidate_commands.add_parser("select", help="Record an explicit candidate selection")
+    candidate_select = candidate_commands.add_parser(
+        "select", help="Record an explicit candidate selection"
+    )
     candidate_select.add_argument("path", type=Path)
     candidate_select.add_argument("--candidate-id", required=True)
     candidate_select.add_argument("--confirm", action="store_true")
     candidate_select.add_argument("--output", type=Path)
     candidate_select.add_argument("--force", action="store_true")
     _common_json(candidate_select)
-    candidate_bind = candidate_commands.add_parser("bind", help="Bind a confirmed candidate basis to a Contribution Packet")
+    candidate_bind = candidate_commands.add_parser(
+        "bind", help="Bind a confirmed candidate basis to a Contribution Packet"
+    )
     candidate_bind.add_argument("--menu", type=Path, required=True)
     candidate_bind.add_argument("--packet", type=Path, required=True)
     candidate_bind.add_argument("--candidate-id")
     _common_json(candidate_bind)
-    candidate_transition = candidate_commands.add_parser("transition", help="Record a human-confirmed recommendation transition")
+    candidate_transition = candidate_commands.add_parser(
+        "transition", help="Record a human-confirmed recommendation transition"
+    )
     candidate_transition.add_argument("--packet", type=Path, required=True)
     candidate_transition.add_argument("--to", choices=("plan_directly",), required=True)
     candidate_transition.add_argument("--reason", required=True)
     candidate_transition.add_argument("--confirm", action="store_true")
     _common_json(candidate_transition)
 
-    contract = commands.add_parser("contract", help="Create or validate a Contribution Contract")
+    contract = commands.add_parser(
+        "contract", help="Create or validate a Contribution Contract"
+    )
     contract_commands = contract.add_subparsers(dest="contract_command", required=True)
     contract_init = contract_commands.add_parser("init")
     contract_init.add_argument("--contribution-id", default="contribution-001")
-    contract_init.add_argument("--output", type=Path, default=Path(".reviewworthy/contribution-contract.json"))
+    contract_init.add_argument(
+        "--output", type=Path, default=Path(".reviewworthy/contribution-contract.json")
+    )
     contract_init.add_argument("--force", action="store_true")
     _common_json(contract_init)
     contract_validate = contract_commands.add_parser("validate")
@@ -354,8 +551,12 @@ def _build_parser() -> argparse.ArgumentParser:
     contract_render.add_argument("--force", action="store_true")
     _common_json(contract_render)
 
-    disclosure = commands.add_parser("disclosure", help="Render a policy-aware AI-assistance disclosure")
-    disclosure_commands = disclosure.add_subparsers(dest="disclosure_command", required=True)
+    disclosure = commands.add_parser(
+        "disclosure", help="Render a policy-aware AI-assistance disclosure"
+    )
+    disclosure_commands = disclosure.add_subparsers(
+        dest="disclosure_command", required=True
+    )
     disclosure_render = disclosure_commands.add_parser("render")
     disclosure_render.add_argument("--packet", type=Path, required=True)
     disclosure_render.add_argument("--location")
@@ -363,46 +564,68 @@ def _build_parser() -> argparse.ArgumentParser:
     disclosure_render.add_argument("--force", action="store_true")
     _common_json(disclosure_render)
 
-    evaluations = commands.add_parser("eval", help="Run standard-library fixture evaluations")
+    evaluations = commands.add_parser(
+        "eval", help="Run standard-library fixture evaluations"
+    )
     evaluation_commands = evaluations.add_subparsers(dest="eval_command", required=True)
     eval_run = evaluation_commands.add_parser("run")
     eval_run.add_argument("path", type=Path, nargs="?", default=Path("evals/fixtures"))
     _common_json(eval_run)
 
-    pilot = commands.add_parser("pilot", help="Offline pilot calibration; never calls a live provider")
+    pilot = commands.add_parser(
+        "pilot", help="Offline pilot calibration; never calls a live provider"
+    )
     pilot_commands = pilot.add_subparsers(dest="pilot_command", required=True)
     pilot_run = pilot_commands.add_parser("run")
-    pilot_run.add_argument("--root", type=Path, default=Path("."), help="Trusted evaluator repository")
+    pilot_run.add_argument(
+        "--root", type=Path, default=Path("."), help="Trusted evaluator repository"
+    )
     pilot_run.add_argument("--trace", type=Path, required=True)
     pilot_run.add_argument("--simulate", action="store_true")
-    pilot_run.add_argument("--branch", choices=("canonical", "timeout"), default="canonical")
-    pilot_run.add_argument("--observer-log", type=Path, help="Evaluator-owned external action log; never candidate output")
+    pilot_run.add_argument(
+        "--branch", choices=("canonical", "timeout"), default="canonical"
+    )
+    pilot_run.add_argument(
+        "--observer-log",
+        type=Path,
+        help="Evaluator-owned external action log; never candidate output",
+    )
     pilot_run.add_argument("--log-output", type=Path)
     pilot_run.add_argument("--output", type=Path)
     _common_json(pilot_run)
     pilot_export = pilot_commands.add_parser("export")
     pilot_export.add_argument("--root", type=Path, default=Path("."))
-    pilot_export.add_argument("--case", choices=("RW-P01", "RW-P02", "RW-P03", "RW-P04"), required=True)
+    pilot_export.add_argument(
+        "--case", choices=("RW-P01", "RW-P02", "RW-P03", "RW-P04"), required=True
+    )
     pilot_export.add_argument("--output", type=Path, required=True)
     _common_json(pilot_export)
 
-    diff = commands.add_parser("diff", help="Capture or bind deterministic Git Diff evidence")
+    diff = commands.add_parser(
+        "diff", help="Capture or bind deterministic Git Diff evidence"
+    )
     diff_commands = diff.add_subparsers(dest="diff_command", required=True)
     diff_capture = diff_commands.add_parser("capture")
     diff_capture.add_argument("--root", type=Path, default=Path("."))
     diff_capture.add_argument("--base", required=True)
     diff_capture.add_argument("--head", required=True)
-    diff_capture.add_argument("--output", type=Path, default=Path(".reviewworthy/diff.json"))
+    diff_capture.add_argument(
+        "--output", type=Path, default=Path(".reviewworthy/diff.json")
+    )
     diff_capture.add_argument("--force", action="store_true")
     _common_json(diff_capture)
-    diff_bind = diff_commands.add_parser("bind", help="Bind the current clean merge-base Diff to a Contribution Packet")
+    diff_bind = diff_commands.add_parser(
+        "bind", help="Bind the current clean merge-base Diff to a Contribution Packet"
+    )
     diff_bind.add_argument("--root", type=Path, default=Path("."))
     diff_bind.add_argument("--packet", type=Path, required=True)
     diff_bind.add_argument("--base", required=True)
     diff_bind.add_argument("--head", default="HEAD")
     _common_json(diff_bind)
 
-    verify = commands.add_parser("verify", help="Execute one check from the Packet verification plan")
+    verify = commands.add_parser(
+        "verify", help="Execute one check from the Packet verification plan"
+    )
     verify_commands = verify.add_subparsers(dest="verify_command", required=True)
     verify_run = verify_commands.add_parser("run")
     verify_run.add_argument("--root", type=Path, default=Path("."))
@@ -410,14 +633,22 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_run.add_argument("--check-id", required=True)
     _common_json(verify_run)
 
-    issue = commands.add_parser("issue", help="Verify a supporting GitHub Issue reference")
+    issue = commands.add_parser(
+        "issue", help="Verify a supporting GitHub Issue reference"
+    )
     issue_commands = issue.add_subparsers(dest="issue_command", required=True)
     issue_verify = issue_commands.add_parser("verify")
     issue_verify.add_argument("--packet", type=Path, required=True)
-    issue_verify.add_argument("--record", action="store_true", help="Refresh Packet basis verification, withdrawing old evidence on failed revalidation")
+    issue_verify.add_argument(
+        "--record",
+        action="store_true",
+        help="Refresh Packet basis verification, withdrawing old evidence on failed revalidation",
+    )
     _common_json(issue_verify)
 
-    remote = commands.add_parser("remote", help="Plan or explicitly execute a GitHub write")
+    remote = commands.add_parser(
+        "remote", help="Plan or explicitly execute a GitHub write"
+    )
     remote_commands = remote.add_subparsers(dest="remote_command", required=True)
     for name in ("plan", "create"):
         command = remote_commands.add_parser(name)
@@ -428,45 +659,101 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--body-file", type=Path, required=True)
         command.add_argument("--base", default="main")
         command.add_argument("--head")
-        command.add_argument("--root", type=Path, default=Path("."), help="Git worktree used to resolve base/head SHAs")
+        command.add_argument(
+            "--root",
+            type=Path,
+            default=Path("."),
+            help="Git worktree used to resolve base/head SHAs",
+        )
         if name == "create":
             command.add_argument("--confirm-operation-id", required=True)
-            command.add_argument("--retry-uncertain", action="store_true", help="After manual inspection, accept residual duplicate risk and retry one pending create")
+            command.add_argument(
+                "--retry-uncertain",
+                action="store_true",
+                help="After manual inspection, accept residual duplicate risk and retry one pending create",
+            )
         _common_json(command)
-    reconcile = remote_commands.add_parser("reconcile", help="Inspect and repair one saved current operation")
+    reconcile = remote_commands.add_parser(
+        "reconcile", help="Inspect and repair one saved current operation"
+    )
     reconcile.add_argument("--state", type=Path, required=True)
     reconcile.add_argument("--confirm-operation-id")
     _common_json(reconcile)
     return parser
 
 
-def _remote_operation(args: argparse.Namespace) -> tuple[dict[str, Any], Any, dict[str, Any] | None]:
+def _remote_operation(
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], Any, dict[str, Any] | None]:
     packet = _load_current_packet(args.packet)
     if not repository_matches(packet.get("repository"), args.repo):
-        raise ValueError("Remote target repository must exactly match packet.repository")
+        raise ValueError(
+            "Remote target repository must exactly match packet.repository"
+        )
     repository = packet.get("repository")
-    repository_id = repository.get("repository_id") if isinstance(repository, dict) else None
-    if not isinstance(repository_id, int) or isinstance(repository_id, bool) or repository_id <= 0:
-        raise ValueError("Remote operations require packet.repository.repository_id to be a positive immutable GitHub ID")
+    repository_id = (
+        repository.get("repository_id") if isinstance(repository, dict) else None
+    )
+    if (
+        not isinstance(repository_id, int)
+        or isinstance(repository_id, bool)
+        or repository_id <= 0
+    ):
+        raise ValueError(
+            "Remote operations require packet.repository.repository_id to be a positive immutable GitHub ID"
+        )
     body = args.body_file.read_text(encoding="utf-8")
     narrative = packet.get("narrative", {})
     if not isinstance(narrative, dict) or args.title != narrative.get("title"):
-        raise ValueError("Remote title must exactly match the approved packet narrative title")
+        raise ValueError(
+            "Remote title must exactly match the approved packet narrative title"
+        )
     if body != narrative.get("body"):
-        raise ValueError("Remote Body must exactly match the approved packet narrative Body")
-    actual_diff = capture_pr_diff(args.root, args.base, args.head) if args.kind == "pull_request" else None
-    operation = build_operation(packet, args.repo, args.kind, args.title, body, args.base, args.head, actual_diff)
+        raise ValueError(
+            "Remote Body must exactly match the approved packet narrative Body"
+        )
+    actual_diff = (
+        capture_pr_diff(args.root, args.base, args.head)
+        if args.kind == "pull_request"
+        else None
+    )
+    operation = build_operation(
+        packet,
+        args.repo,
+        args.kind,
+        args.title,
+        body,
+        args.base,
+        args.head,
+        actual_diff,
+    )
     return packet, operation, actual_diff
 
 
-def _issue_revalidation_errors(packet: dict[str, Any], remote: dict[str, Any]) -> list[dict[str, str]]:
+def _issue_revalidation_errors(
+    packet: dict[str, Any], remote: dict[str, Any]
+) -> list[dict[str, str]]:
     reference = issue_reference(packet)
     repository = packet.get("repository", {})
     errors: list[dict[str, str]] = []
     if not reference:
-        return [{"code": "issue_reference_required", "message": "A pull request must have a canonical supporting Issue URL.", "path": "basis.references"}]
+        return [
+            {
+                "code": "issue_reference_required",
+                "message": "A pull request must have a canonical supporting Issue URL.",
+                "path": "basis.references",
+            }
+        ]
     if not remote.get("verified"):
-        errors.append({"code": "issue_revalidation_failed", "message": str(remote.get("error", "The supporting Issue could not be verified.")), "path": "basis.verification"})
+        errors.append(
+            {
+                "code": "issue_revalidation_failed",
+                "message": str(
+                    remote.get("error", "The supporting Issue could not be verified.")
+                ),
+                "path": "basis.verification",
+            }
+        )
         return errors
     parsed = parse_public_record(reference)
     if (
@@ -478,45 +765,109 @@ def _issue_revalidation_errors(packet: dict[str, Any], remote: dict[str, Any]) -
         or isinstance(remote.get("number"), bool)
         or remote.get("number") != parsed.get("number")
         or remote.get("visibility") != "public"
-        or not repository_slugs_match(remote.get("repository"), f"{parsed['owner']}/{parsed['name']}")
+        or not repository_slugs_match(
+            remote.get("repository"), f"{parsed['owner']}/{parsed['name']}"
+        )
     ):
-        errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match the Packet Issue identity.", "path": "basis.verification"})
+        errors.append(
+            {
+                "code": "issue_revalidation_repository_mismatch",
+                "message": "The live Issue verification does not match the Packet Issue identity.",
+                "path": "basis.verification",
+            }
+        )
     if isinstance(repository, dict):
         expected_repository = f"{repository.get('owner')}/{repository.get('name')}"
         if not repository_slugs_match(remote.get("repository"), expected_repository):
-            errors.append({"code": "issue_revalidation_repository_mismatch", "message": "The live Issue verification does not match packet.repository.", "path": "repository"})
+            errors.append(
+                {
+                    "code": "issue_revalidation_repository_mismatch",
+                    "message": "The live Issue verification does not match packet.repository.",
+                    "path": "repository",
+                }
+            )
         if repository.get("repository_id") is not None and (
             not isinstance(remote.get("repository_id"), int)
             or isinstance(remote.get("repository_id"), bool)
             or remote.get("repository_id") != repository.get("repository_id")
         ):
-            errors.append({"code": "issue_revalidation_identity_mismatch", "message": "The live Issue verification has a different repository ID.", "path": "repository.repository_id"})
+            errors.append(
+                {
+                    "code": "issue_revalidation_identity_mismatch",
+                    "message": "The live Issue verification has a different repository ID.",
+                    "path": "repository.repository_id",
+                }
+            )
     state_reason = normalize_label(remote.get("state_reason", ""))
     if state_reason == "not planned":
-        errors.append({"code": "issue_not_actionable", "message": "The supporting Issue is closed as not planned.", "path": "basis.verification.state_reason"})
+        errors.append(
+            {
+                "code": "issue_not_actionable",
+                "message": "The supporting Issue is closed as not planned.",
+                "path": "basis.verification.state_reason",
+            }
+        )
     if has_normalized_label(remote.get("labels"), "duplicate"):
-        errors.append({"code": "issue_duplicate", "message": "The supporting Issue has the duplicate label.", "path": "basis.verification.labels"})
-    if not isinstance(remote.get("labels"), list) or not all(isinstance(label, str) for label in remote.get("labels", [])):
-        policy = packet.get("policy", {})
-        claims = policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
-        ai_assistance = packet.get("ai_assistance", {})
-        if isinstance(claims, dict) and claims.get("good_first_issue_ai_allowed") is False and isinstance(ai_assistance, dict) and ai_assistance.get("used") is not False:
-            errors.append({
-                "code": "good_first_issue_label_verification_required",
-                "message": "Live good-first-issue policy enforcement requires a complete label list.",
+        errors.append(
+            {
+                "code": "issue_duplicate",
+                "message": "The supporting Issue has the duplicate label.",
                 "path": "basis.verification.labels",
-            })
-    errors.extend(good_first_issue_policy_errors(packet, remote.get("labels"), path="basis.verification.labels"))
+            }
+        )
+    if not isinstance(remote.get("labels"), list) or not all(
+        isinstance(label, str) for label in remote.get("labels", [])
+    ):
+        policy = packet.get("policy", {})
+        claims = (
+            policy.get("authoritative_claims", {}) if isinstance(policy, dict) else {}
+        )
+        ai_assistance = packet.get("ai_assistance", {})
+        if (
+            isinstance(claims, dict)
+            and claims.get("good_first_issue_ai_allowed") is False
+            and isinstance(ai_assistance, dict)
+            and ai_assistance.get("used") is not False
+        ):
+            errors.append(
+                {
+                    "code": "good_first_issue_label_verification_required",
+                    "message": "Live good-first-issue policy enforcement requires a complete label list.",
+                    "path": "basis.verification.labels",
+                }
+            )
+    errors.extend(
+        good_first_issue_policy_errors(
+            packet, remote.get("labels"), path="basis.verification.labels"
+        )
+    )
     return errors
 
 
-def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool) -> dict[str, Any]:
+def _verify_and_record_issue(
+    packet: dict[str, Any], path: Path, *, record: bool
+) -> dict[str, Any]:
     reference = issue_reference(packet)
     if not reference:
-        return {"valid": False, "verification": "not_run", "errors": [{"code": "issue_reference_required", "message": "Packet needs a canonical GitHub Issue URL.", "path": "basis.references"}]}
+        return {
+            "valid": False,
+            "verification": "not_run",
+            "errors": [
+                {
+                    "code": "issue_reference_required",
+                    "message": "Packet needs a canonical GitHub Issue URL.",
+                    "path": "basis.references",
+                }
+            ],
+        }
     remote = GhClient().verify_public_reference(reference)
     errors = _issue_revalidation_errors(packet, remote)
-    result: dict[str, Any] = {"valid": not errors, "verification": "github_public_reference", "remote": remote, "errors": errors}
+    result: dict[str, Any] = {
+        "valid": not errors,
+        "verification": "github_public_reference",
+        "remote": remote,
+        "errors": errors,
+    }
     if record and errors:
         updated = deepcopy(packet)
         basis = updated["basis"]
@@ -535,15 +886,32 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
             "reference": reference,
             "verified_at": utc_now(),
         }
-        for key in ("host", "repository", "repository_id", "record_type", "number", "url", "visibility", "state", "state_reason", "locked", "labels"):
+        for key in (
+            "host",
+            "repository",
+            "repository_id",
+            "record_type",
+            "number",
+            "url",
+            "visibility",
+            "state",
+            "state_reason",
+            "locked",
+            "labels",
+        ):
             if remote.get(key) is not None:
                 verification[key] = remote[key]
         if basis.get("kind") == "issue":
             basis["verification"] = verification
-        elif isinstance(basis.get("signal"), dict) and basis["signal"].get("record_type") == "issue":
+        elif (
+            isinstance(basis.get("signal"), dict)
+            and basis["signal"].get("record_type") == "issue"
+        ):
             basis["signal"]["verification"] = verification
         else:
-            raise ValueError("Packet basis does not contain an Issue verification target")
+            raise ValueError(
+                "Packet basis does not contain an Issue verification target"
+            )
         repository = packet.get("repository")
         if isinstance(repository, dict) and repository.get("repository_id") is None:
             repository["repository_id"] = remote.get("repository_id")
@@ -554,7 +922,11 @@ def _verify_and_record_issue(packet: dict[str, Any], path: Path, *, record: bool
 
 def _canonical_remote_url(value: Any, expected_type: str, repo: str) -> str:
     parsed = parse_public_record(value)
-    if not parsed or parsed.get("record_type") != expected_type or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", repo):
+    if (
+        not parsed
+        or parsed.get("record_type") != expected_type
+        or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", repo)
+    ):
         raise GhError(f"GitHub returned a non-canonical {expected_type} URL for {repo}")
     return str(parsed["url"])
 
@@ -573,7 +945,14 @@ def _remote_pr_head_reconciliation(
     return None, remote_head_sha
 
 
-def _link_pull_request(client: GhClient, operation: Any, receipt_path: Path, pr_url: str, *, allow_write: bool = True) -> tuple[str, str]:
+def _link_pull_request(
+    client: GhClient,
+    operation: Any,
+    receipt_path: Path,
+    pr_url: str,
+    *,
+    allow_write: bool = True,
+) -> tuple[str, str]:
     """Reconcile exactly one Issue note after a PR has been created."""
 
     if not operation.issue_url:
@@ -619,20 +998,35 @@ def _reconcile_saved_operation(args: argparse.Namespace) -> int:
     with operation_lock(args.state):
         operation, record = load_operation_state(args.state)
         if operation.purpose != "contribution":
-            raise ValueError("Use signal publish reconcile for a signal publication operation")
-        if args.confirm_operation_id is not None and args.confirm_operation_id != operation.operation_id:
-            raise ValueError("Confirmation operation ID does not match the original saved operation")
+            raise ValueError(
+                "Use signal publish reconcile for a signal publication operation"
+            )
+        if (
+            args.confirm_operation_id is not None
+            and args.confirm_operation_id != operation.operation_id
+        ):
+            raise ValueError(
+                "Confirmation operation ID does not match the original saved operation"
+            )
         client = GhClient()
         result = inspect_operation(client, operation, record)
         record_inspection(args.state, record, result)
-        result.update({"operation_id": operation.operation_id, "receipt_path": str(args.state)})
+        result.update(
+            {"operation_id": operation.operation_id, "receipt_path": str(args.state)}
+        )
         if result["outcome"] == "already_exists":
             remote = result["remote"]
             if operation.kind == "issue":
                 save_operation_receipt(args.state, operation, remote)
             else:
                 save_operation_pr_created(args.state, operation, remote)
-                status, reason = _link_pull_request(client, operation, args.state, remote, allow_write=args.confirm_operation_id == operation.operation_id)
+                status, reason = _link_pull_request(
+                    client,
+                    operation,
+                    args.state,
+                    remote,
+                    allow_write=args.confirm_operation_id == operation.operation_id,
+                )
                 result.update({"status": status, "link_source": reason})
                 if status != "linked":
                     result.update({"outcome": "needs_reconciliation", "reason": reason})
@@ -647,59 +1041,142 @@ def _reconcile_signal_publication(args: argparse.Namespace) -> int:
             raise ValueError("State is not a Signal publication operation")
         recovery = record.get("signal_recovery")
         if recovery is not None:
-            if not isinstance(recovery, dict) or recovery.get("target") != str(args.path.resolve()):
-                raise ValueError("Signal recovery target differs from the original publication target")
+            if not isinstance(recovery, dict) or recovery.get("target") != str(
+                args.path.resolve()
+            ):
+                raise ValueError(
+                    "Signal recovery target differs from the original publication target"
+                )
             original = require_current_signal(recovery.get("input"))
             body = recovery.get("body")
-            if not isinstance(body, str) or body.rstrip() + "\n\n" + operation.marker != operation.body:
-                raise ValueError("Signal recovery Body differs from the stored operation")
-            rebuilt = build_signal_operation(original, operation.repo, operation.title, body, operation.repository_id)
+            if (
+                not isinstance(body, str)
+                or body.rstrip() + "\n\n" + operation.marker != operation.body
+            ):
+                raise ValueError(
+                    "Signal recovery Body differs from the stored operation"
+                )
+            rebuilt = build_signal_operation(
+                original, operation.repo, operation.title, body, operation.repository_id
+            )
             if rebuilt != operation:
-                raise ValueError("Signal recovery input differs from the original operation")
+                raise ValueError(
+                    "Signal recovery input differs from the original operation"
+                )
         else:
             original = require_current_signal(_load_object(args.path))
             body = operation.body.removesuffix("\n\n" + operation.marker)
         target_existed = args.path.exists()
-        current = require_current_signal(_load_object(args.path)) if target_existed else original
-        subject = current.get("publication_subject_id") or f"{current.get('record_type')}:{current.get('claim_type')}:{current.get('reference')}"
+        current = (
+            require_current_signal(_load_object(args.path))
+            if target_existed
+            else original
+        )
+        subject = (
+            current.get("publication_subject_id")
+            or f"{current.get('record_type')}:{current.get('claim_type')}:{current.get('reference')}"
+        )
         if subject != operation.subject_id or current.get("record_type") != "issue":
             raise ValueError("Signal subject differs from the original publication")
-        if current.get("lifecycle") != "pending" or (operation.subject_id.startswith("issue:") and not operation.subject_id.startswith(f"issue:{current.get('claim_type')}:")):
-            raise ValueError("Signal lifecycle or claim differs from the original pending publication")
+        if current.get("lifecycle") != "pending" or (
+            operation.subject_id.startswith("issue:")
+            and not operation.subject_id.startswith(
+                f"issue:{current.get('claim_type')}:"
+            )
+        ):
+            raise ValueError(
+                "Signal lifecycle or claim differs from the original pending publication"
+            )
         expected = dict(original)
         remote = record.get("remote") or record.get("known_remote")
-        publication = {"operation_id": operation.operation_id, "repo": operation.repo, "title": operation.title, "body": body}
+        publication = {
+            "operation_id": operation.operation_id,
+            "repo": operation.repo,
+            "title": operation.title,
+            "body": body,
+        }
         if current.get("publication") is not None:
             actual = current["publication"]
-            if not isinstance(actual, dict) or any(actual.get(key) != publication[key] for key in ("operation_id", "repo", "title")) or not isinstance(actual.get("body"), str) or actual["body"].rstrip() != body.rstrip():
-                raise ValueError("Signal publication fields differ from the original operation")
+            if (
+                not isinstance(actual, dict)
+                or any(
+                    actual.get(key) != publication[key]
+                    for key in ("operation_id", "repo", "title")
+                )
+                or not isinstance(actual.get("body"), str)
+                or actual["body"].rstrip() != body.rstrip()
+            ):
+                raise ValueError(
+                    "Signal publication fields differ from the original operation"
+                )
             if recovery is None:
                 body = actual["body"]
-                rebuilt = build_signal_operation(current, operation.repo, operation.title, body, operation.repository_id)
+                rebuilt = build_signal_operation(
+                    current,
+                    operation.repo,
+                    operation.title,
+                    body,
+                    operation.repository_id,
+                )
                 if rebuilt != operation:
-                    raise ValueError("Retained Signal publication inputs differ from the original operation")
+                    raise ValueError(
+                        "Retained Signal publication inputs differ from the original operation"
+                    )
                 publication["body"] = body
             if remote and current.get("reference") != remote:
-                raise ValueError("Signal reference differs from the original publication URL")
-            expected.update({"reference": current["reference"], "publication_subject_id": operation.subject_id, "publication": actual})
+                raise ValueError(
+                    "Signal reference differs from the original publication URL"
+                )
+            expected.update(
+                {
+                    "reference": current["reference"],
+                    "publication_subject_id": operation.subject_id,
+                    "publication": actual,
+                }
+            )
         if recovery is not None and current != expected:
-            raise ValueError("Signal target was materially edited after publication planning; preserve it and inspect manually")
-        errors = [error for error in validate_signal(current)["errors"] if error["code"] != "missing_signal_reference"]
+            raise ValueError(
+                "Signal target was materially edited after publication planning; preserve it and inspect manually"
+            )
+        errors = [
+            error
+            for error in validate_signal(current)["errors"]
+            if error["code"] != "missing_signal_reference"
+        ]
         if errors:
             raise ValueError(f"Signal target is invalid: {errors}")
         client = GhClient()
         result = inspect_operation(client, operation, record)
         record_inspection(args.state, record, result)
-        result.update({"operation_id": operation.operation_id, "receipt_path": str(args.state)})
+        result.update(
+            {"operation_id": operation.operation_id, "receipt_path": str(args.state)}
+        )
         if result["outcome"] == "already_exists":
             remote = result["remote"]
-            if current.get("publication") is not None and current.get("reference") != remote:
-                raise ValueError("Published Signal reference differs from the recovered object")
-            save_operation_receipt(args.state, operation, remote, signal_recovery=recovery)
+            if (
+                current.get("publication") is not None
+                and current.get("reference") != remote
+            ):
+                raise ValueError(
+                    "Published Signal reference differs from the recovered object"
+                )
+            save_operation_receipt(
+                args.state, operation, remote, signal_recovery=recovery
+            )
             updated = dict(current)
-            updated.update({"reference": remote, "publication_subject_id": operation.subject_id, "publication": publication})
-            if args.path.exists() != target_existed or (target_existed and _load_object(args.path) != current):
-                raise ValueError("Signal target changed during remote inspection; preserve the new content and inspect manually before recovery")
+            updated.update(
+                {
+                    "reference": remote,
+                    "publication_subject_id": operation.subject_id,
+                    "publication": publication,
+                }
+            )
+            if args.path.exists() != target_existed or (
+                target_existed and _load_object(args.path) != current
+            ):
+                raise ValueError(
+                    "Signal target changed during remote inspection; preserve the new content and inspect manually before recovery"
+                )
             _replace_json(args.path, updated)
             result.update({"signal": str(args.path), "published": True})
         _print(result, args.as_json)
@@ -710,18 +1187,27 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         if args.command == "start":
-            result = prepare_start(args.root, args.contribution_id, args.issue, args.focus)
+            result = prepare_start(
+                args.root, args.contribution_id, args.issue, args.focus
+            )
             path = Path(result["packet"])
             packet = _load_current_packet(path)
             basis = packet["basis"]
-            issue_record = basis if basis.get("kind") == "issue" else basis.get("signal", {})
+            issue_record = (
+                basis if basis.get("kind") == "issue" else basis.get("signal", {})
+            )
             if issue_record.get("verification", {}).get("status") != "verified":
                 try:
-                    result["issue_verification"] = _verify_and_record_issue(packet, path, record=True)
+                    result["issue_verification"] = _verify_and_record_issue(
+                        packet, path, record=True
+                    )
                 except GhError as exc:
                     result["issue_verification"] = {"valid": False, "error": str(exc)}
             else:
-                result["issue_verification"] = {"valid": True, "source": "existing_packet"}
+                result["issue_verification"] = {
+                    "valid": True,
+                    "source": "existing_packet",
+                }
             result["status"] = workflow_status(_load_current_packet(path), path)
             _print(result, args.as_json)
             return 0 if result["issue_verification"]["valid"] else 1
@@ -729,7 +1215,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command in {"status", "next"}:
             result = workflow_status(_load_current_packet(args.packet), args.packet)
             if args.command == "next":
-                result = {**result, "blocking": result["blocking"], "next": result["next"][:1]}
+                result = {
+                    **result,
+                    "blocking": result["blocking"],
+                    "next": result["next"][:1],
+                }
             _print(result, args.as_json)
             return 0
 
@@ -742,7 +1232,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.brief_command == "create":
                 brief_value = build_project_brief(args.root, args.focus)
                 _write_json(args.output, brief_value, args.force)
-                _print({"created": str(args.output), "source_manifest_sha256": brief_value["source_manifest_sha256"]}, args.as_json)
+                _print(
+                    {
+                        "created": str(args.output),
+                        "source_manifest_sha256": brief_value["source_manifest_sha256"],
+                    },
+                    args.as_json,
+                )
                 return 0
             brief_value = _load_object(args.path)
             if args.brief_command == "validate":
@@ -750,14 +1246,28 @@ def main(argv: list[str] | None = None) -> int:
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
             _write_text(args.output, render_project_brief(brief_value), args.force)
-            _print({"rendered": str(args.output), "source_manifest_sha256": brief_value.get("source_manifest_sha256")}, args.as_json)
+            _print(
+                {
+                    "rendered": str(args.output),
+                    "source_manifest_sha256": brief_value.get("source_manifest_sha256"),
+                },
+                args.as_json,
+            )
             return 0
 
         if args.command == "understanding":
             packet = _load_current_packet(args.path)
             if args.understanding_command == "validate":
-                depth = packet.get("review", {}).get("profile", "standard") if isinstance(packet.get("review"), dict) else "standard"
-                result = validate_understanding(packet.get("understanding"), semantic_snapshot(packet), review_profile=depth)
+                depth = (
+                    packet.get("review", {}).get("profile", "standard")
+                    if isinstance(packet.get("review"), dict)
+                    else "standard"
+                )
+                result = validate_understanding(
+                    packet.get("understanding"),
+                    semantic_snapshot(packet),
+                    review_profile=depth,
+                )
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
             snapshot = semantic_snapshot(packet)
@@ -767,7 +1277,9 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("--rubric values must use category=text")
                 category, evidence = item.split("=", 1)
                 if not category.strip() or not evidence.strip():
-                    raise ValueError("--rubric values need a non-empty category and evidence")
+                    raise ValueError(
+                        "--rubric values need a non-empty category and evidence"
+                    )
                 rubric[category.strip()] = evidence.strip()
             updated = record_understanding(
                 packet,
@@ -783,15 +1295,32 @@ def main(argv: list[str] | None = None) -> int:
             )
             results = updated.get("results", [])
             for result_record in results if isinstance(results, list) else []:
-                if not isinstance(result_record, dict) or result_record.get("node") != "understanding":
+                if (
+                    not isinstance(result_record, dict)
+                    or result_record.get("node") != "understanding"
+                ):
                     continue
-                if args.phase == "assessment" or args.status in {"failed", "blocked", "unknown"}:
+                if args.phase == "assessment" or args.status in {
+                    "failed",
+                    "blocked",
+                    "unknown",
+                }:
                     result_record["status"] = args.status
-                    result_record["evidence"] = list(args.evidence) or [f"{args.phase}:{args.status}"]
+                    result_record["evidence"] = list(args.evidence) or [
+                        f"{args.phase}:{args.status}"
+                    ]
                     result_record.setdefault("details", {})["phase"] = args.phase
             updated = replace_packet(args.path, packet, updated)
-            depth = updated.get("review", {}).get("profile", "standard") if isinstance(updated.get("review"), dict) else "standard"
-            result = validate_understanding(updated.get("understanding"), semantic_snapshot(updated), review_profile=depth)
+            depth = (
+                updated.get("review", {}).get("profile", "standard")
+                if isinstance(updated.get("review"), dict)
+                else "standard"
+            )
+            result = validate_understanding(
+                updated.get("understanding"),
+                semantic_snapshot(updated),
+                review_profile=depth,
+            )
             result["updated"] = str(args.path)
             _print(result, args.as_json)
             return 0 if result["valid"] else 1
@@ -803,7 +1332,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "signal":
             if args.signal_command == "init":
-                signal_value = skeleton_signal(args.record_type, args.claim_type, args.reference)
+                signal_value = skeleton_signal(
+                    args.record_type, args.claim_type, args.reference
+                )
                 signal_value.update(
                     {
                         "evidence": args.evidence,
@@ -828,7 +1359,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if args.signal_command == "validate":
                 signal_value = _load_object(args.path)
-                result = validate_signal(signal_value, require_confirmed=args.require_confirmed)
+                result = validate_signal(
+                    signal_value, require_confirmed=args.require_confirmed
+                )
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
             if args.signal_command == "verify":
@@ -836,19 +1369,44 @@ def main(argv: list[str] | None = None) -> int:
                 local = validate_signal(signal_value)
                 structural_errors = list(local["errors"])
                 if structural_errors:
-                    result = {"valid": False, "verification": "not_run", "errors": structural_errors}
+                    result = {
+                        "valid": False,
+                        "verification": "not_run",
+                        "errors": structural_errors,
+                    }
                 elif signal_value.get("record_type") == "local_evidence":
-                    unavailable = signal_value.get("lifecycle") in {"rejected", "expired"}
+                    unavailable = signal_value.get("lifecycle") in {
+                        "rejected",
+                        "expired",
+                    }
                     result = {
                         "valid": not unavailable,
                         "verification": "local_only",
-                        "errors": ([{"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.lifecycle"}] if unavailable else []),
+                        "errors": (
+                            [
+                                {
+                                    "code": "signal_unavailable",
+                                    "message": "The Contribution Signal was rejected or expired.",
+                                    "path": "signal.lifecycle",
+                                }
+                            ]
+                            if unavailable
+                            else []
+                        ),
                     }
                 else:
-                    remote = GhClient().verify_public_reference(signal_value["reference"])
+                    remote = GhClient().verify_public_reference(
+                        signal_value["reference"]
+                    )
                     errors = list(local["errors"])
                     if signal_value.get("lifecycle") in {"rejected", "expired"}:
-                        errors.append({"code": "signal_unavailable", "message": "The Contribution Signal was rejected or expired.", "path": "signal.lifecycle"})
+                        errors.append(
+                            {
+                                "code": "signal_unavailable",
+                                "message": "The Contribution Signal was rejected or expired.",
+                                "path": "signal.lifecycle",
+                            }
+                        )
                     prospective_signal = dict(signal_value)
                     verification = {
                         "status": "verified",
@@ -856,25 +1414,49 @@ def main(argv: list[str] | None = None) -> int:
                         "reference": signal_value["reference"],
                         "verified_at": utc_now(),
                     }
-                    for key in ("host", "repository", "repository_id", "record_type", "number", "url", "visibility", "state", "state_reason", "locked", "labels"):
+                    for key in (
+                        "host",
+                        "repository",
+                        "repository_id",
+                        "record_type",
+                        "number",
+                        "url",
+                        "visibility",
+                        "state",
+                        "state_reason",
+                        "locked",
+                        "labels",
+                    ):
                         if remote.get(key) is not None:
                             verification[key] = remote[key]
                     prospective_signal["verification"] = verification
                     if remote.get("verified"):
                         errors.extend(validate_signal(prospective_signal)["errors"])
                     else:
-                        errors.append({
-                            "code": "signal_verification_failed",
-                            "message": str(remote.get("error", "The public Signal record could not be verified.")),
-                            "path": "signal.reference",
-                        })
+                        errors.append(
+                            {
+                                "code": "signal_verification_failed",
+                                "message": str(
+                                    remote.get(
+                                        "error",
+                                        "The public Signal record could not be verified.",
+                                    )
+                                ),
+                                "path": "signal.reference",
+                            }
+                        )
                     result = {
                         "valid": bool(remote.get("verified")) and not errors,
                         "verification": "github_public_reference",
                         "remote": remote,
                         "errors": errors,
                     }
-                if args.record and not result["valid"] and not structural_errors and "verification" in signal_value:
+                if (
+                    args.record
+                    and not result["valid"]
+                    and not structural_errors
+                    and "verification" in signal_value
+                ):
                     updated_signal = dict(signal_value)
                     updated_signal.pop("verification")
                     _replace_json(args.path, updated_signal)
@@ -901,29 +1483,49 @@ def main(argv: list[str] | None = None) -> int:
             signal_value = require_current_signal(_load_object(args.path))
             body = args.body_file.read_text(encoding="utf-8")
             if not args.title.strip() or not body.strip():
-                raise ValueError("Signal publication requires a non-empty title and body")
+                raise ValueError(
+                    "Signal publication requires a non-empty title and body"
+                )
             target = args.output or args.path
             publication = signal_value.get("publication")
             if publication is not None:
                 if not isinstance(publication, dict):
-                    raise ValueError("Signal publication identity is malformed; reconcile before publishing again")
-                if not isinstance(signal_value.get("publication_subject_id"), str) or not signal_value["publication_subject_id"].strip():
-                    raise ValueError("Published signal has no stable publication subject; reconcile before publishing again")
+                    raise ValueError(
+                        "Signal publication identity is malformed; reconcile before publishing again"
+                    )
+                if (
+                    not isinstance(signal_value.get("publication_subject_id"), str)
+                    or not signal_value["publication_subject_id"].strip()
+                ):
+                    raise ValueError(
+                        "Published signal has no stable publication subject; reconcile before publishing again"
+                    )
                 if (
                     not repository_slugs_match(publication.get("repo"), args.repo)
                     or publication.get("title") != args.title
                     or publication.get("body") != body
                 ):
-                    raise ValueError("Published signal publication inputs differ from the recorded operation")
-            operation = build_signal_operation(signal_value, args.repo, args.title, body, args.repository_id)
+                    raise ValueError(
+                        "Published signal publication inputs differ from the recorded operation"
+                    )
+            operation = build_signal_operation(
+                signal_value, args.repo, args.title, body, args.repository_id
+            )
             payload = operation.as_dict()
-            if isinstance(publication, dict) and publication.get("operation_id") != operation.operation_id:
-                raise ValueError("Published signal operation identity differs from the rendered operation; reconcile before publishing again")
+            if (
+                isinstance(publication, dict)
+                and publication.get("operation_id") != operation.operation_id
+            ):
+                raise ValueError(
+                    "Published signal operation identity differs from the rendered operation; reconcile before publishing again"
+                )
             if args.signal_publish_command == "plan":
                 _print(payload, args.as_json)
                 return 0
             if args.confirm_operation_id != operation.operation_id:
-                raise ValueError("Confirmation operation ID does not match the current signal publication operation")
+                raise ValueError(
+                    "Confirmation operation ID does not match the current signal publication operation"
+                )
             publish_errors = [
                 error
                 for error in validate_signal(signal_value)["errors"]
@@ -937,47 +1539,101 @@ def main(argv: list[str] | None = None) -> int:
                 existing_target = require_current_signal(_load_object(target))
                 existing_publication = existing_target.get("publication")
                 if not (
-                    existing_target.get("publication_subject_id") == operation.subject_id
+                    existing_target.get("publication_subject_id")
+                    == operation.subject_id
                     and isinstance(existing_publication, dict)
-                    and existing_publication.get("operation_id") == operation.operation_id
-                    and repository_slugs_match(existing_publication.get("repo"), args.repo)
+                    and existing_publication.get("operation_id")
+                    == operation.operation_id
+                    and repository_slugs_match(
+                        existing_publication.get("repo"), args.repo
+                    )
                     and existing_publication.get("title") == args.title
                     and existing_publication.get("body") == body
                 ):
-                    raise ValueError(f"Refusing to overwrite existing file: {target}; use --force to replace it")
+                    raise ValueError(
+                        f"Refusing to overwrite existing file: {target}; use --force to replace it"
+                    )
 
             receipt_path = operation_receipt_path(target, operation.operation_id)
             payload["receipt_path"] = str(receipt_path)
-            recovery = {"target": str(target.resolve()), "input": signal_value, "body": body}
+            recovery = {
+                "target": str(target.resolve()),
+                "input": signal_value,
+                "body": body,
+            }
             if args.retry_uncertain:
-                payload["retry_warning"] = "Manual inspection and opt-in retry accept residual duplicate risk; only one create is attempted."
+                payload["retry_warning"] = (
+                    "Manual inspection and opt-in retry accept residual duplicate risk; only one create is attempted."
+                )
             with operation_lock(receipt_path):
-                receipt = load_creation_receipt(receipt_path, operation, retry_uncertain=args.retry_uncertain, signal_recovery=recovery)
+                receipt = load_creation_receipt(
+                    receipt_path,
+                    operation,
+                    retry_uncertain=args.retry_uncertain,
+                    signal_recovery=recovery,
+                )
                 if receipt:
-                    remote = _canonical_remote_url(receipt["remote"], "issue", operation.repo)
-                    payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
+                    remote = _canonical_remote_url(
+                        receipt["remote"], "issue", operation.repo
+                    )
+                    payload.update(
+                        {
+                            "outcome": "already_exists",
+                            "source": "local_receipt",
+                            "remote": remote,
+                        }
+                    )
                 else:
                     client = GhClient()
-                    client.verify_repository_identity(operation.repo, operation.repository_id)
-                    existing = find_creation_matches(client, operation, receipt_path, retry_uncertain=args.retry_uncertain)
+                    client.verify_repository_identity(
+                        operation.repo, operation.repository_id
+                    )
+                    existing = find_creation_matches(
+                        client,
+                        operation,
+                        receipt_path,
+                        retry_uncertain=args.retry_uncertain,
+                    )
                     if existing:
                         remote = _canonical_remote_url(
                             existing[0].get("url") or existing[0].get("html_url"),
                             "issue",
                             operation.repo,
                         )
-                        save_operation_receipt(receipt_path, operation, remote, signal_recovery=recovery)
-                        payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+                        save_operation_receipt(
+                            receipt_path, operation, remote, signal_recovery=recovery
+                        )
+                        payload.update(
+                            {
+                                "outcome": "already_exists",
+                                "source": "remote_reconciliation",
+                                "existing": existing,
+                                "remote": remote,
+                            }
+                        )
                     else:
-                        save_operation_pending(receipt_path, operation, signal_recovery=recovery)
-                        remote = _canonical_remote_url(client.create(operation), "issue", operation.repo)
-                        payload["inspection"] = inspect_created_operation(client, operation, receipt_path, remote)
-                        save_operation_receipt(receipt_path, operation, remote, signal_recovery=recovery)
+                        save_operation_pending(
+                            receipt_path, operation, signal_recovery=recovery
+                        )
+                        remote = _canonical_remote_url(
+                            client.create(operation), "issue", operation.repo
+                        )
+                        payload["inspection"] = inspect_created_operation(
+                            client, operation, receipt_path, remote
+                        )
+                        save_operation_receipt(
+                            receipt_path, operation, remote, signal_recovery=recovery
+                        )
                         payload.update({"outcome": "created", "remote": remote})
             updated_signal = dict(signal_value)
             updated_signal["reference"] = remote
             updated_signal["publication_subject_id"] = operation.subject_id
-            updated_signal["publication"] = {"operation_id": operation.operation_id, "repo": operation.repo, "title": args.title, "body": body}
+            updated_signal["publication"] = {
+                "operation_id": operation.operation_id,
+                "repo": operation.repo,
+                "title": args.title,
+                "body": body,
+            }
             _replace_json(target, updated_signal)
             payload.update({"signal": str(target), "published": True})
             if payload.get("inspection", {}).get("outcome") == "needs_reconciliation":
@@ -988,70 +1644,159 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "packet":
             if args.packet_command == "init":
                 require_contribution_id(args.contribution_id)
-                output = _private_packet_output(args.root, args.output, args.contribution_id)
+                output = _private_packet_output(
+                    args.root, args.output, args.contribution_id
+                )
                 if output.exists() and not args.force:
-                    raise ValueError(f"Refusing to overwrite existing file: {output}; use --force to replace it")
-                packet = skeleton_packet(args.contribution_id, args.mode, args.repository)
+                    raise ValueError(
+                        f"Refusing to overwrite existing file: {output}; use --force to replace it"
+                    )
+                packet = skeleton_packet(
+                    args.contribution_id, args.mode, args.repository
+                )
                 atomic_write_json(output, packet, sort_keys=False)
-                result = {"created": str(output), "contribution_id": args.contribution_id, "mode": args.mode}
+                result = {
+                    "created": str(output),
+                    "contribution_id": args.contribution_id,
+                    "mode": args.mode,
+                }
                 _print(result, args.as_json)
                 return 0
             if args.packet_command == "narrative":
                 packet = _load_current_packet(args.packet)
                 if args.packet_operation == "record":
-                    updated = record_narrative(packet, title=args.title,
+                    updated = record_narrative(
+                        packet,
+                        title=args.title,
                         body=args.body_file.read_text(encoding="utf-8"),
-                        human_expression=args.human_expression_file.read_text(encoding="utf-8") if args.human_expression_file else None)
+                        human_expression=args.human_expression_file.read_text(
+                            encoding="utf-8"
+                        )
+                        if args.human_expression_file
+                        else None,
+                    )
                     updated = replace_packet(args.packet, packet, updated)
-                    _print({"updated": str(args.packet), "narrative": updated["narrative"],
-                            "status": workflow_status(updated, args.packet)}, args.as_json)
+                    _print(
+                        {
+                            "updated": str(args.packet),
+                            "narrative": updated["narrative"],
+                            "status": workflow_status(updated, args.packet),
+                        },
+                        args.as_json,
+                    )
                 elif args.packet_operation == "confirm":
-                    updated = confirm_narrative(packet, human_confirmed=args.human_confirmed)
+                    updated = confirm_narrative(
+                        packet, human_confirmed=args.human_confirmed
+                    )
                     _replace_json(args.packet, updated)
-                    _print({"updated": str(args.packet), "narrative": updated["narrative"],
-                            "status": workflow_status(updated, args.packet)}, args.as_json)
+                    _print(
+                        {
+                            "updated": str(args.packet),
+                            "narrative": updated["narrative"],
+                            "status": workflow_status(updated, args.packet),
+                        },
+                        args.as_json,
+                    )
                 else:
                     candidate, errors = narrative_confirmation_candidate(packet)
                     body = packet["narrative"]["body"]
-                    public_body = append_evidence_summary(body, build_evidence_summary(candidate, candidate["diff"]),
-                                                          workflow_ready=not errors)
+                    public_body = append_evidence_summary(
+                        body,
+                        build_evidence_summary(candidate, candidate["diff"]),
+                        workflow_ready=not errors,
+                    )
                     if args.output:
                         if args.output.resolve() == args.packet.resolve():
-                            raise ValueError("Narrative output must not overwrite the Packet")
+                            raise ValueError(
+                                "Narrative output must not overwrite the Packet"
+                            )
                         _write_text(args.output, body, args.force)
-                    _print({"title": packet["narrative"]["title"], "body": body, "public_body": public_body,
-                            "confirmation_blockers": errors, "output": str(args.output) if args.output else None}, args.as_json)
+                    _print(
+                        {
+                            "title": packet["narrative"]["title"],
+                            "body": body,
+                            "public_body": public_body,
+                            "confirmation_blockers": errors,
+                            "output": str(args.output) if args.output else None,
+                        },
+                        args.as_json,
+                    )
                 return 0
             if args.packet_command in {"review", "verification", "ownership", "ai"}:
                 packet = _load_current_packet(args.packet)
                 source = _load_object(args.input)
-                operation = {"review": record_review, "verification": record_verification_plan,
-                             "ownership": record_ownership, "ai": record_ai}[args.packet_command]
+                operation = {
+                    "review": record_review,
+                    "verification": record_verification_plan,
+                    "ownership": record_ownership,
+                    "ai": record_ai,
+                }[args.packet_command]
                 updated = replace_packet(args.packet, packet, operation(packet, source))
-                _print({"updated": str(args.packet), "semantic_snapshot": updated["snapshots"]["semantic"],
-                        "status": workflow_status(updated, args.packet)}, args.as_json)
+                _print(
+                    {
+                        "updated": str(args.packet),
+                        "semantic_snapshot": updated["snapshots"]["semantic"],
+                        "status": workflow_status(updated, args.packet),
+                    },
+                    args.as_json,
+                )
                 return 0
             if args.packet_command == "contract":
                 packet = _load_current_packet(args.packet)
-                updated = (bind_contract(packet, _load_object(args.contract)) if args.packet_operation == "bind"
-                           else approve_contract(packet, human_confirmed=args.human_confirmed))
+                updated = (
+                    bind_contract(packet, _load_object(args.contract))
+                    if args.packet_operation == "bind"
+                    else approve_contract(packet, human_confirmed=args.human_confirmed)
+                )
                 updated = replace_packet(args.packet, packet, updated)
-                _print({"updated": str(args.packet), "approval": updated["contract"]["approval"], "semantic_snapshot": updated["snapshots"]["semantic"]}, args.as_json)
+                _print(
+                    {
+                        "updated": str(args.packet),
+                        "approval": updated["contract"]["approval"],
+                        "semantic_snapshot": updated["snapshots"]["semantic"],
+                    },
+                    args.as_json,
+                )
                 return 0
             if args.packet_command in {"policy", "basis"}:
                 packet = _load_current_packet(args.packet)
-                updated = (bind_policy(packet, args.root) if args.packet_command == "policy"
-                           else record_basis(packet, issue=args.issue, signal=_load_object(args.signal) if args.signal else None, repository=args.repository))
+                updated = (
+                    bind_policy(packet, args.root)
+                    if args.packet_command == "policy"
+                    else record_basis(
+                        packet,
+                        issue=args.issue,
+                        signal=_load_object(args.signal) if args.signal else None,
+                        repository=args.repository,
+                    )
+                )
                 updated = replace_packet(args.packet, packet, updated)
-                _print({"updated": str(args.packet), "semantic_snapshot": updated["snapshots"]["semantic"]}, args.as_json)
+                _print(
+                    {
+                        "updated": str(args.packet),
+                        "semantic_snapshot": updated["snapshots"]["semantic"],
+                    },
+                    args.as_json,
+                )
                 return 0
             result = validate_packet(_load_object(args.path))
             _print(result, args.as_json)
             return 0 if result["valid"] else 1
 
         if args.command == "action":
-            event_name, event_repository, event_repository_id, event_base_sha, event_head_sha, event_body = github_event_context()
-            body = args.body_file.read_text(encoding="utf-8") if args.body_file else event_body
+            (
+                event_name,
+                event_repository,
+                event_repository_id,
+                event_base_sha,
+                event_head_sha,
+                event_body,
+            ) = github_event_context()
+            body = (
+                args.body_file.read_text(encoding="utf-8")
+                if args.body_file
+                else event_body
+            )
             result = check_evidence(
                 body,
                 root=args.root,
@@ -1073,7 +1818,9 @@ def main(argv: list[str] | None = None) -> int:
                     "repository": args.repo,
                     "query": args.query,
                     "matches": matches,
-                    "recommendation": "stop_and_review_duplicates" if matches else "no_matching_work_found",
+                    "recommendation": "stop_and_review_duplicates"
+                    if matches
+                    else "no_matching_work_found",
                 }
                 _print(result, args.as_json)
                 return 0
@@ -1081,7 +1828,10 @@ def main(argv: list[str] | None = None) -> int:
                 menu = skeleton_menu(args.repository)
                 menu["project_brief"] = args.project_brief
                 _write_json(args.output, menu, args.force)
-                _print({"created": str(args.output), "repository": args.repository}, args.as_json)
+                _print(
+                    {"created": str(args.output), "repository": args.repository},
+                    args.as_json,
+                )
                 return 0
             if args.candidate_command == "bind":
                 menu = _load_object(args.menu)
@@ -1090,38 +1840,75 @@ def main(argv: list[str] | None = None) -> int:
                 target = args.packet
                 updated = replace_packet(target, packet, updated)
                 snapshot = updated["snapshots"]["semantic"]
-                _print({"updated": str(target), "candidate_id": updated["candidate_selection"]["candidate_id"], "semantic_snapshot": snapshot}, args.as_json)
+                _print(
+                    {
+                        "updated": str(target),
+                        "candidate_id": updated["candidate_selection"]["candidate_id"],
+                        "semantic_snapshot": snapshot,
+                    },
+                    args.as_json,
+                )
                 return 0
             if args.candidate_command == "transition":
                 packet = _load_current_packet(args.packet)
-                updated = transition_candidate(packet, to=args.to, reason=args.reason, human_confirmed=args.confirm)
+                updated = transition_candidate(
+                    packet, to=args.to, reason=args.reason, human_confirmed=args.confirm
+                )
                 updated = replace_packet(args.packet, packet, updated)
                 snapshot = updated["snapshots"]["semantic"]
-                _print({"updated": str(args.packet), "to": args.to, "semantic_snapshot": snapshot}, args.as_json)
+                _print(
+                    {
+                        "updated": str(args.packet),
+                        "to": args.to,
+                        "semantic_snapshot": snapshot,
+                    },
+                    args.as_json,
+                )
                 return 0
             menu = _load_object(args.path)
             if args.candidate_command == "select":
-                updated = select_candidate(menu, args.candidate_id, confirmed=args.confirm)
+                updated = select_candidate(
+                    menu, args.candidate_id, confirmed=args.confirm
+                )
                 target = args.output or args.path
                 if target != args.path:
                     _write_json(target, updated, args.force)
                 else:
                     _replace_json(target, updated)
-                _print({"updated": str(target), "selected_id": args.candidate_id, "confirmed": args.confirm}, args.as_json)
+                _print(
+                    {
+                        "updated": str(target),
+                        "selected_id": args.candidate_id,
+                        "confirmed": args.confirm,
+                    },
+                    args.as_json,
+                )
                 return 0
             if args.candidate_command == "validate":
                 result = validate_candidate_menu(menu)
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
             _write_text(args.output, render_candidate_menu(menu), args.force)
-            _print({"rendered": str(args.output), "candidate_count": len(menu.get("candidates", []))}, args.as_json)
+            _print(
+                {
+                    "rendered": str(args.output),
+                    "candidate_count": len(menu.get("candidates", [])),
+                },
+                args.as_json,
+            )
             return 0
 
         if args.command == "contract":
             if args.contract_command == "init":
                 contract_value = skeleton_contract(args.contribution_id)
                 _write_json(args.output, contract_value, args.force)
-                _print({"created": str(args.output), "contribution_id": args.contribution_id}, args.as_json)
+                _print(
+                    {
+                        "created": str(args.output),
+                        "contribution_id": args.contribution_id,
+                    },
+                    args.as_json,
+                )
                 return 0
             contract_value = _load_object(args.path)
             if args.contract_command == "validate":
@@ -1129,7 +1916,13 @@ def main(argv: list[str] | None = None) -> int:
                 _print(result, args.as_json)
                 return 0 if result["valid"] else 1
             _write_text(args.output, render_contract(contract_value), args.force)
-            _print({"rendered": str(args.output), "contribution_id": contract_value.get("contribution_id")}, args.as_json)
+            _print(
+                {
+                    "rendered": str(args.output),
+                    "contribution_id": contract_value.get("contribution_id"),
+                },
+                args.as_json,
+            )
             return 0
 
         if args.command == "disclosure":
@@ -1148,12 +1941,20 @@ def main(argv: list[str] | None = None) -> int:
             if args.pilot_command == "export":
                 result = export_task(root, args.case, args.output)
             else:
-                result = run_pilot(root, args.trace, simulate=args.simulate, branch=args.branch,
-                                   observer_path=args.observer_log, log_output=args.log_output)
+                result = run_pilot(
+                    root,
+                    args.trace,
+                    simulate=args.simulate,
+                    branch=args.branch,
+                    observer_path=args.observer_log,
+                    log_output=args.log_output,
+                )
                 if args.output:
                     atomic_write_json(args.output, result)
             _print(result, args.as_json)
-            return 0 if args.pilot_command == "export" or result["automatic_pass"] else 1
+            return (
+                0 if args.pilot_command == "export" or result["automatic_pass"] else 1
+            )
 
         if args.command == "eval":
             result = run_evals(args.path)
@@ -1169,7 +1970,12 @@ def main(argv: list[str] | None = None) -> int:
 
             packet = _load_current_packet(args.packet)
             current_status = workflow_status(packet, args.packet)
-            if current_status["current_stage"] in {"invalid", "blocked", "basis", "contract"}:
+            if current_status["current_stage"] in {
+                "invalid",
+                "blocked",
+                "basis",
+                "contract",
+            }:
                 raise ValueError(
                     "Diff binding requires a valid, unblocked Packet with an approved contribution basis and Contract"
                 )
@@ -1178,24 +1984,45 @@ def main(argv: list[str] | None = None) -> int:
             updated["diff"] = {field: captured[field] for field in PR_DIFF_FIELDS}
             violations, _unknowns = deterministic_evidence_checks(updated, strict=True)
             if violations:
-                _print({"updated": False, "binding_blockers": violations, "diff": updated["diff"]}, args.as_json)
+                _print(
+                    {
+                        "updated": False,
+                        "binding_blockers": violations,
+                        "diff": updated["diff"],
+                    },
+                    args.as_json,
+                )
                 return 1
             results = updated.get("results", [])
             implementation = next(
-                (result for result in results if isinstance(result, dict) and result.get("node") == "implementation"),
+                (
+                    result
+                    for result in results
+                    if isinstance(result, dict)
+                    and result.get("node") == "implementation"
+                ),
                 None,
             )
             if not isinstance(implementation, dict):
                 raise ValueError("Packet is missing the implementation result record")
-            implementation.update({
-                "status": "passed",
-                "evidence": [
-                    f"Bound merge-base Diff {captured['subject_digest']} at head {captured['head_sha']}."
-                ],
-            })
+            implementation.update(
+                {
+                    "status": "passed",
+                    "evidence": [
+                        f"Bound merge-base Diff {captured['subject_digest']} at head {captured['head_sha']}."
+                    ],
+                }
+            )
             updated = replace_packet(args.packet, packet, updated)
             result = workflow_status(updated, args.packet)
-            _print({"updated": str(args.packet), "diff": updated["diff"], "status": result}, args.as_json)
+            _print(
+                {
+                    "updated": str(args.packet),
+                    "diff": updated["diff"],
+                    "status": result,
+                },
+                args.as_json,
+            )
             return 0
 
         if args.command == "verify":
@@ -1203,18 +2030,37 @@ def main(argv: list[str] | None = None) -> int:
             verification = packet.get("verification")
             plan = verification.get("plan") if isinstance(verification, dict) else None
             checks = plan.get("checks", []) if isinstance(plan, dict) else []
-            if not isinstance(plan, dict) or verification.get("plan_digest") != verification_plan_digest(plan):
+            if not isinstance(plan, dict) or verification.get(
+                "plan_digest"
+            ) != verification_plan_digest(plan):
                 raise ValueError("Packet verification plan digest is missing or stale")
-            check = next((item for item in checks if isinstance(item, dict) and item.get("id") == args.check_id), None)
+            check = next(
+                (
+                    item
+                    for item in checks
+                    if isinstance(item, dict) and item.get("id") == args.check_id
+                ),
+                None,
+            )
             if not isinstance(check, dict):
                 raise ValueError(f"Unknown verification check: {args.check_id}")
             packet_diff = packet.get("diff")
             if not isinstance(packet_diff, dict):
                 raise ValueError("packet.diff must be an object")
-            actual_diff = capture_pr_diff(args.root, packet_diff.get("base_tip_sha", ""), packet_diff.get("head_sha", ""))
-            mismatched = [field for field in PR_DIFF_FIELDS if packet_diff.get(field) != actual_diff.get(field)]
+            actual_diff = capture_pr_diff(
+                args.root,
+                packet_diff.get("base_tip_sha", ""),
+                packet_diff.get("head_sha", ""),
+            )
+            mismatched = [
+                field
+                for field in PR_DIFF_FIELDS
+                if packet_diff.get(field) != actual_diff.get(field)
+            ]
             if mismatched:
-                raise ValueError(f"Packet Diff is not current for verification: {mismatched}")
+                raise ValueError(
+                    f"Packet Diff is not current for verification: {mismatched}"
+                )
             receipts = verification.get("receipts")
             if not isinstance(receipts, list):
                 raise ValueError("packet.verification.receipts must be a list")
@@ -1222,7 +2068,9 @@ def main(argv: list[str] | None = None) -> int:
             # or interruption must not leave the previous passing check current.
             pending = deepcopy(packet)
             pending["verification"]["receipts"] = [
-                item for item in receipts if not isinstance(item, dict) or item.get("check_id") != args.check_id
+                item
+                for item in receipts
+                if not isinstance(item, dict) or item.get("check_id") != args.check_id
             ]
             replace_packet(args.packet, packet, pending)
             receipt = run_verification(
@@ -1239,11 +2087,20 @@ def main(argv: list[str] | None = None) -> int:
             receipts = verification.get("receipts")
             if not isinstance(receipts, list):
                 raise ValueError("packet.verification.receipts must be a list")
-            verification["receipts"] = [item for item in receipts if not isinstance(item, dict) or item.get("check_id") != args.check_id]
+            verification["receipts"] = [
+                item
+                for item in receipts
+                if not isinstance(item, dict) or item.get("check_id") != args.check_id
+            ]
             verification["receipts"].append(receipt)
             replace_packet(args.packet, packet, updated)
             _print({"recorded": str(args.packet), **receipt}, args.as_json)
-            return 0 if receipt["command_outcome"] == "passed" and receipt["integrity_status"] == "stable" else 1
+            return (
+                0
+                if receipt["command_outcome"] == "passed"
+                and receipt["integrity_status"] == "stable"
+                else 1
+            )
 
         if args.command == "issue":
             packet = _load_current_packet(args.packet)
@@ -1261,16 +2118,22 @@ def main(argv: list[str] | None = None) -> int:
             if args.remote_command == "plan":
                 blockers = readiness_blockers(packet)
                 if operation.kind == "pull_request":
-                    blockers = pull_request_readiness_blockers(packet, operation.body, actual_diff)
+                    blockers = pull_request_readiness_blockers(
+                        packet, operation.body, actual_diff
+                    )
                 payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)
                 return 0
 
             if args.confirm_operation_id != operation.operation_id:
-                raise ValueError("Confirmation operation ID does not match the current rendered operation")
+                raise ValueError(
+                    "Confirmation operation ID does not match the current rendered operation"
+                )
             blockers = readiness_blockers(packet)
             if operation.kind == "pull_request":
-                blockers = pull_request_readiness_blockers(packet, operation.body, actual_diff)
+                blockers = pull_request_readiness_blockers(
+                    packet, operation.body, actual_diff
+                )
             if blockers:
                 payload["readiness_blockers"] = blockers
                 _print(payload, args.as_json)
@@ -1279,22 +2142,48 @@ def main(argv: list[str] | None = None) -> int:
             receipt_path = operation_receipt_path(args.packet, operation.operation_id)
             payload["receipt_path"] = str(receipt_path)
             if args.retry_uncertain:
-                payload["retry_warning"] = "Manual inspection and opt-in retry accept residual duplicate risk; only one create is attempted."
+                payload["retry_warning"] = (
+                    "Manual inspection and opt-in retry accept residual duplicate risk; only one create is attempted."
+                )
             with operation_lock(receipt_path):
-                receipt = load_creation_receipt(receipt_path, operation, retry_uncertain=args.retry_uncertain)
+                receipt = load_creation_receipt(
+                    receipt_path, operation, retry_uncertain=args.retry_uncertain
+                )
                 if operation.kind == "pull_request":
                     if receipt:
                         status = receipt["status"]
                         if status == "linked":
-                            payload.update({"outcome": "already_exists", "source": "local_receipt", "status": status, "pr_url": receipt["pr_url"], "issue_url": receipt.get("issue_url", "")})
+                            payload.update(
+                                {
+                                    "outcome": "already_exists",
+                                    "source": "local_receipt",
+                                    "status": status,
+                                    "pr_url": receipt["pr_url"],
+                                    "issue_url": receipt.get("issue_url", ""),
+                                }
+                            )
                             _print(payload, args.as_json)
                             return 0
-                        payload.update({"outcome": "needs_reconciliation", "source": "local_receipt", "status": status, "pr_url": receipt["pr_url"], "issue_url": receipt.get("issue_url", ""), "reason": receipt.get("reason", "The PR link receipt is not terminally linked.")})
+                        payload.update(
+                            {
+                                "outcome": "needs_reconciliation",
+                                "source": "local_receipt",
+                                "status": status,
+                                "pr_url": receipt["pr_url"],
+                                "issue_url": receipt.get("issue_url", ""),
+                                "reason": receipt.get(
+                                    "reason",
+                                    "The PR link receipt is not terminally linked.",
+                                ),
+                            }
+                        )
                         _print(payload, args.as_json)
                         return 1
 
                     client = GhClient()
-                    client.verify_repository_identity(operation.repo, operation.repository_id)
+                    client.verify_repository_identity(
+                        operation.repo, operation.repository_id
+                    )
                     if operation.issue_url:
                         live_issue = client.verify_public_reference(operation.issue_url)
                         live_errors = _issue_revalidation_errors(packet, live_issue)
@@ -1302,54 +2191,117 @@ def main(argv: list[str] | None = None) -> int:
                             payload["readiness_blockers"] = live_errors
                             _print(payload, args.as_json)
                             return 1
-                    existing = find_creation_matches(client, operation, receipt_path, retry_uncertain=args.retry_uncertain)
+                    existing = find_creation_matches(
+                        client,
+                        operation,
+                        receipt_path,
+                        retry_uncertain=args.retry_uncertain,
+                    )
                     if existing:
-                        pr_url = _canonical_remote_url(existing[0].get("url") or existing[0].get("html_url"), "pull_request", operation.repo)
+                        pr_url = _canonical_remote_url(
+                            existing[0].get("url") or existing[0].get("html_url"),
+                            "pull_request",
+                            operation.repo,
+                        )
                         source = "remote_reconciliation"
                     else:
                         save_operation_pending(receipt_path, operation)
-                        pr_url = _canonical_remote_url(client.create(operation), "pull_request", operation.repo)
+                        pr_url = _canonical_remote_url(
+                            client.create(operation), "pull_request", operation.repo
+                        )
                         source = "created"
-                        payload["inspection"] = inspect_created_operation(client, operation, receipt_path, pr_url)
+                        payload["inspection"] = inspect_created_operation(
+                            client, operation, receipt_path, pr_url
+                        )
                     save_operation_pr_created(receipt_path, operation, pr_url)
                     inspection = payload.get("inspection")
                     if inspection and inspection["outcome"] != "already_exists":
-                        reason = ", ".join(item["code"] for item in inspection["diagnostics"])
-                        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
-                        payload.update({"outcome": "needs_reconciliation", "source": source, "pr_url": pr_url, "status": "needs_reconciliation", "reason": reason})
+                        reason = ", ".join(
+                            item["code"] for item in inspection["diagnostics"]
+                        )
+                        save_operation_needs_reconciliation(
+                            receipt_path, operation, pr_url, reason
+                        )
+                        payload.update(
+                            {
+                                "outcome": "needs_reconciliation",
+                                "source": source,
+                                "pr_url": pr_url,
+                                "status": "needs_reconciliation",
+                                "reason": reason,
+                            }
+                        )
                         _print(payload, args.as_json)
                         return 1
-                    reason, remote_head_sha = _remote_pr_head_reconciliation(client, operation, pr_url)
+                    reason, remote_head_sha = _remote_pr_head_reconciliation(
+                        client, operation, pr_url
+                    )
                     if reason:
-                        save_operation_needs_reconciliation(receipt_path, operation, pr_url, reason)
-                        payload.update({
-                            "outcome": "needs_reconciliation",
+                        save_operation_needs_reconciliation(
+                            receipt_path, operation, pr_url, reason
+                        )
+                        payload.update(
+                            {
+                                "outcome": "needs_reconciliation",
+                                "source": source,
+                                "status": "needs_reconciliation",
+                                "pr_url": pr_url,
+                                "issue_url": operation.issue_url or "",
+                                "reason": reason,
+                            }
+                        )
+                        if remote_head_sha is not None:
+                            payload.update(
+                                {
+                                    "expected_head_sha": operation.head_sha,
+                                    "remote_head_sha": remote_head_sha,
+                                }
+                            )
+                        _print(payload, args.as_json)
+                        return 1
+                    link_status, link_source = _link_pull_request(
+                        client, operation, receipt_path, pr_url
+                    )
+                    payload.update(
+                        {
                             "source": source,
-                            "status": "needs_reconciliation",
                             "pr_url": pr_url,
                             "issue_url": operation.issue_url or "",
-                            "reason": reason,
-                        })
-                        if remote_head_sha is not None:
-                            payload.update({"expected_head_sha": operation.head_sha, "remote_head_sha": remote_head_sha})
-                        _print(payload, args.as_json)
-                        return 1
-                    link_status, link_source = _link_pull_request(client, operation, receipt_path, pr_url)
-                    payload.update({"source": source, "pr_url": pr_url, "issue_url": operation.issue_url or "", "status": link_status, "link_source": link_source})
+                            "status": link_status,
+                            "link_source": link_source,
+                        }
+                    )
                     if link_status != "linked":
                         payload["outcome"] = "needs_reconciliation"
                         payload["reason"] = link_source
                         _print(payload, args.as_json)
                         return 1
-                    payload["outcome"] = "created" if source == "created" else "already_exists"
+                    payload["outcome"] = (
+                        "created" if source == "created" else "already_exists"
+                    )
                 else:
                     if receipt:
-                        remote = _canonical_remote_url(receipt["remote"], "issue", operation.repo)
-                        payload.update({"outcome": "already_exists", "source": "local_receipt", "remote": remote})
+                        remote = _canonical_remote_url(
+                            receipt["remote"], "issue", operation.repo
+                        )
+                        payload.update(
+                            {
+                                "outcome": "already_exists",
+                                "source": "local_receipt",
+                                "remote": remote,
+                            }
+                        )
                     else:
                         client = GhClient()
-                        client.verify_repository_identity(operation.repo, operation.repository_id)
-                        existing = find_creation_matches(client, operation, receipt_path, retry_uncertain=args.retry_uncertain)
+                        client.verify_repository_identity(
+                            operation.repo, operation.repository_id
+                        )
+                        existing = find_creation_matches(
+                            client,
+                            operation,
+                            receipt_path,
+                            retry_uncertain=args.retry_uncertain,
+                        )
                         if existing:
                             remote = _canonical_remote_url(
                                 existing[0].get("url") or existing[0].get("html_url"),
@@ -1357,11 +2309,22 @@ def main(argv: list[str] | None = None) -> int:
                                 operation.repo,
                             )
                             save_operation_receipt(receipt_path, operation, remote)
-                            payload.update({"outcome": "already_exists", "source": "remote_reconciliation", "existing": existing, "remote": remote})
+                            payload.update(
+                                {
+                                    "outcome": "already_exists",
+                                    "source": "remote_reconciliation",
+                                    "existing": existing,
+                                    "remote": remote,
+                                }
+                            )
                         else:
                             save_operation_pending(receipt_path, operation)
-                            remote = _canonical_remote_url(client.create(operation), "issue", operation.repo)
-                            payload["inspection"] = inspect_created_operation(client, operation, receipt_path, remote)
+                            remote = _canonical_remote_url(
+                                client.create(operation), "issue", operation.repo
+                            )
+                            payload["inspection"] = inspect_created_operation(
+                                client, operation, receipt_path, remote
+                            )
                             save_operation_receipt(receipt_path, operation, remote)
                             payload.update({"outcome": "created", "remote": remote})
             if payload.get("inspection", {}).get("outcome") == "needs_reconciliation":

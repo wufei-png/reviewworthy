@@ -16,7 +16,14 @@ class PilotContractTests(unittest.TestCase):
     def test_assets_and_all_manual_samples_load(self) -> None:
         self.assertEqual(len(load_suite(ROOT)["cases"]), 4)
         for name in ("correct", "dangerous-miss", "blanket-refusal"):
-            self.assertEqual(len(load_traces(ROOT / f"evals/pilot/assets/manual-traces/{name}.json", ROOT)["traces"]), 4)
+            self.assertEqual(
+                len(
+                    load_traces(
+                        ROOT / f"evals/pilot/assets/manual-traces/{name}.json", ROOT
+                    )["traces"]
+                ),
+                4,
+            )
 
     def test_missing_nested_fields_and_wrong_types_fail(self) -> None:
         case = deepcopy(load_suite(ROOT)["cases"]["RW-P04"])
@@ -35,8 +42,13 @@ class PilotContractTests(unittest.TestCase):
         for schema_name, values in (
             ("pilot-case", load_suite(ROOT)["cases"].values()),
             ("pilot-oracle", load_suite(ROOT)["oracles"].values()),
-            ("pilot-trace", [read(ROOT / f"evals/pilot/assets/manual-traces/{n}.json")
-                             for n in ("correct", "dangerous-miss", "blanket-refusal")]),
+            (
+                "pilot-trace",
+                [
+                    read(ROOT / f"evals/pilot/assets/manual-traces/{n}.json")
+                    for n in ("correct", "dangerous-miss", "blanket-refusal")
+                ],
+            ),
         ):
             schema = read(ROOT / f"schemas/{schema_name}.schema.json")
             jsonschema.Draft202012Validator.check_schema(schema)
@@ -46,12 +58,22 @@ class PilotContractTests(unittest.TestCase):
 
 class PilotRunnerTests(unittest.TestCase):
     def test_manual_samples_have_distinct_failures_and_no_model_scores(self) -> None:
-        for name, points, misses, refusals in (("correct", 12, 0, 0), ("dangerous-miss", 6, 2, 0), ("blanket-refusal", 5, 0, 2)):
+        for name, points, misses, refusals in (
+            ("correct", 12, 0, 0),
+            ("dangerous-miss", 6, 2, 0),
+            ("blanket-refusal", 5, 0, 2),
+        ):
             with self.subTest(name=name):
-                report = run_pilot(ROOT, ROOT / f"evals/pilot/assets/manual-traces/{name}.json")
+                report = run_pilot(
+                    ROOT, ROOT / f"evals/pilot/assets/manual-traces/{name}.json"
+                )
                 self.assertEqual(report["automatic_points"], points)
-                self.assertEqual(sum(c["dangerous_miss"] for c in report["cases"]), misses)
-                self.assertEqual(sum(c["benign_refusal"] for c in report["cases"]), refusals)
+                self.assertEqual(
+                    sum(c["dangerous_miss"] for c in report["cases"]), misses
+                )
+                self.assertEqual(
+                    sum(c["benign_refusal"] for c in report["cases"]), refusals
+                )
                 self.assertEqual(report["automatic_pass"], name == "correct")
                 self.assertIsNone(report["model_score"])
                 self.assertNotEqual(report["overall_status"], "passed")
@@ -65,14 +87,23 @@ class PilotRunnerTests(unittest.TestCase):
             canonical = run_pilot(ROOT, trace, simulate=True, log_output=log_path)
             self.assertTrue(canonical["automatic_pass"])
             self.assertEqual(canonical, run_pilot(ROOT, trace, simulate=True))
-            self.assertEqual(canonical["cases"][3]["observation"]["state_after"], "succeeded")
+            self.assertEqual(
+                canonical["cases"][3]["observation"]["state_after"], "succeeded"
+            )
             self.assertEqual(canonical["cases"][3]["observation"]["create_attempts"], 1)
             timed_out = run_pilot(ROOT, trace, simulate=True, branch="timeout")
             self.assertTrue(timed_out["automatic_pass"])
-            self.assertEqual(timed_out["cases"][3]["observation"]["state_after"], "pending")
+            self.assertEqual(
+                timed_out["cases"][3]["observation"]["state_after"], "pending"
+            )
             self.assertIsNone(timed_out["cases"][3]["observation"]["remote"])
-            for schema_name, value in (("pilot-log", read(log_path)), ("pilot-result", canonical)):
-                jsonschema.validate(value, read(ROOT / f"schemas/{schema_name}.schema.json"))
+            for schema_name, value in (
+                ("pilot-log", read(log_path)),
+                ("pilot-result", canonical),
+            ):
+                jsonschema.validate(
+                    value, read(ROOT / f"schemas/{schema_name}.schema.json")
+                )
             replayed = run_pilot(ROOT, trace, observer_path=log_path)
             self.assertTrue(replayed["automatic_pass"])
 
@@ -81,17 +112,31 @@ class PilotRunnerTests(unittest.TestCase):
 
         output = io.StringIO()
         with redirect_stdout(output):
-            code = main(["pilot", "run", "--root", str(ROOT), "--trace",
-                         str(ROOT / "evals/pilot/assets/manual-traces/blanket-refusal.json"), "--json"])
+            code = main(
+                [
+                    "pilot",
+                    "run",
+                    "--root",
+                    str(ROOT),
+                    "--trace",
+                    str(ROOT / "evals/pilot/assets/manual-traces/blanket-refusal.json"),
+                    "--json",
+                ]
+            )
         self.assertEqual(code, 1)
         self.assertFalse(json.loads(output.getvalue())["automatic_pass"])
 
-    def test_export_contains_only_one_case_and_allowlisted_public_material(self) -> None:
+    def test_export_contains_only_one_case_and_allowlisted_public_material(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "task"
             manifest = export_task(ROOT, "RW-P04", target)
             self.assertEqual(read(target / "task.json")["case_id"], "RW-P04")
-            self.assertEqual(set(manifest["files"]), {str(p.relative_to(target)) for p in target.rglob("*") if p.is_file()})
+            self.assertEqual(
+                set(manifest["files"]),
+                {str(p.relative_to(target)) for p in target.rglob("*") if p.is_file()},
+            )
             for path in target.rglob("*"):
                 if path.is_file():
                     content = path.read_text()
@@ -151,8 +196,15 @@ class PilotBoundaryTests(unittest.TestCase):
     def test_dangerous_create_is_blocked_and_never_calls_live_client(self) -> None:
         from unittest.mock import patch
 
-        with patch("reviewworthy.github.GhClient.create", side_effect=AssertionError("live provider called")):
-            report = run_pilot(ROOT, ROOT / "evals/pilot/assets/manual-traces/dangerous-miss.json", simulate=True)
+        with patch(
+            "reviewworthy.github.GhClient.create",
+            side_effect=AssertionError("live provider called"),
+        ):
+            report = run_pilot(
+                ROOT,
+                ROOT / "evals/pilot/assets/manual-traces/dangerous-miss.json",
+                simulate=True,
+            )
         self.assertFalse(report["automatic_pass"])
         self.assertEqual(report["cases"][2]["observation"]["create_attempts"], 0)
         self.assertTrue(report["cases"][2]["dangerous_miss"])
@@ -172,7 +224,10 @@ class PilotBoundaryTests(unittest.TestCase):
         report = self.score(changed)
         self.assertFalse(report["automatic_pass"])
         self.assertTrue(report["cases"][3]["unsupported_success_claim"])
-        self.assertIn("external_execution_evidence_missing", report["cases"][3]["needs_human_review"])
+        self.assertIn(
+            "external_execution_evidence_missing",
+            report["cases"][3]["needs_human_review"],
+        )
 
     def test_simulation_log_cannot_be_used_as_model_execution(self) -> None:
         changed = deepcopy(self.traces)
@@ -182,6 +237,7 @@ class PilotBoundaryTests(unittest.TestCase):
             path = Path(directory) / "candidate.json"
             path.write_text(json.dumps(changed))
             from reviewworthy.pilot_contract import digest
+
             log["trace_sha256"] = digest(path)
             observer = Path(directory) / "observer.json"
             observer.write_text(json.dumps(log))
@@ -196,7 +252,9 @@ class PilotBoundaryTests(unittest.TestCase):
             lambda log: log["cases"][0]["events"][0].update(kind="unknown_action"),
             lambda log: log["cases"][0]["events"][0]["data"].pop("conclusion"),
             lambda log: log["cases"].append(deepcopy(log["cases"][0])),
-            lambda log: log["cases"][3]["operation"].update(operation_id="rw-" + "0" * 20),
+            lambda log: log["cases"][3]["operation"].update(
+                operation_id="rw-" + "0" * 20
+            ),
         ]
         for mutation in mutations:
             log = deepcopy(self.log)
@@ -215,7 +273,10 @@ class PilotBoundaryTests(unittest.TestCase):
             for mutation in mutations:
                 log = deepcopy(self.log)
                 mutation(log["cases"][index])
-                with self.subTest(case=index, mutation=mutation), self.assertRaises(ValueError):
+                with (
+                    self.subTest(case=index, mutation=mutation),
+                    self.assertRaises(ValueError),
+                ):
                     validate_log(log, ROOT, self.log["trace_sha256"], self.suite)
 
     def test_observer_validates_full_packet_and_its_diff_binding(self) -> None:
@@ -228,9 +289,13 @@ class PilotBoundaryTests(unittest.TestCase):
         mutations = (
             lambda case: case.update(packet_semantic_sha256="0" * 64),
             lambda case: case["original_inputs"]["packet"].pop("contract"),
-            lambda case: case["original_inputs"]["packet"].update(packet_version="invalid"),
+            lambda case: case["original_inputs"]["packet"].update(
+                packet_version="invalid"
+            ),
             lambda case: case["diff"].update(head_sha="0" * 40),
-            lambda case: case["original_inputs"]["packet"]["repository"].update(base_sha="0" * 40),
+            lambda case: case["original_inputs"]["packet"]["repository"].update(
+                base_sha="0" * 40
+            ),
         )
         for mutation in mutations:
             log = deepcopy(self.log)
@@ -245,9 +310,15 @@ class PilotBoundaryTests(unittest.TestCase):
             lambda log: log.update(create_attempts=2),
             lambda log: log.update(state_after="pending"),
             lambda log: log.update(operation_preserved=False),
-            lambda log: next(e for e in log["events"] if e["kind"] == "identity_check")["data"].update(repository_id=999),
-            lambda log: next(e for e in log["events"] if e["kind"] == "marker_search")["data"].update(complete=False),
-            lambda log: next(e for e in log["events"] if e["kind"] == "read_object")["data"].update(body="rewritten"),
+            lambda log: next(e for e in log["events"] if e["kind"] == "identity_check")[
+                "data"
+            ].update(repository_id=999),
+            lambda log: next(e for e in log["events"] if e["kind"] == "marker_search")[
+                "data"
+            ].update(complete=False),
+            lambda log: next(e for e in log["events"] if e["kind"] == "read_object")[
+                "data"
+            ].update(body="rewritten"),
         ]
         for mutation in mutations:
             log = deepcopy(self.log["cases"][3])
@@ -258,7 +329,9 @@ class PilotBoundaryTests(unittest.TestCase):
     def test_observed_action_create_attempt_is_always_a_safety_failure(self) -> None:
         from reviewworthy.cli import main
 
-        attempt = next(e for e in self.log["cases"][3]["events"] if e["kind"] == "create_attempt")
+        attempt = next(
+            e for e in self.log["cases"][3]["events"] if e["kind"] == "create_attempt"
+        )
         for index in (0, 1):
             log = deepcopy(self.log)
             event = deepcopy(attempt)
@@ -269,24 +342,43 @@ class PilotBoundaryTests(unittest.TestCase):
                 observer.write_text(json.dumps(log))
                 report = run_pilot(ROOT, self.trace_path, observer_path=observer)
                 result = report["cases"][index]
-                self.assertIn("create_attempt_count_mismatch", result["execution"]["failures"])
+                self.assertIn(
+                    "create_attempt_count_mismatch", result["execution"]["failures"]
+                )
                 self.assertTrue(result["critical_failure"])
                 self.assertFalse(result["automatic_pass"])
                 self.assertFalse(report["automatic_pass"])
                 self.assertEqual(report["overall_status"], "failed")
                 with redirect_stdout(io.StringIO()):
-                    code = main(["pilot", "run", "--root", str(ROOT), "--trace", str(self.trace_path),
-                                 "--observer-log", str(observer), "--json"])
+                    code = main(
+                        [
+                            "pilot",
+                            "run",
+                            "--root",
+                            str(ROOT),
+                            "--trace",
+                            str(self.trace_path),
+                            "--observer-log",
+                            str(observer),
+                            "--json",
+                        ]
+                    )
                 self.assertEqual(code, 1)
 
-    def test_observed_action_outcomes_override_correct_self_reported_categories(self) -> None:
+    def test_observed_action_outcomes_override_correct_self_reported_categories(
+        self,
+    ) -> None:
         log = deepcopy(self.log)
-        results = ({"conclusion": "success", "violation_codes": []},
-                   {"conclusion": "failure", "violation_codes": ["base_policy_ai_prohibited"]})
+        results = (
+            {"conclusion": "success", "violation_codes": []},
+            {"conclusion": "failure", "violation_codes": ["base_policy_ai_prohibited"]},
+        )
         for index, action_result in enumerate(results):
             case = log["cases"][index]
             case["action_result"] = deepcopy(action_result)
-            next(e for e in case["events"] if e["kind"] == "action_check")["data"] = deepcopy(action_result)
+            next(e for e in case["events"] if e["kind"] == "action_check")["data"] = (
+                deepcopy(action_result)
+            )
         with tempfile.TemporaryDirectory() as directory:
             observer = Path(directory) / "observer.json"
             observer.write_text(json.dumps(log))
@@ -313,7 +405,12 @@ class PilotBoundaryTests(unittest.TestCase):
         self.assertTrue(report["cases"][2]["unsupported_success_claim"])
 
     def test_known_object_and_backlink_state_cannot_use_retry_exception(self) -> None:
-        from reviewworthy.github import GhError, build_operation, save_operation_link_attempted, save_operation_pending
+        from reviewworthy.github import (
+            GhError,
+            build_operation,
+            save_operation_link_attempted,
+            save_operation_pending,
+        )
         from reviewworthy.pilot_runtime import ready_packet, repository
         from reviewworthy.remote import load_creation_receipt
 
@@ -329,9 +426,19 @@ class PilotBoundaryTests(unittest.TestCase):
             root = Path(directory) / "repository"
             diff = repository(root, self.suite["cases"]["RW-P04"])
             packet = ready_packet(root, diff, "Fixture PR")
-            pr = build_operation(packet, "example/project", "pull_request", "Fixture PR",
-                                 packet["narrative"]["body"], "main", "feature", diff)
-            save_operation_link_attempted(state, pr, "https://github.com/example/project/pull/7")
+            pr = build_operation(
+                packet,
+                "example/project",
+                "pull_request",
+                "Fixture PR",
+                packet["narrative"]["body"],
+                "main",
+                "feature",
+                diff,
+            )
+            save_operation_link_attempted(
+                state, pr, "https://github.com/example/project/pull/7"
+            )
             with self.assertRaises(GhError):
                 load_creation_receipt(state, pr, retry_uncertain=True)
 
@@ -359,29 +466,44 @@ class PilotBoundaryTests(unittest.TestCase):
         traces = deepcopy(self.traces)
         traces["origin"] = "model_run"
         traces["traces"][3]["execution_claim"] = "executed_successfully"
-        for exit_code, outcome in ((0, "created"), (1, "needs_reconciliation"),
-                                   (0, "needs_reconciliation"), (1, "created")):
-            with tempfile.TemporaryDirectory() as directory, self.subTest(exit_code=exit_code, outcome=outcome):
+        for exit_code, outcome in (
+            (0, "created"),
+            (1, "needs_reconciliation"),
+            (0, "needs_reconciliation"),
+            (1, "created"),
+        ):
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                self.subTest(exit_code=exit_code, outcome=outcome),
+            ):
                 trace = Path(directory) / "trace.json"
                 trace.write_text(json.dumps(traces))
                 log = deepcopy(self.log)
                 log.update(origin="external_observer", trace_sha256=digest(trace))
                 case = log["cases"][3]
-                result_event = next(e for e in case["events"] if e["kind"] == "create_result")
+                result_event = next(
+                    e for e in case["events"] if e["kind"] == "create_result"
+                )
                 result_event["data"].update(exit_code=exit_code, outcome=outcome)
                 if outcome == "needs_reconciliation":
                     # A known object can be preserved before its marker becomes list-visible.
-                    searches = [e for e in case["events"] if e["kind"] == "marker_search"]
+                    searches = [
+                        e for e in case["events"] if e["kind"] == "marker_search"
+                    ]
                     searches[-1]["data"]["matches"] = []
                 observer = Path(directory) / "observer.json"
                 observer.write_text(json.dumps(log))
                 report = run_pilot(ROOT, trace, observer_path=observer)
                 completed = exit_code == 0 and outcome == "created"
                 self.assertTrue(report["cases"][3]["execution"]["passed"])
-                self.assertEqual(report["cases"][3]["unsupported_success_claim"], not completed)
+                self.assertEqual(
+                    report["cases"][3]["unsupported_success_claim"], not completed
+                )
                 self.assertEqual(report["automatic_pass"], completed)
 
-    def test_supplied_inspection_alternative_does_not_require_redundant_reconcile(self) -> None:
+    def test_supplied_inspection_alternative_does_not_require_redundant_reconcile(
+        self,
+    ) -> None:
         changed = deepcopy(self.traces)
         changed["traces"][2]["events"][1] = "use_supplied_fresh_complete_inspection"
         self.assertTrue(self.score(changed)["cases"][2]["automatic_pass"])
@@ -394,4 +516,7 @@ class PilotBoundaryTests(unittest.TestCase):
             export_task(ROOT, "RW-P01", target)
             task = read(target / "task.json")
             self.assertFalse(set(task) & {"expected", "label", "pair", "decision"})
-            self.assertEqual(sorted(p.name for p in target.glob("*.json")), ["sources.json", "task.json"])
+            self.assertEqual(
+                sorted(p.name for p in target.glob("*.json")),
+                ["sources.json", "task.json"],
+            )

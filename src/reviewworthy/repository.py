@@ -41,9 +41,13 @@ def repository_identity(
         try:
             owner, name = parse_repository_slug(f"{owner}/{name}")
         except ValueError as exc:
-            raise ValueError("repository identity owner and name must use the owner/name form") from exc
+            raise ValueError(
+                "repository identity owner and name must use the owner/name form"
+            ) from exc
         parsed_id = value.get("repository_id", repository_id)
-        parsed_branch = str(value.get("default_branch", default_branch) or default_branch)
+        parsed_branch = str(
+            value.get("default_branch", default_branch) or default_branch
+        )
         parsed_base = str(value.get("base_sha", base_sha) or base_sha)
     else:
         owner, name = parse_repository_slug(value)
@@ -53,8 +57,12 @@ def repository_identity(
         parsed_branch = default_branch
         parsed_base = base_sha
     if provider != "github" or host != GITHUB_HOST:
-        raise ValueError("only the github.com provider is supported in packet identity 0.1")
-    if parsed_id is not None and (not isinstance(parsed_id, int) or isinstance(parsed_id, bool) or parsed_id <= 0):
+        raise ValueError(
+            "only the github.com provider is supported in packet identity 0.1"
+        )
+    if parsed_id is not None and (
+        not isinstance(parsed_id, int) or isinstance(parsed_id, bool) or parsed_id <= 0
+    ):
         raise ValueError("repository_id must be a positive integer when present")
     return {
         "provider": provider,
@@ -83,7 +91,10 @@ def repository_matches(identity: Any, slug: str) -> bool:
         owner, name = parse_repository_slug(slug)
     except ValueError:
         return False
-    return expected["owner"].casefold() == owner.casefold() and expected["name"].casefold() == name.casefold()
+    return (
+        expected["owner"].casefold() == owner.casefold()
+        and expected["name"].casefold() == name.casefold()
+    )
 
 
 def repository_slugs_match(left: Any, right: Any) -> bool:
@@ -94,14 +105,22 @@ def repository_slugs_match(left: Any, right: Any) -> bool:
         right_owner, right_name = parse_repository_slug(right)
     except ValueError:
         return False
-    return left_owner.casefold() == right_owner.casefold() and left_name.casefold() == right_name.casefold()
+    return (
+        left_owner.casefold() == right_owner.casefold()
+        and left_name.casefold() == right_name.casefold()
+    )
 
 
 def parse_public_record(reference: str) -> dict[str, Any] | None:
     if not isinstance(reference, str):
         return None
     parsed = urlparse(reference.strip())
-    if parsed.scheme != "https" or parsed.netloc.lower() != GITHUB_HOST or parsed.query or parsed.fragment:
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc.lower() != GITHUB_HOST
+        or parsed.query
+        or parsed.fragment
+    ):
         return None
     match = _RECORD_RE.fullmatch(reference.strip())
     if not match:
@@ -122,23 +141,70 @@ def parse_public_record(reference: str) -> dict[str, Any] | None:
     }
 
 
-def validate_repository_identity(value: Any, path: str = "repository") -> list[dict[str, str]]:
+def validate_repository_identity(
+    value: Any, path: str = "repository"
+) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     if not isinstance(value, dict):
-        return [{"code": "invalid_repository_identity", "message": "repository must be an object", "path": path}]
+        return [
+            {
+                "code": "invalid_repository_identity",
+                "message": "repository must be an object",
+                "path": path,
+            }
+        ]
     for key in ("provider", "host", "owner", "name", "default_branch"):
         if not isinstance(value.get(key), str) or not value.get(key, "").strip():
-            errors.append({"code": "invalid_repository_identity", "message": f"repository.{key} is required", "path": f"{path}.{key}"})
-    if isinstance(value.get("owner"), str) and isinstance(value.get("name"), str) and value.get("owner", "").strip() and value.get("name", "").strip():
+            errors.append(
+                {
+                    "code": "invalid_repository_identity",
+                    "message": f"repository.{key} is required",
+                    "path": f"{path}.{key}",
+                }
+            )
+    if (
+        isinstance(value.get("owner"), str)
+        and isinstance(value.get("name"), str)
+        and value.get("owner", "").strip()
+        and value.get("name", "").strip()
+    ):
         try:
             parse_repository_slug(f"{value['owner']}/{value['name']}")
         except ValueError:
-            errors.append({"code": "invalid_repository_identity", "message": "repository.owner and repository.name must use the owner/name form", "path": path})
+            errors.append(
+                {
+                    "code": "invalid_repository_identity",
+                    "message": "repository.owner and repository.name must use the owner/name form",
+                    "path": path,
+                }
+            )
     if value.get("provider") not in {None, "github"}:
-        errors.append({"code": "unsupported_repository_provider", "message": "Only the github provider is supported", "path": f"{path}.provider"})
+        errors.append(
+            {
+                "code": "unsupported_repository_provider",
+                "message": "Only the github provider is supported",
+                "path": f"{path}.provider",
+            }
+        )
     if value.get("host") not in {None, GITHUB_HOST}:
-        errors.append({"code": "unsupported_repository_host", "message": "Only github.com is supported", "path": f"{path}.host"})
+        errors.append(
+            {
+                "code": "unsupported_repository_host",
+                "message": "Only github.com is supported",
+                "path": f"{path}.host",
+            }
+        )
     repository_id = value.get("repository_id")
-    if repository_id is not None and (not isinstance(repository_id, int) or isinstance(repository_id, bool) or repository_id <= 0):
-        errors.append({"code": "invalid_repository_id", "message": "repository.repository_id must be a positive integer when present", "path": f"{path}.repository_id"})
+    if repository_id is not None and (
+        not isinstance(repository_id, int)
+        or isinstance(repository_id, bool)
+        or repository_id <= 0
+    ):
+        errors.append(
+            {
+                "code": "invalid_repository_id",
+                "message": "repository.repository_id must be a positive integer when present",
+                "path": f"{path}.repository_id",
+            }
+        )
     return errors

@@ -12,8 +12,20 @@ from .util import sha256_json
 MENU_VERSION = "0.1"
 REVIEW_COSTS = {"small", "medium", "large", "unknown"}
 VERIFIABILITY = {"high", "medium", "low", "unknown"}
-RECOMMENDATIONS = {"plan_directly", "seek_maintainer_signal", "issue_only", "do_not_contribute"}
-DUPLICATE_DISPOSITIONS = {"exact_duplicate", "potential_duplicate", "related", "not_duplicate", "stale", "superseded"}
+RECOMMENDATIONS = {
+    "plan_directly",
+    "seek_maintainer_signal",
+    "issue_only",
+    "do_not_contribute",
+}
+DUPLICATE_DISPOSITIONS = {
+    "exact_duplicate",
+    "potential_duplicate",
+    "related",
+    "not_duplicate",
+    "stale",
+    "superseded",
+}
 DUPLICATE_BLOCKING_DISPOSITIONS = {"exact_duplicate", "potential_duplicate"}
 
 
@@ -41,144 +53,364 @@ def _candidate_by_id(menu: dict[str, Any], candidate_id: str) -> dict[str, Any]:
 def validate_candidate_menu(menu: dict[str, Any]) -> dict[str, Any]:
     errors: list[dict[str, str]] = []
     if menu.get("menu_version") != MENU_VERSION:
-        _error(errors, "unsupported_version", "menu_version must be 0.1", "menu_version")
-    if not isinstance(menu.get("repository"), str) or not menu.get("repository", "").strip():
+        _error(
+            errors, "unsupported_version", "menu_version must be 0.1", "menu_version"
+        )
+    if (
+        not isinstance(menu.get("repository"), str)
+        or not menu.get("repository", "").strip()
+    ):
         _error(errors, "missing_repository", "repository is required", "repository")
     else:
         try:
             parse_repository_slug(menu["repository"])
         except ValueError:
-            _error(errors, "invalid_repository", "repository must use the owner/name form", "repository")
+            _error(
+                errors,
+                "invalid_repository",
+                "repository must use the owner/name form",
+                "repository",
+            )
     candidates = menu.get("candidates")
     if not isinstance(candidates, list):
         _error(errors, "invalid_candidates", "candidates must be a list", "candidates")
         candidates = []
     seen: set[str] = set()
-    required = ("id", "title", "basis", "duplicate_search", "value", "scope", "review_cost", "verifiability", "risk", "recommendation")
+    required = (
+        "id",
+        "title",
+        "basis",
+        "duplicate_search",
+        "value",
+        "scope",
+        "review_cost",
+        "verifiability",
+        "risk",
+        "recommendation",
+    )
     for index, candidate in enumerate(candidates):
         path = f"candidates[{index}]"
         if not isinstance(candidate, dict):
-            _error(errors, "invalid_candidate", "Each candidate must be an object", path)
+            _error(
+                errors, "invalid_candidate", "Each candidate must be an object", path
+            )
             continue
         for key in required:
             if key not in candidate:
-                _error(errors, "missing_candidate_field", f"Candidate field is required: {key}", f"{path}.{key}")
+                _error(
+                    errors,
+                    "missing_candidate_field",
+                    f"Candidate field is required: {key}",
+                    f"{path}.{key}",
+                )
         candidate_id = candidate.get("id")
         if not isinstance(candidate_id, str) or not candidate_id.strip():
-            _error(errors, "invalid_candidate_id", "Candidate id must be non-empty", f"{path}.id")
+            _error(
+                errors,
+                "invalid_candidate_id",
+                "Candidate id must be non-empty",
+                f"{path}.id",
+            )
         elif candidate_id in seen:
-            _error(errors, "duplicate_candidate_id", f"Candidate id is duplicated: {candidate_id}", f"{path}.id")
+            _error(
+                errors,
+                "duplicate_candidate_id",
+                f"Candidate id is duplicated: {candidate_id}",
+                f"{path}.id",
+            )
         else:
             seen.add(candidate_id)
-        if not isinstance(candidate.get("title"), str) or not candidate.get("title", "").strip():
-            _error(errors, "invalid_candidate_title", "Candidate title must be non-empty", f"{path}.title")
+        if (
+            not isinstance(candidate.get("title"), str)
+            or not candidate.get("title", "").strip()
+        ):
+            _error(
+                errors,
+                "invalid_candidate_title",
+                "Candidate title must be non-empty",
+                f"{path}.title",
+            )
         if "score" in candidate or "confidence" in candidate:
-            _error(errors, "numeric_score_not_allowed", "Candidate menus use evidence fields, not a single AI score", path)
+            _error(
+                errors,
+                "numeric_score_not_allowed",
+                "Candidate menus use evidence fields, not a single AI score",
+                path,
+            )
         if candidate.get("review_cost") not in REVIEW_COSTS:
-            _error(errors, "invalid_review_cost", f"review_cost must be one of {sorted(REVIEW_COSTS)}", f"{path}.review_cost")
+            _error(
+                errors,
+                "invalid_review_cost",
+                f"review_cost must be one of {sorted(REVIEW_COSTS)}",
+                f"{path}.review_cost",
+            )
         if candidate.get("verifiability") not in VERIFIABILITY:
-            _error(errors, "invalid_verifiability", f"verifiability must be one of {sorted(VERIFIABILITY)}", f"{path}.verifiability")
+            _error(
+                errors,
+                "invalid_verifiability",
+                f"verifiability must be one of {sorted(VERIFIABILITY)}",
+                f"{path}.verifiability",
+            )
         if candidate.get("recommendation") not in RECOMMENDATIONS:
-            _error(errors, "invalid_recommendation", f"recommendation must be one of {sorted(RECOMMENDATIONS)}", f"{path}.recommendation")
+            _error(
+                errors,
+                "invalid_recommendation",
+                f"recommendation must be one of {sorted(RECOMMENDATIONS)}",
+                f"{path}.recommendation",
+            )
         if not isinstance(candidate.get("value"), dict):
             _error(errors, "invalid_value", "value must be an object", f"{path}.value")
         if not isinstance(candidate.get("scope"), dict):
-            _error(errors, "invalid_candidate_scope", "scope must be an object", f"{path}.scope")
+            _error(
+                errors,
+                "invalid_candidate_scope",
+                "scope must be an object",
+                f"{path}.scope",
+            )
         basis = candidate.get("basis")
-        if not isinstance(basis, dict) or basis.get("kind") not in {"issue", "signal", "discovery-evidence"}:
-            _error(errors, "invalid_candidate_basis", "basis.kind must be issue, signal, or discovery-evidence", f"{path}.basis")
-        elif not isinstance(basis.get("references", []), list) or not isinstance(basis.get("evidence", []), list):
-            _error(errors, "invalid_basis_evidence", "basis.references and basis.evidence must be lists", f"{path}.basis")
+        if not isinstance(basis, dict) or basis.get("kind") not in {
+            "issue",
+            "signal",
+            "discovery-evidence",
+        }:
+            _error(
+                errors,
+                "invalid_candidate_basis",
+                "basis.kind must be issue, signal, or discovery-evidence",
+                f"{path}.basis",
+            )
+        elif not isinstance(basis.get("references", []), list) or not isinstance(
+            basis.get("evidence", []), list
+        ):
+            _error(
+                errors,
+                "invalid_basis_evidence",
+                "basis.references and basis.evidence must be lists",
+                f"{path}.basis",
+            )
         elif not basis.get("references") and not basis.get("evidence"):
-            _error(errors, "empty_candidate_basis", "A candidate needs references or reproducible evidence", f"{path}.basis")
-        if isinstance(basis, dict) and basis.get("kind") in {"signal", "discovery-evidence"} and isinstance(basis.get("signal"), dict):
+            _error(
+                errors,
+                "empty_candidate_basis",
+                "A candidate needs references or reproducible evidence",
+                f"{path}.basis",
+            )
+        if (
+            isinstance(basis, dict)
+            and basis.get("kind") in {"signal", "discovery-evidence"}
+            and isinstance(basis.get("signal"), dict)
+        ):
             signal_result = validate_signal(basis["signal"])
             for error in signal_result["errors"]:
-                _error(errors, error["code"], error["message"], f"{path}.basis.{error['path'].removeprefix('signal.')}")
+                _error(
+                    errors,
+                    error["code"],
+                    error["message"],
+                    f"{path}.basis.{error['path'].removeprefix('signal.')}",
+                )
             if basis["signal"].get("lifecycle") in {"rejected", "expired"}:
-                _error(errors, "signal_unavailable", "A rejected or expired Contribution Signal cannot be selected", f"{path}.basis.signal.lifecycle")
+                _error(
+                    errors,
+                    "signal_unavailable",
+                    "A rejected or expired Contribution Signal cannot be selected",
+                    f"{path}.basis.signal.lifecycle",
+                )
             if basis.get("kind") == "discovery-evidence" and not (
                 basis["signal"].get("record_type") == "local_evidence"
                 and basis["signal"].get("claim_type") == "reproducible_evidence"
             ):
-                _error(errors, "discovery_signal_shape_mismatch", "discovery-evidence basis requires local reproducible evidence", f"{path}.basis.signal")
+                _error(
+                    errors,
+                    "discovery_signal_shape_mismatch",
+                    "discovery-evidence basis requires local reproducible evidence",
+                    f"{path}.basis.signal",
+                )
         duplicate_search = candidate.get("duplicate_search")
-        if not isinstance(duplicate_search, dict) or duplicate_search.get("checked") is not True:
-            _error(errors, "duplicate_search_missing", "Duplicate-work evidence must be explicitly checked", f"{path}.duplicate_search")
+        if (
+            not isinstance(duplicate_search, dict)
+            or duplicate_search.get("checked") is not True
+        ):
+            _error(
+                errors,
+                "duplicate_search_missing",
+                "Duplicate-work evidence must be explicitly checked",
+                f"{path}.duplicate_search",
+            )
         elif not isinstance(duplicate_search.get("matches"), list):
-            _error(errors, "invalid_duplicate_matches", "duplicate_search.matches must be a list", f"{path}.duplicate_search.matches")
+            _error(
+                errors,
+                "invalid_duplicate_matches",
+                "duplicate_search.matches must be a list",
+                f"{path}.duplicate_search.matches",
+            )
         else:
             disposition = duplicate_search.get("disposition")
             if disposition not in DUPLICATE_DISPOSITIONS:
-                _error(errors, "invalid_duplicate_disposition", f"duplicate_search.disposition must be one of {sorted(DUPLICATE_DISPOSITIONS)}", f"{path}.duplicate_search.disposition")
-            if disposition == "superseded" and not isinstance(duplicate_search.get("superseded_by"), str):
-                _error(errors, "missing_superseded_by", "A superseded candidate must record superseded_by", f"{path}.duplicate_search.superseded_by")
-            elif disposition == "superseded" and not duplicate_search.get("superseded_by", "").strip():
-                _error(errors, "missing_superseded_by", "A superseded candidate must record superseded_by", f"{path}.duplicate_search.superseded_by")
-            if disposition == "exact_duplicate" and candidate.get("recommendation") != "do_not_contribute":
-                _error(errors, "duplicate_work_recommendation_mismatch", "An exact duplicate must not recommend contribution", f"{path}.recommendation")
-            if disposition == "potential_duplicate" and candidate.get("recommendation") == "plan_directly":
-                _error(errors, "potential_duplicate_needs_review", "A potential duplicate cannot recommend direct implementation before investigation", f"{path}.recommendation")
+                _error(
+                    errors,
+                    "invalid_duplicate_disposition",
+                    f"duplicate_search.disposition must be one of {sorted(DUPLICATE_DISPOSITIONS)}",
+                    f"{path}.duplicate_search.disposition",
+                )
+            if disposition == "superseded" and not isinstance(
+                duplicate_search.get("superseded_by"), str
+            ):
+                _error(
+                    errors,
+                    "missing_superseded_by",
+                    "A superseded candidate must record superseded_by",
+                    f"{path}.duplicate_search.superseded_by",
+                )
+            elif (
+                disposition == "superseded"
+                and not duplicate_search.get("superseded_by", "").strip()
+            ):
+                _error(
+                    errors,
+                    "missing_superseded_by",
+                    "A superseded candidate must record superseded_by",
+                    f"{path}.duplicate_search.superseded_by",
+                )
+            if (
+                disposition == "exact_duplicate"
+                and candidate.get("recommendation") != "do_not_contribute"
+            ):
+                _error(
+                    errors,
+                    "duplicate_work_recommendation_mismatch",
+                    "An exact duplicate must not recommend contribution",
+                    f"{path}.recommendation",
+                )
+            if (
+                disposition == "potential_duplicate"
+                and candidate.get("recommendation") == "plan_directly"
+            ):
+                _error(
+                    errors,
+                    "potential_duplicate_needs_review",
+                    "A potential duplicate cannot recommend direct implementation before investigation",
+                    f"{path}.recommendation",
+                )
         if not isinstance(candidate.get("risk"), list):
             _error(errors, "invalid_risk", "risk must be a list", f"{path}.risk")
         elif not all(isinstance(item, str) for item in candidate["risk"]):
-            _error(errors, "invalid_risk_item", "risk items must be strings", f"{path}.risk")
+            _error(
+                errors,
+                "invalid_risk_item",
+                "risk items must be strings",
+                f"{path}.risk",
+            )
         scope = candidate.get("scope")
-        if isinstance(scope, dict) and any(not isinstance(scope.get(key, []), list) for key in ("files", "modules")):
-            _error(errors, "invalid_scope_list", "scope.files and scope.modules must be lists", f"{path}.scope")
+        if isinstance(scope, dict) and any(
+            not isinstance(scope.get(key, []), list) for key in ("files", "modules")
+        ):
+            _error(
+                errors,
+                "invalid_scope_list",
+                "scope.files and scope.modules must be lists",
+                f"{path}.scope",
+            )
     selection = menu.get("selection")
     if not isinstance(selection, dict):
         _error(errors, "invalid_selection", "selection must be an object", "selection")
     elif selection.get("selected_id") and selection["selected_id"] not in seen:
-        _error(errors, "unknown_selected_candidate", "selection.selected_id is not present in candidates", "selection.selected_id")
+        _error(
+            errors,
+            "unknown_selected_candidate",
+            "selection.selected_id is not present in candidates",
+            "selection.selected_id",
+        )
     elif not isinstance(selection.get("confirmed"), bool):
-        _error(errors, "invalid_selection_confirmation", "selection.confirmed must be boolean", "selection.confirmed")
+        _error(
+            errors,
+            "invalid_selection_confirmation",
+            "selection.confirmed must be boolean",
+            "selection.confirmed",
+        )
     elif selection.get("confirmed") and selection.get("selected_id"):
         selected = _candidate_by_id(menu, selection["selected_id"])
         basis = selected.get("basis", {})
-        if isinstance(basis, dict) and basis.get("kind") in {"signal", "discovery-evidence"} and not isinstance(basis.get("signal"), dict):
-            _error(errors, "selected_signal_missing", "A confirmed signal-backed candidate needs a structured signal record", f"candidates[{selection['selected_id']}].basis.signal")
-    return {"valid": not errors, "errors": errors, "candidate_count": len(candidates), "candidate_ids": sorted(seen)}
+        if (
+            isinstance(basis, dict)
+            and basis.get("kind") in {"signal", "discovery-evidence"}
+            and not isinstance(basis.get("signal"), dict)
+        ):
+            _error(
+                errors,
+                "selected_signal_missing",
+                "A confirmed signal-backed candidate needs a structured signal record",
+                f"candidates[{selection['selected_id']}].basis.signal",
+            )
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "candidate_count": len(candidates),
+        "candidate_ids": sorted(seen),
+    }
 
 
-def select_candidate(menu: dict[str, Any], candidate_id: str, *, confirmed: bool) -> dict[str, Any]:
+def select_candidate(
+    menu: dict[str, Any], candidate_id: str, *, confirmed: bool
+) -> dict[str, Any]:
     """Record an explicit candidate selection without authorizing implementation."""
 
     validation = validate_candidate_menu(menu)
     if not validation["valid"]:
-        raise ValueError(f"Cannot select from an invalid candidate menu: {validation['errors']}")
+        raise ValueError(
+            f"Cannot select from an invalid candidate menu: {validation['errors']}"
+        )
     _candidate_by_id(menu, candidate_id)
     selected = deepcopy(menu)
     selected["selection"] = {"selected_id": candidate_id, "confirmed": confirmed}
     selected_validation = validate_candidate_menu(selected)
     if not selected_validation["valid"]:
-        raise ValueError(f"Cannot confirm this candidate selection: {selected_validation['errors']}")
+        raise ValueError(
+            f"Cannot confirm this candidate selection: {selected_validation['errors']}"
+        )
     return selected
 
 
-def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: str | None = None) -> dict[str, Any]:
+def bind_candidate(
+    menu: dict[str, Any], packet: dict[str, Any], candidate_id: str | None = None
+) -> dict[str, Any]:
     """Bind a confirmed candidate's basis to a packet before contract work begins."""
 
     validation = validate_candidate_menu(menu)
     if not validation["valid"]:
-        raise ValueError(f"Cannot bind from an invalid candidate menu: {validation['errors']}")
+        raise ValueError(
+            f"Cannot bind from an invalid candidate menu: {validation['errors']}"
+        )
     selection = menu.get("selection", {})
     selected_id = candidate_id or selection.get("selected_id")
     if not isinstance(selected_id, str) or not selected_id.strip():
         raise ValueError("A candidate must be selected before binding")
-    if selection.get("selected_id") != selected_id or selection.get("confirmed") is not True:
-        raise ValueError("Candidate selection must be explicitly confirmed before binding")
+    if (
+        selection.get("selected_id") != selected_id
+        or selection.get("confirmed") is not True
+    ):
+        raise ValueError(
+            "Candidate selection must be explicitly confirmed before binding"
+        )
     candidate = _candidate_by_id(menu, selected_id)
     if candidate.get("recommendation") == "do_not_contribute":
-        raise ValueError("A do_not_contribute candidate cannot be bound to an implementation packet")
+        raise ValueError(
+            "A do_not_contribute candidate cannot be bound to an implementation packet"
+        )
     if not isinstance(packet, dict) or packet.get("packet_version") != "0.3":
         raise ValueError("A contribution packet with packet_version 0.3 is required")
     basis = candidate.get("basis")
     if not isinstance(basis, dict):
         raise ValueError("Selected candidate has no valid contribution basis")
-    if basis.get("kind") in {"signal", "discovery-evidence"} and not isinstance(basis.get("signal"), dict):
-        raise ValueError("Selected signal-backed candidate has no structured signal record")
-    if isinstance(basis.get("signal"), dict) and basis["signal"].get("lifecycle") in {"rejected", "expired"}:
+    if basis.get("kind") in {"signal", "discovery-evidence"} and not isinstance(
+        basis.get("signal"), dict
+    ):
+        raise ValueError(
+            "Selected signal-backed candidate has no structured signal record"
+        )
+    if isinstance(basis.get("signal"), dict) and basis["signal"].get("lifecycle") in {
+        "rejected",
+        "expired",
+    }:
         raise ValueError("A rejected or expired Contribution Signal cannot be bound")
     bound = deepcopy(packet)
     menu_repository = menu.get("repository")
@@ -187,9 +419,15 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
     try:
         parse_repository_slug(menu_repository)
     except ValueError as exc:
-        raise ValueError("Candidate menu repository must use the owner/name form") from exc
+        raise ValueError(
+            "Candidate menu repository must use the owner/name form"
+        ) from exc
     packet_repository = bound.get("repository")
-    if not isinstance(packet_repository, dict) or not packet_repository.get("owner") or not packet_repository.get("name"):
+    if (
+        not isinstance(packet_repository, dict)
+        or not packet_repository.get("owner")
+        or not packet_repository.get("name")
+    ):
         previous = packet_repository if isinstance(packet_repository, dict) else {}
         bound["repository"] = repository_identity(
             menu_repository,
@@ -203,15 +441,21 @@ def bind_candidate(menu: dict[str, Any], packet: dict[str, Any], candidate_id: s
     if not isinstance(entry, dict):
         raise ValueError("packet_entry_invalid")
     bound["entry"] = dict(entry)
-    bound["entry"]["mode"] = "issue-backed" if basis.get("kind") == "issue" else "discovery"
-    bound["entry"]["source"] = f"candidate-menu:{menu.get('repository', '')}:{selected_id}"
+    bound["entry"]["mode"] = (
+        "issue-backed" if basis.get("kind") == "issue" else "discovery"
+    )
+    bound["entry"]["source"] = (
+        f"candidate-menu:{menu.get('repository', '')}:{selected_id}"
+    )
     bound["basis"] = deepcopy(basis)
     bound["candidate_selection"] = {
         "candidate_id": selected_id,
         "repository": menu_repository,
         "menu_snapshot": sha256_json(menu),
         "recommendation": candidate.get("recommendation"),
-        "duplicate_disposition": candidate.get("duplicate_search", {}).get("disposition"),
+        "duplicate_disposition": candidate.get("duplicate_search", {}).get(
+            "disposition"
+        ),
         "confirmed": True,
     }
     return bound
@@ -234,10 +478,14 @@ def transition_candidate(
         raise ValueError("A candidate transition needs explicit human confirmation")
     selection = packet.get("candidate_selection") if isinstance(packet, dict) else None
     if not isinstance(selection, dict) or selection.get("confirmed") is not True:
-        raise ValueError("A confirmed candidate selection is required before transition")
+        raise ValueError(
+            "A confirmed candidate selection is required before transition"
+        )
     recommendation = selection.get("recommendation")
     if recommendation not in {"issue_only", "seek_maintainer_signal"}:
-        raise ValueError("Only issue_only or seek_maintainer_signal recommendations need a transition")
+        raise ValueError(
+            "Only issue_only or seek_maintainer_signal recommendations need a transition"
+        )
     transitioned = deepcopy(packet)
     transitioned["candidate_selection"]["transition"] = {
         "from": recommendation,
@@ -251,7 +499,9 @@ def transition_candidate(
 def render_candidate_menu(menu: dict[str, Any]) -> str:
     validation = validate_candidate_menu(menu)
     if not validation["valid"]:
-        raise ValueError(f"Cannot render invalid candidate menu: {validation['errors']}")
+        raise ValueError(
+            f"Cannot render invalid candidate menu: {validation['errors']}"
+        )
     lines = [
         "# Candidate menu",
         "",
@@ -280,7 +530,8 @@ def render_candidate_menu(menu: dict[str, Any]) -> str:
                 scope=", ".join(
                     [f"file:{item}" for item in scope.get("files", [])]
                     + [f"module:{item}" for item in scope.get("modules", [])]
-                ) or "not bounded",
+                )
+                or "not bounded",
                 cost=candidate["review_cost"],
                 verify=candidate["verifiability"],
                 risk=", ".join(candidate["risk"]) or "none recorded",

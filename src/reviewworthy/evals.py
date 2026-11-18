@@ -11,7 +11,12 @@ from .action import check_evidence
 from .candidate import validate_candidate_menu
 from .contract import contract_snapshot
 from .git import verification_plan_digest
-from .packet import REQUIRED_NODES, semantic_snapshot, readiness_blockers, skeleton_packet
+from .packet import (
+    REQUIRED_NODES,
+    semantic_snapshot,
+    readiness_blockers,
+    skeleton_packet,
+)
 from .policy import inspect_policy
 from .risk import assess_manifest
 
@@ -78,7 +83,12 @@ def _base_packet() -> dict[str, Any]:
             "scope": {"files": ["src/example.py"], "modules": ["input boundary"]},
             "invariants": ["Existing callers keep their behavior."],
             "design": "Guard the invalid input at the existing boundary.",
-            "alternatives": [{"option": "Refactor the caller", "rejected_because": "Larger review surface."}],
+            "alternatives": [
+                {
+                    "option": "Refactor the caller",
+                    "rejected_because": "Larger review surface.",
+                }
+            ],
             "validation_plan": ["Run the focused unit test."],
             "risks": ["A caller may rely on the old exception path."],
             "success_criteria": ["The regression test passes."],
@@ -103,7 +113,11 @@ def _base_packet() -> dict[str, Any]:
             {"name": "implementation", "level": "assisted", "human_verified": True},
             {"name": "verification", "level": "reviewed", "human_verified": True},
         ],
-        "disclosure": {"text": "AI assistance was reviewed by the contributor.", "locations": ["pr_body"], "human_confirmed": True},
+        "disclosure": {
+            "text": "AI assistance was reviewed by the contributor.",
+            "locations": ["pr_body"],
+            "human_confirmed": True,
+        },
     }
     packet["diff"] = {
         "comparison": "merge_base",
@@ -119,30 +133,43 @@ def _base_packet() -> dict[str, Any]:
     packet["verification"] = {
         "plan": {
             "plan_version": "0.1",
-            "checks": [{"id": "unit", "argv": ["python", "-m", "unittest"], "cwd": ".", "required": True}],
+            "checks": [
+                {
+                    "id": "unit",
+                    "argv": ["python", "-m", "unittest"],
+                    "cwd": ".",
+                    "required": True,
+                }
+            ],
         },
-        "receipts": [{
-            "receipt_version": "0.3",
-            "check_id": "unit",
-            "plan_digest": "",
-            "subject_digest": "subject-digest",
-            "argv": ["python", "-m", "unittest"],
-            "cwd": ".",
-            "exit_code": 0,
-            "command_outcome": "passed",
-            "integrity_status": "stable",
-            "head_sha": "head-sha",
-            "head_sha_before": "head-sha",
-            "head_sha_after": "head-sha",
-            "worktree_clean_before": True,
-            "worktree_clean_after": True,
-            "stdout_sha256": "stdout-sha256",
-            "stderr_sha256": "stderr-sha256",
-            "provenance": "contributor_local",
-        }],
+        "receipts": [
+            {
+                "receipt_version": "0.3",
+                "check_id": "unit",
+                "plan_digest": "",
+                "subject_digest": "subject-digest",
+                "argv": ["python", "-m", "unittest"],
+                "cwd": ".",
+                "exit_code": 0,
+                "command_outcome": "passed",
+                "integrity_status": "stable",
+                "head_sha": "head-sha",
+                "head_sha_before": "head-sha",
+                "head_sha_after": "head-sha",
+                "worktree_clean_before": True,
+                "worktree_clean_after": True,
+                "stdout_sha256": "stdout-sha256",
+                "stderr_sha256": "stderr-sha256",
+                "provenance": "contributor_local",
+            }
+        ],
     }
-    packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
-    packet["verification"]["receipts"][0]["plan_digest"] = packet["verification"]["plan_digest"]
+    packet["verification"]["plan_digest"] = verification_plan_digest(
+        packet["verification"]["plan"]
+    )
+    packet["verification"]["receipts"][0]["plan_digest"] = packet["verification"][
+        "plan_digest"
+    ]
     packet["ownership"] = {
         "status": "passed",
         "problem": "The contributor can explain the failure.",
@@ -150,14 +177,25 @@ def _base_packet() -> dict[str, Any]:
         "verification": "The focused unit check covers the boundary.",
         "risks": ["Existing callers may rely on the old exception path."],
     }
-    packet["results"] = [{"node": node, "status": "passed", "evidence": [f"{node} recorded"]} for node in REQUIRED_NODES]
+    packet["results"] = [
+        {"node": node, "status": "passed", "evidence": [f"{node} recorded"]}
+        for node in REQUIRED_NODES
+    ]
     packet["understanding"] = {
         "orientation": {
             "status": "passed",
             "summary": "The contract and evidence were explained.",
             "topics": ["contract", "diff", "verification", "policy"],
             "rubric": {
-                "covered": ["behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"],
+                "covered": [
+                    "behavior",
+                    "invariant",
+                    "test",
+                    "flow",
+                    "tradeoffs",
+                    "failures",
+                    "regressions",
+                ],
                 "evidence": {
                     "behavior": "The boundary rejects the invalid input.",
                     "invariant": "Existing callers retain their behavior.",
@@ -173,9 +211,19 @@ def _base_packet() -> dict[str, Any]:
         "assessment": {
             "status": "passed",
             "questions": ["What boundary protects the invariant?"],
-            "answers": ["The existing input boundary validates before the old path runs."],
+            "answers": [
+                "The existing input boundary validates before the old path runs."
+            ],
             "rubric": {
-                "covered": ["behavior", "invariant", "test", "flow", "tradeoffs", "failures", "regressions"],
+                "covered": [
+                    "behavior",
+                    "invariant",
+                    "test",
+                    "flow",
+                    "tradeoffs",
+                    "failures",
+                    "regressions",
+                ],
                 "evidence": {
                     "behavior": "The invalid input follows the guarded path.",
                     "invariant": "The existing caller contract remains unchanged.",
@@ -197,7 +245,9 @@ def _base_packet() -> dict[str, Any]:
         "human_expression": "",
     }
     packet["contract"]["approval"] = {"status": "approved", "human_confirmed": True}
-    packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
+    packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(
+        packet["contract"]
+    )
     snapshot = semantic_snapshot(packet)
     packet["snapshots"]["semantic"] = snapshot
     packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
@@ -224,18 +274,46 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(str(content), encoding="utf-8")
                 actual = inspect_policy(root)
-            checks = [("authoritative_claims.ai_assistance", _get_path(actual, "authoritative_claims.ai_assistance"), expected.get("ai_assistance"))]
+            checks = [
+                (
+                    "authoritative_claims.ai_assistance",
+                    _get_path(actual, "authoritative_claims.ai_assistance"),
+                    expected.get("ai_assistance"),
+                )
+            ]
             if expected.get("readiness_blocker"):
                 packet = _base_packet()
-                packet["policy"]["authoritative_claims"]["ai_assistance"] = actual["authoritative_claims"]["ai_assistance"]
+                packet["policy"]["authoritative_claims"]["ai_assistance"] = actual[
+                    "authoritative_claims"
+                ]["ai_assistance"]
                 packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-                packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
+                packet["understanding"]["assessment"]["semantic_snapshot"] = (
+                    semantic_snapshot(packet)
+                )
                 blocker_codes = {item["code"] for item in readiness_blockers(packet)}
-                checks.append(("readiness_blocker", expected["readiness_blocker"] in blocker_codes, True))
+                checks.append(
+                    (
+                        "readiness_blocker",
+                        expected["readiness_blocker"] in blocker_codes,
+                        True,
+                    )
+                )
         elif kind == "candidate":
             actual = validate_candidate_menu(fixture["menu"])
             candidate_id = fixture["menu"]["candidates"][0]["id"]
-            checks = [("valid", actual["valid"], expected.get("valid")), ("recommendation", fixture["menu"]["candidates"][0]["recommendation"], expected.get("recommendation")), ("candidate_id", candidate_id, expected.get("candidate_id", candidate_id))]
+            checks = [
+                ("valid", actual["valid"], expected.get("valid")),
+                (
+                    "recommendation",
+                    fixture["menu"]["candidates"][0]["recommendation"],
+                    expected.get("recommendation"),
+                ),
+                (
+                    "candidate_id",
+                    candidate_id,
+                    expected.get("candidate_id", candidate_id),
+                ),
+            ]
         elif kind == "packet":
             packet = _base_packet()
             for mutation in fixture.get("mutations", []):
@@ -245,23 +323,52 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
                 packet["snapshots"]["semantic"] = snapshot
                 packet["understanding"]["orientation"]["semantic_snapshot"] = snapshot
                 packet["understanding"]["assessment"]["semantic_snapshot"] = snapshot
-            actual = {"blocker_codes": sorted({item["code"] for item in readiness_blockers(packet)})}
-            if not isinstance(expected.get("blocker_codes"), list) or not isinstance(expected.get("result"), str):
-                raise ValueError("packet evals must assert exact blocker_codes and result")
+            actual = {
+                "blocker_codes": sorted(
+                    {item["code"] for item in readiness_blockers(packet)}
+                )
+            }
+            if not isinstance(expected.get("blocker_codes"), list) or not isinstance(
+                expected.get("result"), str
+            ):
+                raise ValueError(
+                    "packet evals must assert exact blocker_codes and result"
+                )
             actual["result"] = "blocked" if actual["blocker_codes"] else "ready"
             checks = [
                 ("result", actual["result"], expected["result"]),
-                ("blocker_codes", actual["blocker_codes"], sorted(expected["blocker_codes"])),
+                (
+                    "blocker_codes",
+                    actual["blocker_codes"],
+                    sorted(expected["blocker_codes"]),
+                ),
             ]
         elif kind == "risk":
             actual = assess_manifest(fixture["manifest"])
-            checks = [("hard_stop", actual["hard_stops"][0]["code"] if actual["hard_stops"] else None, expected.get("hard_stop")), ("review_profile", actual["review_profile"], expected.get("review_profile", actual["review_profile"]))]
+            checks = [
+                (
+                    "hard_stop",
+                    actual["hard_stops"][0]["code"] if actual["hard_stops"] else None,
+                    expected.get("hard_stop"),
+                ),
+                (
+                    "review_profile",
+                    actual["review_profile"],
+                    expected.get("review_profile", actual["review_profile"]),
+                ),
+            ]
         elif kind == "action":
             event = fixture.get("event", {})
             if not isinstance(event, dict):
                 raise ValueError("action eval event must be an object")
-            if not isinstance(expected.get("violation_codes"), list) or not isinstance(expected.get("conclusion"), str) or not isinstance(expected.get("result"), str):
-                raise ValueError("action evals must assert exact violation_codes, conclusion, and result")
+            if (
+                not isinstance(expected.get("violation_codes"), list)
+                or not isinstance(expected.get("conclusion"), str)
+                or not isinstance(expected.get("result"), str)
+            ):
+                raise ValueError(
+                    "action evals must assert exact violation_codes, conclusion, and result"
+                )
             with tempfile.TemporaryDirectory() as directory:
                 actual = check_evidence(
                     fixture.get("body", ""),
@@ -275,7 +382,11 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
                 )
             actual_result = "failed" if actual["conclusion"] == "failure" else "passed"
             checks = [
-                ("violation_codes", sorted(item["code"] for item in actual["violations"]), sorted(expected["violation_codes"])),
+                (
+                    "violation_codes",
+                    sorted(item["code"] for item in actual["violations"]),
+                    sorted(expected["violation_codes"]),
+                ),
                 ("conclusion", actual["conclusion"], expected["conclusion"]),
                 ("result", actual_result, expected["result"]),
             ]
@@ -287,7 +398,11 @@ def _run_case(path: Path, fixture: dict[str, Any]) -> dict[str, Any]:
             passed, message = _assert_equal(actual_value, expected_value, check_path)
             if not passed:
                 failures.append(message)
-        return {"id": case_id, "result": "passed" if not failures else "failed", "failures": failures}
+        return {
+            "id": case_id,
+            "result": "passed" if not failures else "failed",
+            "failures": failures,
+        }
     except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
         return {"id": case_id, "result": "failed", "failures": [str(exc)]}
 
@@ -300,7 +415,14 @@ def run_evals(path: Path) -> dict[str, Any]:
     else:
         paths = []
     if not paths:
-        return {"result": "failed", "total": 0, "passed": 0, "failed": 0, "cases": [], "error": f"No eval fixtures found at {path}"}
+        return {
+            "result": "failed",
+            "total": 0,
+            "passed": 0,
+            "failed": 0,
+            "cases": [],
+            "error": f"No eval fixtures found at {path}",
+        }
     cases: list[dict[str, Any]] = []
     for fixture_path in paths:
         try:
@@ -309,7 +431,9 @@ def run_evals(path: Path) -> dict[str, Any]:
                 raise ValueError("Fixture must be a JSON object")
             cases.append(_run_case(fixture_path, fixture))
         except (OSError, json.JSONDecodeError, ValueError) as exc:
-            cases.append({"id": fixture_path.stem, "result": "failed", "failures": [str(exc)]})
+            cases.append(
+                {"id": fixture_path.stem, "result": "failed", "failures": [str(exc)]}
+            )
     passed = sum(case["result"] == "passed" for case in cases)
     return {
         "result": "passed" if passed == len(cases) else "failed",

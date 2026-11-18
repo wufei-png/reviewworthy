@@ -46,7 +46,10 @@ def run_bounded(
 
     if timeout_seconds <= 0 or max_capture_bytes <= 0:
         raise ValueError("subprocess bounds must be positive")
-    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+    with (
+        tempfile.TemporaryFile() as stdout_file,
+        tempfile.TemporaryFile() as stderr_file,
+    ):
         process = subprocess.Popen(
             argv,
             cwd=cwd,
@@ -69,7 +72,10 @@ def run_bounded(
 
         deadline = time.monotonic() + timeout_seconds
         while process.poll() is None:
-            if stdout_file.tell() > max_capture_bytes or stderr_file.tell() > max_capture_bytes:
+            if (
+                stdout_file.tell() > max_capture_bytes
+                or stderr_file.tell() > max_capture_bytes
+            ):
                 terminate()
                 raise CommandOutputLimitError(
                     f"Command output exceeded {max_capture_bytes} captured bytes: {argv[0]}"
@@ -77,7 +83,9 @@ def run_bounded(
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 terminate()
-                raise CommandTimeoutError(f"Command timed out after {timeout_seconds:g}s: {argv[0]}")
+                raise CommandTimeoutError(
+                    f"Command timed out after {timeout_seconds:g}s: {argv[0]}"
+                )
             time.sleep(min(0.02, remaining))
         returncode = process.returncode
 
@@ -107,7 +115,9 @@ def atomic_write_text(path: Path, value: str) -> None:
     """Replace one artifact atomically within its destination directory."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     temporary_path = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -129,11 +139,19 @@ def atomic_write_text(path: Path, value: str) -> None:
 
 
 def atomic_write_json(path: Path, value: Any, *, sort_keys: bool = True) -> None:
-    atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2, sort_keys=sort_keys) + "\n")
+    atomic_write_text(
+        path,
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=sort_keys) + "\n",
+    )
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def relative_path(path: Path, root: Path) -> str:
@@ -146,7 +164,9 @@ def relative_path(path: Path, root: Path) -> str:
 def normalize_label(value: Any) -> str:
     """Normalize GitHub state reasons and labels for exact policy checks."""
 
-    return " ".join(str(value).strip().lower().replace("_", " ").replace("-", " ").split())
+    return " ".join(
+        str(value).strip().lower().replace("_", " ").replace("-", " ").split()
+    )
 
 
 def has_normalized_label(labels: Any, expected: str) -> bool:

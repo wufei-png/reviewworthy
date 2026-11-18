@@ -18,7 +18,10 @@ def valid_packet() -> dict:
             "default_branch": "main",
             "base_sha": "base-sha",
         },
-        "entry": {"mode": "issue-backed", "source": "https://github.com/example/project/issues/1"},
+        "entry": {
+            "mode": "issue-backed",
+            "source": "https://github.com/example/project/issues/1",
+        },
         "basis": {
             "kind": "issue",
             "references": ["https://github.com/example/project/issues/1"],
@@ -44,7 +47,12 @@ def valid_packet() -> dict:
             "scope": {"files": ["src/example.py"]},
             "invariants": ["Existing callers keep their behavior."],
             "design": "Guard the invalid input at the existing boundary.",
-            "alternatives": [{"option": "Refactor the caller", "rejected_because": "Larger review surface."}],
+            "alternatives": [
+                {
+                    "option": "Refactor the caller",
+                    "rejected_because": "Larger review surface.",
+                }
+            ],
             "validation_plan": ["Run the focused unit test."],
             "risks": ["A caller may rely on the old exception path."],
             "success_criteria": ["The regression test passes."],
@@ -63,7 +71,11 @@ def valid_packet() -> dict:
                 {"name": "implementation", "level": "assisted", "human_verified": True},
                 {"name": "verification", "level": "reviewed", "human_verified": True},
             ],
-            "disclosure": {"text": "AI assistance was reviewed by the contributor.", "locations": ["pr_body"], "human_confirmed": True},
+            "disclosure": {
+                "text": "AI assistance was reviewed by the contributor.",
+                "locations": ["pr_body"],
+                "human_confirmed": True,
+            },
         },
         "diff": {
             "comparison": "merge_base",
@@ -79,29 +91,38 @@ def valid_packet() -> dict:
         "verification": {
             "plan": {
                 "plan_version": "0.1",
-                "checks": [{"id": "unit", "argv": ["python", "-m", "unittest"], "cwd": ".", "required": True}],
+                "checks": [
+                    {
+                        "id": "unit",
+                        "argv": ["python", "-m", "unittest"],
+                        "cwd": ".",
+                        "required": True,
+                    }
+                ],
             },
-            "receipts": [{
-                "receipt_version": "0.3",
-                "check_id": "unit",
-                "plan_digest": "",
-                "subject_digest": "subject-digest",
-                "argv": ["python", "-m", "unittest"],
-                "cwd": ".",
-                "exit_code": 0,
-                "command_outcome": "passed",
-                "integrity_status": "stable",
-                "started_at": "2026-08-09T00:00:00Z",
-                "finished_at": "2026-08-09T00:00:01Z",
-                "head_sha": "head-sha",
-                "head_sha_before": "head-sha",
-                "head_sha_after": "head-sha",
-                "worktree_clean_before": True,
-                "worktree_clean_after": True,
-                "stdout_sha256": "stdout-sha256",
-                "stderr_sha256": "stderr-sha256",
-                "provenance": "contributor_local",
-            }],
+            "receipts": [
+                {
+                    "receipt_version": "0.3",
+                    "check_id": "unit",
+                    "plan_digest": "",
+                    "subject_digest": "subject-digest",
+                    "argv": ["python", "-m", "unittest"],
+                    "cwd": ".",
+                    "exit_code": 0,
+                    "command_outcome": "passed",
+                    "integrity_status": "stable",
+                    "started_at": "2026-08-09T00:00:00Z",
+                    "finished_at": "2026-08-09T00:00:01Z",
+                    "head_sha": "head-sha",
+                    "head_sha_before": "head-sha",
+                    "head_sha_after": "head-sha",
+                    "worktree_clean_before": True,
+                    "worktree_clean_after": True,
+                    "stdout_sha256": "stdout-sha256",
+                    "stderr_sha256": "stderr-sha256",
+                    "provenance": "contributor_local",
+                }
+            ],
         },
         "ownership": {
             "status": "passed",
@@ -133,7 +154,9 @@ def valid_packet() -> dict:
             "assessment": {
                 "status": "passed",
                 "questions": ["What boundary protects the invariant?"],
-                "answers": ["The existing input boundary validates before the old path runs."],
+                "answers": [
+                    "The existing input boundary validates before the old path runs."
+                ],
                 "rubric": {
                     "covered": ["behavior", "invariant", "test"],
                     "evidence": {
@@ -153,12 +176,22 @@ def valid_packet() -> dict:
             "human_expression": "",
         },
     }
-    packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(packet["contract"])
-    packet["verification"]["plan_digest"] = verification_plan_digest(packet["verification"]["plan"])
-    packet["verification"]["receipts"][0]["plan_digest"] = packet["verification"]["plan_digest"]
+    packet["contract"]["approval"]["contract_sha256"] = contract_snapshot(
+        packet["contract"]
+    )
+    packet["verification"]["plan_digest"] = verification_plan_digest(
+        packet["verification"]["plan"]
+    )
+    packet["verification"]["receipts"][0]["plan_digest"] = packet["verification"][
+        "plan_digest"
+    ]
     packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-    packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
-    packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
+    packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(
+        packet
+    )
+    packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(
+        packet
+    )
     return packet
 
 
@@ -166,11 +199,15 @@ def configure_created_object(client) -> None:
     """Make an injected provider expose its successful canonical create once."""
 
     client.read_operation_object.side_effect = lambda operation, url: {
-        "html_url": url, "title": operation.title, "body": operation.body,
-        "head": {"sha": operation.head_sha}, "base": {"ref": operation.base},
+        "html_url": url,
+        "title": operation.title,
+        "body": operation.body,
+        "head": {"sha": operation.head_sha},
+        "base": {"ref": operation.base},
         "draft": operation.draft,
     }
     client.find_existing.side_effect = lambda operation: (
-        client.find_existing.return_value if client.create.call_count == 0
+        client.find_existing.return_value
+        if client.create.call_count == 0
         else [{"url": client.create.return_value}]
     )

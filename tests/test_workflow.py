@@ -33,24 +33,34 @@ class WorkflowStatusTests(unittest.TestCase):
         self.assertEqual(result["next"][0]["kind"], "decision")
         self.assertEqual(result["next"][0]["command"], "")
 
-    def test_approved_contract_routes_to_implementation_before_diff_exists(self) -> None:
+    def test_approved_contract_routes_to_implementation_before_diff_exists(
+        self,
+    ) -> None:
         packet = valid_packet()
-        packet["diff"].update({
-            "base_tip_sha": "",
-            "merge_base_sha": "",
-            "head_sha": "",
-            "subject_digest": "",
-            "changed_files": [],
-            "additions": 0,
-            "deletions": 0,
-        })
+        packet["diff"].update(
+            {
+                "base_tip_sha": "",
+                "merge_base_sha": "",
+                "head_sha": "",
+                "subject_digest": "",
+                "changed_files": [],
+                "additions": 0,
+                "deletions": 0,
+            }
+        )
         packet["verification"]["receipts"] = []
-        implementation = next(result for result in packet["results"] if result["node"] == "implementation")
+        implementation = next(
+            result for result in packet["results"] if result["node"] == "implementation"
+        )
         implementation.update({"status": "not_run", "evidence": []})
         snapshot = semantic_snapshot(packet)
         packet["snapshots"]["semantic"] = snapshot
-        packet["understanding"]["orientation"].update({"status": "not_run", "semantic_snapshot": snapshot})
-        packet["understanding"]["assessment"].update({"status": "not_run", "semantic_snapshot": snapshot})
+        packet["understanding"]["orientation"].update(
+            {"status": "not_run", "semantic_snapshot": snapshot}
+        )
+        packet["understanding"]["assessment"].update(
+            {"status": "not_run", "semantic_snapshot": snapshot}
+        )
 
         result = workflow_status(packet, Path("packet.json"))
 
@@ -61,9 +71,13 @@ class WorkflowStatusTests(unittest.TestCase):
         self.assertIn("--packet packet.json", result["next"][0]["command"])
         self.assertIn("--base main --head HEAD", result["next"][0]["command"])
 
-    def test_explicit_hard_stop_takes_priority_over_earlier_incomplete_stage(self) -> None:
+    def test_explicit_hard_stop_takes_priority_over_earlier_incomplete_stage(
+        self,
+    ) -> None:
         packet = skeleton_packet("blocked-001", "issue-backed", "example/project")
-        packet["review"]["hard_stops"] = [{"kind": "security", "reason": "Use the private security channel."}]
+        packet["review"]["hard_stops"] = [
+            {"kind": "security", "reason": "Use the private security channel."}
+        ]
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
 
         result = workflow_status(packet, Path("packet.json"))
@@ -71,32 +85,49 @@ class WorkflowStatusTests(unittest.TestCase):
         self.assertEqual(result["current_stage"], "blocked")
         self.assertIn("hard-stop", result["next"][0]["reason"])
 
-    def test_hard_stop_takes_priority_when_completed_understanding_becomes_stale(self) -> None:
+    def test_hard_stop_takes_priority_when_completed_understanding_becomes_stale(
+        self,
+    ) -> None:
         packet = valid_packet()
-        packet["review"]["hard_stops"] = [{"kind": "security", "reason": "Use the private security channel."}]
+        packet["review"]["hard_stops"] = [
+            {"kind": "security", "reason": "Use the private security channel."}
+        ]
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
 
         result = workflow_status(packet, Path("packet.json"))
 
-        self.assertIn("assessment_requires_current_orientation", {item["code"] for item in result["blocking"]})
+        self.assertIn(
+            "assessment_requires_current_orientation",
+            {item["code"] for item in result["blocking"]},
+        )
         self.assertEqual(result["current_stage"], "blocked")
 
     def test_non_implementation_result_failure_routes_to_its_own_stage(self) -> None:
         packet = valid_packet()
-        ownership_result = next(result for result in packet["results"] if result["node"] == "ownership")
+        ownership_result = next(
+            result for result in packet["results"] if result["node"] == "ownership"
+        )
         ownership_result.update({"status": "not_run", "evidence": []})
 
         result = workflow_status(packet, Path("packet.json"))
 
         self.assertEqual(result["current_stage"], "ownership")
 
-    def test_risk_signal_requiring_deeper_review_routes_to_profile_decision(self) -> None:
+    def test_risk_signal_requiring_deeper_review_routes_to_profile_decision(
+        self,
+    ) -> None:
         packet = valid_packet()
-        packet["review"]["signals"] = [{"kind": "public_api", "reason": "Changes a public contract."}]
+        packet["review"]["signals"] = [
+            {"kind": "public_api", "reason": "Changes a public contract."}
+        ]
         snapshot = semantic_snapshot(packet)
         packet["snapshots"]["semantic"] = snapshot
-        packet["understanding"]["orientation"].update({"status": "not_run", "semantic_snapshot": snapshot})
-        packet["understanding"]["assessment"].update({"status": "not_run", "semantic_snapshot": snapshot})
+        packet["understanding"]["orientation"].update(
+            {"status": "not_run", "semantic_snapshot": snapshot}
+        )
+        packet["understanding"]["assessment"].update(
+            {"status": "not_run", "semantic_snapshot": snapshot}
+        )
 
         result = workflow_status(packet, Path("packet.json"))
 
@@ -109,8 +140,12 @@ class WorkflowStatusTests(unittest.TestCase):
         packet = valid_packet()
         packet["verification"]["receipts"] = []
         packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
-        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
+        packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(
+            packet
+        )
+        packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(
+            packet
+        )
 
         result = workflow_status(packet, Path("packet.json"))
 
@@ -131,7 +166,9 @@ class WorkflowStatusTests(unittest.TestCase):
         result = workflow_status(packet, Path("packet.json"))
 
         self.assertEqual(result["current_stage"], "verification")
-        self.assertIn("verification_head_mismatch", {item["code"] for item in result["blocking"]})
+        self.assertIn(
+            "verification_head_mismatch", {item["code"] for item in result["blocking"]}
+        )
         self.assertIn("--check-id unit", result["next"][0]["command"])
 
     def test_next_cli_returns_one_machine_readable_action(self) -> None:
@@ -140,8 +177,12 @@ class WorkflowStatusTests(unittest.TestCase):
             packet = valid_packet()
             packet["verification"]["receipts"] = []
             packet["snapshots"]["semantic"] = semantic_snapshot(packet)
-            packet["understanding"]["orientation"]["semantic_snapshot"] = semantic_snapshot(packet)
-            packet["understanding"]["assessment"]["semantic_snapshot"] = semantic_snapshot(packet)
+            packet["understanding"]["orientation"]["semantic_snapshot"] = (
+                semantic_snapshot(packet)
+            )
+            packet["understanding"]["assessment"]["semantic_snapshot"] = (
+                semantic_snapshot(packet)
+            )
             path.write_text(json.dumps(packet), encoding="utf-8")
             output = io.StringIO()
 
@@ -183,7 +224,9 @@ class WorkflowStatusTests(unittest.TestCase):
 
     def test_missing_narrative_reaches_narrative_stage(self) -> None:
         packet = valid_packet()
-        packet["narrative"].update({"title": "", "body": "", "final_preview_confirmed": False})
+        packet["narrative"].update(
+            {"title": "", "body": "", "final_preview_confirmed": False}
+        )
 
         result = workflow_status(packet, Path("packet.json"))
 
@@ -202,34 +245,65 @@ class WorkflowStatusTests(unittest.TestCase):
             result = workflow_status(packet, root / "packet.json")
             self.assertFalse(result["ready"])
             self.assertEqual(result["current_stage"], "blocked")
-            self.assertIn("policy_source_encoding", {item["code"] for item in result["blocking"]})
+            self.assertIn(
+                "policy_source_encoding", {item["code"] for item in result["blocking"]}
+            )
 
-    def test_unrelated_malformed_and_stale_operations_cannot_change_packet_routing(self) -> None:
+    def test_unrelated_malformed_and_stale_operations_cannot_change_packet_routing(
+        self,
+    ) -> None:
         from copy import deepcopy
-        from reviewworthy.github import build_operation, operation_receipt_path, save_operation_pending
+        from reviewworthy.github import (
+            build_operation,
+            operation_receipt_path,
+            save_operation_pending,
+        )
+
         packet = valid_packet()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'packet.json'
+            path = Path(directory) / "packet.json"
             before = workflow_status(packet, path)
             other = deepcopy(packet)
-            other['contribution_id'] = 'another-contribution'
-            operation = build_operation(other, 'example/project', 'pull_request',
-                                        other['narrative']['title'], other['narrative']['body'], 'main', 'feature', other['diff'])
+            other["contribution_id"] = "another-contribution"
+            operation = build_operation(
+                other,
+                "example/project",
+                "pull_request",
+                other["narrative"]["title"],
+                other["narrative"]["body"],
+                "main",
+                "feature",
+                other["diff"],
+            )
             state = operation_receipt_path(path, operation.operation_id)
             save_operation_pending(state, operation)
-            state.with_name('malformed.json').write_text('{not-json')
+            state.with_name("malformed.json").write_text("{not-json")
             self.assertEqual(workflow_status(packet, path), before)
-            operation = build_operation(packet, 'example/project', 'pull_request',
-                                        packet['narrative']['title'], packet['narrative']['body'], 'main', 'feature', packet['diff'])
+            operation = build_operation(
+                packet,
+                "example/project",
+                "pull_request",
+                packet["narrative"]["title"],
+                packet["narrative"]["body"],
+                "main",
+                "feature",
+                packet["diff"],
+            )
             current_state = operation_receipt_path(path, operation.operation_id)
             save_operation_pending(current_state, operation)
-            self.assertIn('remote reconcile', workflow_status(packet, path)['next'][0]['command'])
+            self.assertIn(
+                "remote reconcile", workflow_status(packet, path)["next"][0]["command"]
+            )
             changed = deepcopy(packet)
-            changed['narrative']['title'] = 'New confirmed title'
-            self.assertEqual(workflow_status(changed, path)['next'][0]['kind'], 'decision')
+            changed["narrative"]["title"] = "New confirmed title"
+            self.assertEqual(
+                workflow_status(changed, path)["next"][0]["kind"], "decision"
+            )
             blocked = deepcopy(packet)
-            blocked['review']['hard_stops'] = [{'kind': 'security', 'reason': 'Use the private security channel.'}]
-            blocked['snapshots']['semantic'] = semantic_snapshot(blocked)
+            blocked["review"]["hard_stops"] = [
+                {"kind": "security", "reason": "Use the private security channel."}
+            ]
+            blocked["snapshots"]["semantic"] = semantic_snapshot(blocked)
             result = workflow_status(blocked, path)
-            self.assertEqual(result['current_stage'], 'blocked')
-            self.assertNotIn('reconcile', result['next'][0]['command'])
+            self.assertEqual(result["current_stage"], "blocked")
+            self.assertNotIn("reconcile", result["next"][0]["command"])

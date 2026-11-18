@@ -16,7 +16,9 @@ class SignalTests(unittest.TestCase):
         self.assertTrue(validate_signal(signal)["valid"])
         result = validate_signal(signal, require_confirmed=True)
 
-        self.assertIn("signal_not_confirmed", {error["code"] for error in result["errors"]})
+        self.assertIn(
+            "signal_not_confirmed", {error["code"] for error in result["errors"]}
+        )
 
     def test_confirmed_maintainer_claim_requires_authority(self) -> None:
         signal = skeleton_signal(
@@ -33,11 +35,15 @@ class SignalTests(unittest.TestCase):
         self.assertIn("missing_signal_authority", codes)
 
     def test_local_reproducible_evidence_requires_evidence(self) -> None:
-        signal = skeleton_signal("local_evidence", "reproducible_evidence", "local:input-regression")
+        signal = skeleton_signal(
+            "local_evidence", "reproducible_evidence", "local:input-regression"
+        )
 
         result = validate_signal(signal)
 
-        self.assertIn("missing_signal_evidence", {error["code"] for error in result["errors"]})
+        self.assertIn(
+            "missing_signal_evidence", {error["code"] for error in result["errors"]}
+        )
 
     def test_external_reference_must_match_record_type(self) -> None:
         signal = skeleton_signal(
@@ -46,10 +52,15 @@ class SignalTests(unittest.TestCase):
             "https://github.com/example/project/issues/2",
         )
 
-        self.assertIn("signal_reference_record_mismatch", {error["code"] for error in validate_signal(signal)["errors"]})
+        self.assertIn(
+            "signal_reference_record_mismatch",
+            {error["code"] for error in validate_signal(signal)["errors"]},
+        )
 
     def test_signal_verification_is_bound_to_reference_and_record_type(self) -> None:
-        signal = skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/2")
+        signal = skeleton_signal(
+            "issue", "bug_report", "https://github.com/example/project/issues/2"
+        )
         signal["verification"] = {
             "status": "verified",
             "provider": "github",
@@ -65,7 +76,11 @@ class SignalTests(unittest.TestCase):
         self.assertIn("signal_verification_record_mismatch", codes)
 
     def test_external_verification_requires_complete_canonical_identity(self) -> None:
-        signal = skeleton_signal("pull_request", "accepted_proposal", "https://github.com/example/project/pull/12")
+        signal = skeleton_signal(
+            "pull_request",
+            "accepted_proposal",
+            "https://github.com/example/project/pull/12",
+        )
         signal["verification"] = {
             "status": "verified",
             "provider": "github",
@@ -84,10 +99,17 @@ class SignalTests(unittest.TestCase):
 
         signal["verification"]["number"] = 13
         result = validate_signal(signal)
-        self.assertIn("signal_verification_identity_mismatch", {error["code"] for error in result["errors"]})
+        self.assertIn(
+            "signal_verification_identity_mismatch",
+            {error["code"] for error in result["errors"]},
+        )
 
     def test_external_verification_is_bound_to_packet_repository(self) -> None:
-        signal = skeleton_signal("discussion", "accepted_proposal", "https://github.com/example/project/discussions/7")
+        signal = skeleton_signal(
+            "discussion",
+            "accepted_proposal",
+            "https://github.com/example/project/discussions/7",
+        )
         signal["verification"] = {
             "status": "verified",
             "provider": "github",
@@ -110,7 +132,9 @@ class SignalTests(unittest.TestCase):
         self.assertIn("signal_packet_repository_id_mismatch", codes)
 
     def test_discovery_evidence_requires_local_reproducible_shape(self) -> None:
-        signal = skeleton_signal("issue", "bug_report", "https://github.com/example/project/issues/2")
+        signal = skeleton_signal(
+            "issue", "bug_report", "https://github.com/example/project/issues/2"
+        )
         basis = {
             "kind": "discovery-evidence",
             "references": [],
@@ -120,7 +144,9 @@ class SignalTests(unittest.TestCase):
 
         result = validate_basis_signal(basis, "discovery")
 
-        self.assertIn("discovery_signal_shape_mismatch", {error["code"] for error in result})
+        self.assertIn(
+            "discovery_signal_shape_mismatch", {error["code"] for error in result}
+        )
 
     def test_pre_03_signal_axes_are_rejected_not_migrated(self) -> None:
         old_signal = {

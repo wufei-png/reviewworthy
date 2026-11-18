@@ -29,4 +29,6 @@ class EvalContractTests(unittest.TestCase):
             result = run_evals(path)
 
         self.assertEqual(result["result"], "failed")
-        self.assertIn("exact blocker_codes and result", result["cases"][0]["failures"][0])
+        self.assertIn(
+            "exact blocker_codes and result", result["cases"][0]["failures"][0]
+        )

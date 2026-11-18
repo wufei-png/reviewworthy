@@ -7,7 +7,12 @@ import sys
 import tempfile
 import unittest
 
-from reviewworthy.util import CommandOutputLimitError, CommandTimeoutError, atomic_write_text, run_bounded
+from reviewworthy.util import (
+    CommandOutputLimitError,
+    CommandTimeoutError,
+    atomic_write_text,
+    run_bounded,
+)
 
 
 class UtilityBoundaryTests(unittest.TestCase):
@@ -36,7 +41,9 @@ class UtilityBoundaryTests(unittest.TestCase):
             self.assertEqual(path.read_text(), "second\n")
             self.assertEqual(list(path.parent.glob("*.tmp")), [])
 
-    @unittest.skipUnless(sys.platform != "win32", "directory fsync is a POSIX durability boundary")
+    @unittest.skipUnless(
+        sys.platform != "win32", "directory fsync is a POSIX durability boundary"
+    )
     def test_atomic_writer_syncs_file_and_parent_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "artifact.json"

@@ -18,7 +18,12 @@ from urllib.parse import urlparse
 from .evidence import append_evidence_summary, build_evidence_summary
 from .git import PR_DIFF_FIELDS
 from .packet import issue_link_blockers, readiness_blockers
-from .repository import canonical_repository_slug, parse_public_record, parse_repository_slug, repository_slugs_match
+from .repository import (
+    canonical_repository_slug,
+    parse_public_record,
+    parse_repository_slug,
+    repository_slugs_match,
+)
 from .util import (
     CommandOutputLimitError,
     CommandTimeoutError,
@@ -44,7 +49,9 @@ class MarkerAmbiguityError(GhError):
     def __init__(self, matches: list[dict[str, Any]]):
         self.matches = matches
         urls = [item["url"] for item in matches]
-        super().__init__(f"Multiple remote records contain the current operation marker: {', '.join(urls)}")
+        super().__init__(
+            f"Multiple remote records contain the current operation marker: {', '.join(urls)}"
+        )
 
 
 def pull_request_readiness_blockers(
@@ -58,19 +65,23 @@ def pull_request_readiness_blockers(
     blockers.extend(issue_link_blockers(packet, body))
     packet_diff = packet.get("diff")
     if not isinstance(packet_diff, dict) or not isinstance(actual_diff, dict):
-        blockers.append({
-            "code": "remote_diff_unavailable",
-            "message": "The current pull-request Diff could not be recomputed from its base/head commits; recapture evidence.",
-            "path": "diff",
-        })
+        blockers.append(
+            {
+                "code": "remote_diff_unavailable",
+                "message": "The current pull-request Diff could not be recomputed from its base/head commits; recapture evidence.",
+                "path": "diff",
+            }
+        )
         return blockers
     for key in PR_DIFF_FIELDS:
         if packet_diff.get(key) != actual_diff.get(key):
-            blockers.append({
-                "code": f"remote_{key}_mismatch",
-                "message": f"The current PR Diff {key} differs from packet.diff.{key}; recapture evidence.",
-                "path": f"diff.{key}",
-            })
+            blockers.append(
+                {
+                    "code": f"remote_{key}_mismatch",
+                    "message": f"The current PR Diff {key} differs from packet.diff.{key}; recapture evidence.",
+                    "path": f"diff.{key}",
+                }
+            )
     return blockers
 
 
@@ -117,14 +128,16 @@ class RemoteOperation:
             "repository_id": self.repository_id,
         }
         if self.kind == "pull_request":
-            payload.update({
-                "comparison": self.comparison,
-                "base_tip_sha": self.base_tip_sha,
-                "merge_base_sha": self.merge_base_sha,
-                "head_sha": self.head_sha,
-                "subject_digest": self.subject_digest,
-                "fingerprint_algorithm": self.fingerprint_algorithm,
-            })
+            payload.update(
+                {
+                    "comparison": self.comparison,
+                    "base_tip_sha": self.base_tip_sha,
+                    "merge_base_sha": self.merge_base_sha,
+                    "head_sha": self.head_sha,
+                    "subject_digest": self.subject_digest,
+                    "fingerprint_algorithm": self.fingerprint_algorithm,
+                }
+            )
         else:
             payload.update({"subject_digest": None})
         return payload
@@ -157,9 +170,22 @@ def build_operation(
         if basis.get("kind") == "issue":
             references = basis.get("references", [])
             if isinstance(references, list):
-                issue_url = next((str(item) for item in references if parse_public_record(item or "") and parse_public_record(item or "").get("record_type") == "issue"), None)
+                issue_url = next(
+                    (
+                        str(item)
+                        for item in references
+                        if parse_public_record(item or "")
+                        and parse_public_record(item or "").get("record_type")
+                        == "issue"
+                    ),
+                    None,
+                )
         signal = basis.get("signal")
-        if issue_url is None and isinstance(signal, dict) and signal.get("record_type") == "issue":
+        if (
+            issue_url is None
+            and isinstance(signal, dict)
+            and signal.get("record_type") == "issue"
+        ):
             parsed = parse_public_record(str(signal.get("reference", "")))
             if parsed and parsed.get("record_type") == "issue":
                 issue_url = parsed["url"]
@@ -182,24 +208,30 @@ def build_operation(
         "body": operation_body,
         "base": base,
         "head": head,
-        "draft": kind == "pull_request" and bool(
+        "draft": kind == "pull_request"
+        and bool(
             isinstance(packet.get("policy"), dict)
             and isinstance(packet["policy"].get("authoritative_claims"), dict)
-            and packet["policy"]["authoritative_claims"].get("draft_pr_required") is True
+            and packet["policy"]["authoritative_claims"].get("draft_pr_required")
+            is True
         ),
         "issue_url": issue_url,
         "link_note_template": link_note_template,
-        "repository_id": packet.get("repository", {}).get("repository_id") if isinstance(packet.get("repository"), dict) else None,
+        "repository_id": packet.get("repository", {}).get("repository_id")
+        if isinstance(packet.get("repository"), dict)
+        else None,
     }
     if kind == "pull_request":
-        payload.update({
-            "comparison": diff.get("comparison"),
-            "base_tip_sha": diff.get("base_tip_sha"),
-            "merge_base_sha": diff.get("merge_base_sha"),
-            "head_sha": diff.get("head_sha"),
-            "subject_digest": diff.get("subject_digest"),
-            "fingerprint_algorithm": diff.get("fingerprint_algorithm"),
-        })
+        payload.update(
+            {
+                "comparison": diff.get("comparison"),
+                "base_tip_sha": diff.get("base_tip_sha"),
+                "merge_base_sha": diff.get("merge_base_sha"),
+                "head_sha": diff.get("head_sha"),
+                "subject_digest": diff.get("subject_digest"),
+                "fingerprint_algorithm": diff.get("fingerprint_algorithm"),
+            }
+        )
     else:
         payload.update({"subject_digest": None})
     digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:20]
@@ -249,14 +281,26 @@ def build_signal_operation(
     record_type = signal.get("record_type") if isinstance(signal, dict) else None
     claim_type = signal.get("claim_type") if isinstance(signal, dict) else None
     reference = signal.get("reference") if isinstance(signal, dict) else None
-    if record_type != "issue" or claim_type not in {"bug_report", "maintainer_request", "accepted_proposal", "reproducible_evidence"}:
+    if record_type != "issue" or claim_type not in {
+        "bug_report",
+        "maintainer_request",
+        "accepted_proposal",
+        "reproducible_evidence",
+    }:
         raise ValueError("Only Signal 0.3 issue records can be published as an Issue")
     if not isinstance(reference, str):
         raise ValueError("signal.reference must be a string")
     canonical_repo = canonical_repository_slug(repo)
-    if not isinstance(repository_id, int) or isinstance(repository_id, bool) or repository_id <= 0:
+    if (
+        not isinstance(repository_id, int)
+        or isinstance(repository_id, bool)
+        or repository_id <= 0
+    ):
         raise ValueError("Signal publication repository_id must be a positive integer")
-    subject_id = signal.get("publication_subject_id") or f"{record_type}:{claim_type}:{reference}"
+    subject_id = (
+        signal.get("publication_subject_id")
+        or f"{record_type}:{claim_type}:{reference}"
+    )
     payload = {
         "purpose": "signal_publication",
         "subject_id": subject_id,
@@ -301,9 +345,13 @@ def _canonical_operation_remote(operation: RemoteOperation, remote: Any) -> str:
     if (
         not parsed
         or parsed.get("record_type") != operation.kind
-        or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", operation.repo)
+        or not repository_slugs_match(
+            f"{parsed['owner']}/{parsed['name']}", operation.repo
+        )
     ):
-        raise GhError(f"Remote write returned a non-canonical {operation.kind} URL for {operation.repo}")
+        raise GhError(
+            f"Remote write returned a non-canonical {operation.kind} URL for {operation.repo}"
+        )
     return str(parsed["url"])
 
 
@@ -316,9 +364,20 @@ def operation_lock(path: Path):
     try:
         descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps({"state_version": OPERATION_STATE_VERSION, "operation_id": path.stem, "recorded_at": utc_now()}) + "\n")
+            handle.write(
+                json.dumps(
+                    {
+                        "state_version": OPERATION_STATE_VERSION,
+                        "operation_id": path.stem,
+                        "recorded_at": utc_now(),
+                    }
+                )
+                + "\n"
+            )
     except FileExistsError as exc:
-        raise GhError(f"Operation is already in progress. Verify no process owns it, inspect remote state manually, then remove only this lock and run reconcile; never remove a live lock: {lock_path}") from exc
+        raise GhError(
+            f"Operation is already in progress. Verify no process owns it, inspect remote state manually, then remove only this lock and run reconcile; never remove a live lock: {lock_path}"
+        ) from exc
     try:
         yield lock_path
     finally:
@@ -341,16 +400,26 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
         raise GhError(f"Operation state is unreadable; inspect {path}: {exc}") from exc
 
     def invalid(detail: str) -> None:
-        raise GhError(f"Operation state does not match the current operation contract ({detail}): {path}")
+        raise GhError(
+            f"Operation state does not match the current operation contract ({detail}): {path}"
+        )
 
-    if not isinstance(record, dict) or record.get("state_version") != OPERATION_STATE_VERSION:
+    if (
+        not isinstance(record, dict)
+        or record.get("state_version") != OPERATION_STATE_VERSION
+    ):
         invalid("state_version")
     payload = record.get("operation")
     if not isinstance(payload, dict):
         invalid("operation")
     kind = payload.get("kind")
     purpose = payload.get("purpose")
-    if not isinstance(kind, str) or not isinstance(purpose, str) or kind not in {"issue", "pull_request"} or purpose not in {"contribution", "signal_publication"}:
+    if (
+        not isinstance(kind, str)
+        or not isinstance(purpose, str)
+        or kind not in {"issue", "pull_request"}
+        or purpose not in {"contribution", "signal_publication"}
+    ):
         invalid("kind/purpose")
     if purpose == "signal_publication" and kind != "issue":
         invalid("signal publication kind")
@@ -360,7 +429,11 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
     if not re.fullmatch(r"rw-[0-9a-f]{20}", payload["operation_id"]):
         invalid("operation_id")
     marker = f"<!-- reviewworthy:v0.3:operation-id={payload['operation_id']} -->"
-    if payload["marker"] != marker or payload["body"].count(marker) != 1 or not payload["body"].endswith("\n\n" + marker):
+    if (
+        payload["marker"] != marker
+        or payload["body"].count(marker) != 1
+        or not payload["body"].endswith("\n\n" + marker)
+    ):
         invalid("marker/body")
     try:
         if canonical_repository_slug(payload["repo"]) != payload["repo"]:
@@ -373,29 +446,56 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
     if type(payload.get("draft")) is not bool:
         invalid("draft")
     for key in ("base", "head", "issue_url", "link_note_template", "subject_digest"):
-        if key not in payload or (payload[key] is not None and (not isinstance(payload[key], str) or not payload[key].strip())):
+        if key not in payload or (
+            payload[key] is not None
+            and (not isinstance(payload[key], str) or not payload[key].strip())
+        ):
             invalid(key)
     issue_url = payload["issue_url"]
     if issue_url is not None:
         parsed = parse_public_record(issue_url)
-        if not parsed or parsed["record_type"] != "issue" or parsed["url"] != issue_url or not repository_slugs_match(f"{parsed['owner']}/{parsed['name']}", payload["repo"]):
+        if (
+            not parsed
+            or parsed["record_type"] != "issue"
+            or parsed["url"] != issue_url
+            or not repository_slugs_match(
+                f"{parsed['owner']}/{parsed['name']}", payload["repo"]
+            )
+        ):
             invalid("issue_url")
-    permissions = ["issues:write"] if kind == "issue" else ["contents:read", "pull-requests:write"] + (["issues:write"] if issue_url else [])
+    permissions = (
+        ["issues:write"]
+        if kind == "issue"
+        else ["contents:read", "pull-requests:write"]
+        + (["issues:write"] if issue_url else [])
+    )
     if payload.get("permissions") != permissions:
         invalid("permissions")
-    if payload["link_note_template"] != ("{pr_url}" if kind == "pull_request" and issue_url else None):
+    if payload["link_note_template"] != (
+        "{pr_url}" if kind == "pull_request" and issue_url else None
+    ):
         invalid("link_note_template")
     if kind == "pull_request":
         if not payload["head"] or payload.get("comparison") != "merge_base":
             invalid("head/comparison")
-        for key in ("base_tip_sha", "merge_base_sha", "head_sha", "subject_digest", "fingerprint_algorithm"):
+        for key in (
+            "base_tip_sha",
+            "merge_base_sha",
+            "head_sha",
+            "subject_digest",
+            "fingerprint_algorithm",
+        ):
             if not isinstance(payload.get(key), str) or not payload[key].strip():
                 invalid(key)
     elif payload["draft"] or payload["subject_digest"] is not None:
         invalid("issue fields")
     # Contribution Issue plans have always retained optional base/head inputs in
     # their identity even though gh issue create does not use those refs.
-    if purpose == "signal_publication" and (payload["base"] is not None or payload["head"] is not None or issue_url is not None):
+    if purpose == "signal_publication" and (
+        payload["base"] is not None
+        or payload["head"] is not None
+        or issue_url is not None
+    ):
         invalid("signal fields")
     try:
         operation = RemoteOperation(**{**payload, "permissions": tuple(permissions)})
@@ -403,12 +503,22 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
         invalid("operation fields")
     if payload != operation.as_dict():
         invalid("operation fields")
-    if any(record.get(key) != payload[key] for key in ("operation_id", "marker", "repo", "kind")):
+    if any(
+        record.get(key) != payload[key]
+        for key in ("operation_id", "marker", "repo", "kind")
+    ):
         invalid("record identity")
-    if not isinstance(record.get("recorded_at"), str) or not record["recorded_at"].strip():
+    if (
+        not isinstance(record.get("recorded_at"), str)
+        or not record["recorded_at"].strip()
+    ):
         invalid("recorded_at")
     status = record.get("status")
-    allowed = {"pending", "pr_created", "link_attempted", "linked", "needs_reconciliation"} if kind == "pull_request" else {"pending", "succeeded"}
+    allowed = (
+        {"pending", "pr_created", "link_attempted", "linked", "needs_reconciliation"}
+        if kind == "pull_request"
+        else {"pending", "succeeded"}
+    )
     if not isinstance(status, str) or status not in allowed:
         invalid("status")
     if "reason" in record and not isinstance(record["reason"], str):
@@ -425,7 +535,9 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
         if _canonical_operation_remote(operation, remote) != remote:
             invalid("remote URL")
     if record.get("known_remote") is not None:
-        if _canonical_operation_remote(operation, record["known_remote"]) != record["known_remote"] or (remote and remote != record["known_remote"]):
+        if _canonical_operation_remote(operation, record["known_remote"]) != record[
+            "known_remote"
+        ] or (remote and remote != record["known_remote"]):
             invalid("known_remote")
     if status == "pending" and (remote or record.get("reason")):
         invalid("pending object already known")
@@ -435,22 +547,34 @@ def load_operation_state(path: Path) -> tuple[RemoteOperation, dict[str, Any]]:
     return operation, record
 
 
-def load_operation_receipt(path: Path, operation: RemoteOperation) -> dict[str, Any] | None:
+def load_operation_receipt(
+    path: Path, operation: RemoteOperation
+) -> dict[str, Any] | None:
     if not path.exists():
         return None
     stored, receipt = load_operation_state(path)
     if stored != operation:
-        raise GhError(f"Operation receipt payload does not match the rendered operation; reconcile before retrying: {path}")
+        raise GhError(
+            f"Operation receipt payload does not match the rendered operation; reconcile before retrying: {path}"
+        )
     if receipt["status"] == "pending":
-        raise GhError(f"Operation has an uncertain or pending remote write; run remote reconcile --state {path} before retrying")
+        raise GhError(
+            f"Operation has an uncertain or pending remote write; run remote reconcile --state {path} before retrying"
+        )
     return receipt
 
 
-def _write_operation_record(path: Path, record: dict[str, Any], failure_message: str) -> None:
+def _write_operation_record(
+    path: Path, record: dict[str, Any], failure_message: str
+) -> None:
     try:
         if path.is_file():
             previous = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(previous, dict) and previous.get("state_version") == OPERATION_STATE_VERSION and previous.get("operation") == record.get("operation"):
+            if (
+                isinstance(previous, dict)
+                and previous.get("state_version") == OPERATION_STATE_VERSION
+                and previous.get("operation") == record.get("operation")
+            ):
                 for key in ("signal_recovery", "known_remote", "inspection"):
                     if key in previous:
                         record.setdefault(key, previous[key])
@@ -459,7 +583,12 @@ def _write_operation_record(path: Path, record: dict[str, Any], failure_message:
         raise GhError(f"{failure_message}: {path}: {exc}") from exc
 
 
-def save_operation_pending(path: Path, operation: RemoteOperation, *, signal_recovery: dict[str, Any] | None = None) -> None:
+def save_operation_pending(
+    path: Path,
+    operation: RemoteOperation,
+    *,
+    signal_recovery: dict[str, Any] | None = None,
+) -> None:
     record = {
         "state_version": OPERATION_STATE_VERSION,
         "operation_id": operation.operation_id,
@@ -474,10 +603,18 @@ def save_operation_pending(path: Path, operation: RemoteOperation, *, signal_rec
     }
     if signal_recovery is not None:
         record["signal_recovery"] = signal_recovery
-    _write_operation_record(path, record, "Could not persist pending remote-write state")
+    _write_operation_record(
+        path, record, "Could not persist pending remote-write state"
+    )
 
 
-def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str, *, signal_recovery: dict[str, Any] | None = None) -> None:
+def save_operation_receipt(
+    path: Path,
+    operation: RemoteOperation,
+    remote: str,
+    *,
+    signal_recovery: dict[str, Any] | None = None,
+) -> None:
     remote = _canonical_operation_remote(operation, remote)
     receipt = {
         "state_version": OPERATION_STATE_VERSION,
@@ -492,10 +629,21 @@ def save_operation_receipt(path: Path, operation: RemoteOperation, remote: str, 
     }
     if signal_recovery is not None:
         receipt["signal_recovery"] = signal_recovery
-    _write_operation_record(path, receipt, "Remote write succeeded but operation receipt could not be saved; reconcile before retrying")
+    _write_operation_record(
+        path,
+        receipt,
+        "Remote write succeeded but operation receipt could not be saved; reconcile before retrying",
+    )
 
 
-def _save_link_state(path: Path, operation: RemoteOperation, status: str, pr_url: str, *, reason: str = "") -> None:
+def _save_link_state(
+    path: Path,
+    operation: RemoteOperation,
+    status: str,
+    pr_url: str,
+    *,
+    reason: str = "",
+) -> None:
     if operation.kind != "pull_request":
         raise GhError("Link receipt states apply only to pull-request operations")
     if not pr_url.strip():
@@ -514,14 +662,20 @@ def _save_link_state(path: Path, operation: RemoteOperation, status: str, pr_url
     }
     if reason:
         record["reason"] = reason
-    _write_operation_record(path, record, f"Could not persist {status} remote-write state")
+    _write_operation_record(
+        path, record, f"Could not persist {status} remote-write state"
+    )
 
 
-def save_operation_pr_created(path: Path, operation: RemoteOperation, pr_url: str) -> None:
+def save_operation_pr_created(
+    path: Path, operation: RemoteOperation, pr_url: str
+) -> None:
     _save_link_state(path, operation, "pr_created", pr_url)
 
 
-def save_operation_link_attempted(path: Path, operation: RemoteOperation, pr_url: str) -> None:
+def save_operation_link_attempted(
+    path: Path, operation: RemoteOperation, pr_url: str
+) -> None:
     _save_link_state(path, operation, "link_attempted", pr_url)
 
 
@@ -529,7 +683,9 @@ def save_operation_linked(path: Path, operation: RemoteOperation, pr_url: str) -
     _save_link_state(path, operation, "linked", pr_url)
 
 
-def save_operation_needs_reconciliation(path: Path, operation: RemoteOperation, pr_url: str, reason: str) -> None:
+def save_operation_needs_reconciliation(
+    path: Path, operation: RemoteOperation, pr_url: str, reason: str
+) -> None:
     _save_link_state(path, operation, "needs_reconciliation", pr_url, reason=reason)
 
 
@@ -548,7 +704,9 @@ class GhClient:
         except (OSError, CommandTimeoutError, CommandOutputLimitError) as exc:
             raise GhError(f"Could not invoke gh: {exc}") from exc
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "gh command failed").strip()
+            detail = (
+                completed.stderr or completed.stdout or "gh command failed"
+            ).strip()
             raise GhError(detail)
         return completed.stdout or ""
 
@@ -567,18 +725,21 @@ class GhClient:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise GhError("GitHub marker reconciliation timed out after 60s")
-            page = self._json([
-                "api",
-                "--method",
-                "GET",
-                f"repos/{operation.repo}/issues",
-                "-f",
-                "state=all",
-                "-f",
-                "per_page=100",
-                "-f",
-                f"page={page_number}",
-            ], timeout_seconds=remaining)
+            page = self._json(
+                [
+                    "api",
+                    "--method",
+                    "GET",
+                    f"repos/{operation.repo}/issues",
+                    "-f",
+                    "state=all",
+                    "-f",
+                    "per_page=100",
+                    "-f",
+                    f"page={page_number}",
+                ],
+                timeout_seconds=remaining,
+            )
             if not isinstance(page, list):
                 raise GhError("gh issue response page was not a list")
             for item in page:
@@ -599,7 +760,9 @@ class GhClient:
                     "state": item.get("state"),
                 }
                 if operation.marker in str(normalized["body"]):
-                    normalized["url"] = _canonical_operation_remote(operation, normalized["url"])
+                    normalized["url"] = _canonical_operation_remote(
+                        operation, normalized["url"]
+                    )
                     items.append(normalized)
             if len(page) < 100:
                 break
@@ -608,13 +771,22 @@ class GhClient:
             raise MarkerAmbiguityError(items)
         return items
 
-    def read_operation_object(self, operation: RemoteOperation, remote: str) -> dict[str, Any]:
+    def read_operation_object(
+        self, operation: RemoteOperation, remote: str
+    ) -> dict[str, Any]:
         """Read a known object directly, independently of list visibility."""
 
         remote = _canonical_operation_remote(operation, remote)
         parsed = parse_public_record(remote)
         endpoint = "pulls" if operation.kind == "pull_request" else "issues"
-        record = self._json(["api", f"repos/{operation.repo}/{endpoint}/{parsed['number']}", "--method", "GET"])
+        record = self._json(
+            [
+                "api",
+                f"repos/{operation.repo}/{endpoint}/{parsed['number']}",
+                "--method",
+                "GET",
+            ]
+        )
         if not isinstance(record, dict):
             raise GhError("GitHub object response was not an object")
         if _canonical_operation_remote(operation, record.get("html_url")) != remote:
@@ -628,7 +800,9 @@ class GhClient:
 
         parsed = parse_public_record(pr_url)
         if not parsed or parsed.get("record_type") != "pull_request":
-            raise GhError("Pull-request head lookup needs a canonical GitHub pull-request URL")
+            raise GhError(
+                "Pull-request head lookup needs a canonical GitHub pull-request URL"
+            )
         record = self._json(
             [
                 "api",
@@ -643,7 +817,9 @@ class GhClient:
             raise GhError("GitHub pull-request response did not include head.sha")
         return head_sha.strip()
 
-    def search_candidates(self, repo: str, query: str, kind: str = "both") -> list[dict[str, Any]]:
+    def search_candidates(
+        self, repo: str, query: str, kind: str = "both"
+    ) -> list[dict[str, Any]]:
         """Search Issues/PRs for duplicate-work evidence without mutating GitHub."""
 
         kinds = ("issue", "pr") if kind == "both" else (kind,)
@@ -669,10 +845,17 @@ class GhClient:
                 raise GhError(f"gh {current_kind} search response was not a list")
             for item in items:
                 if isinstance(item, dict):
-                    matches.append({"kind": "pull_request" if current_kind == "pr" else "issue", **item})
+                    matches.append(
+                        {
+                            "kind": "pull_request" if current_kind == "pr" else "issue",
+                            **item,
+                        }
+                    )
         return matches
 
-    def verify_repository_identity(self, repo: str, expected_repository_id: int) -> dict[str, Any]:
+    def verify_repository_identity(
+        self, repo: str, expected_repository_id: int
+    ) -> dict[str, Any]:
         """Resolve the live public repository and require its immutable numeric identity."""
 
         owner, name = parse_repository_slug(repo)
@@ -681,33 +864,55 @@ class GhClient:
             raise GhError("GitHub repository response was not an object")
         live_id = record.get("id")
         if not isinstance(live_id, int) or isinstance(live_id, bool) or live_id <= 0:
-            raise GhError("GitHub repository response did not include a valid numeric id")
+            raise GhError(
+                "GitHub repository response did not include a valid numeric id"
+            )
         if record.get("visibility") != "public":
             raise GhError("Remote writes require a public target repository")
         full_name = record.get("full_name")
         if full_name is not None and not repository_slugs_match(full_name, repo):
-            raise GhError("GitHub repository response does not match the requested slug")
+            raise GhError(
+                "GitHub repository response does not match the requested slug"
+            )
         if (
             not isinstance(expected_repository_id, int)
             or isinstance(expected_repository_id, bool)
             or live_id != expected_repository_id
         ):
-            raise GhError("Live repository_id does not match the confirmed remote operation")
-        return {"repository": f"{owner}/{name}", "repository_id": live_id, "visibility": "public"}
+            raise GhError(
+                "Live repository_id does not match the confirmed remote operation"
+            )
+        return {
+            "repository": f"{owner}/{name}",
+            "repository_id": live_id,
+            "visibility": "public",
+        }
 
     def verify_public_reference(self, reference: str) -> dict[str, Any]:
         """Verify that a supported public GitHub record exists without inferring intent."""
 
         parsed = urlparse(reference)
         if parsed.scheme != "https" or parsed.netloc != "github.com":
-            raise GhError("Signal reference must be an https://github.com public record")
+            raise GhError(
+                "Signal reference must be an https://github.com public record"
+            )
         if parsed.query or parsed.fragment:
-            raise GhError("Signal reference must not include a query string or fragment")
+            raise GhError(
+                "Signal reference must not include a query string or fragment"
+            )
         parts = [part for part in parsed.path.split("/") if part]
-        if len(parts) != 4 or parts[2] not in {"issues", "pull", "discussions"} or not parts[3].isdigit():
-            raise GhError("Signal reference must use /OWNER/REPO/issues|pull|discussions/NUMBER")
+        if (
+            len(parts) != 4
+            or parts[2] not in {"issues", "pull", "discussions"}
+            or not parts[3].isdigit()
+        ):
+            raise GhError(
+                "Signal reference must use /OWNER/REPO/issues|pull|discussions/NUMBER"
+            )
         owner, repository, record_type, number = parts[0], parts[1], parts[2], parts[3]
-        repository_record = self._json(["api", f"repos/{owner}/{repository}", "--method", "GET"])
+        repository_record = self._json(
+            ["api", f"repos/{owner}/{repository}", "--method", "GET"]
+        )
         if not isinstance(repository_record, dict):
             raise GhError("GitHub repository response was not an object")
         normalized_record_type = {
@@ -735,14 +940,32 @@ class GhClient:
             )
             response = self._json(
                 [
-                    "api", "graphql", "-f", f"query={query}",
-                    "-F", f"owner={owner}", "-F", f"name={repository}", "-F", f"number={number}",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={query}",
+                    "-F",
+                    f"owner={owner}",
+                    "-F",
+                    f"name={repository}",
+                    "-F",
+                    f"number={number}",
                 ]
             )
-            repository_data = response.get("data", {}).get("repository") if isinstance(response, dict) else None
-            record = repository_data.get("discussion") if isinstance(repository_data, dict) else None
+            repository_data = (
+                response.get("data", {}).get("repository")
+                if isinstance(response, dict)
+                else None
+            )
+            record = (
+                repository_data.get("discussion")
+                if isinstance(repository_data, dict)
+                else None
+            )
             if not isinstance(record, dict):
-                raise GhError("GitHub Discussion GraphQL response did not include the requested discussion")
+                raise GhError(
+                    "GitHub Discussion GraphQL response did not include the requested discussion"
+                )
             canonical_url = record.get("url")
             normalized_record = {
                 "html_url": canonical_url,
@@ -765,7 +988,8 @@ class GhClient:
         canonical_matches = (
             canonical_parts.scheme.lower() == expected_parts.scheme
             and canonical_parts.netloc.lower() == expected_parts.netloc
-            and canonical_parts.path.rstrip("/").lower() == expected_parts.path.rstrip("/").lower()
+            and canonical_parts.path.rstrip("/").lower()
+            == expected_parts.path.rstrip("/").lower()
         )
         if not canonical_matches:
             return {
@@ -774,7 +998,12 @@ class GhClient:
                 "error": "reference_canonical_mismatch",
                 "canonical_url": canonical_url,
             }
-        result = {**base_result, "verified": True, "url": canonical_url, "state": record.get("state")}
+        result = {
+            **base_result,
+            "verified": True,
+            "url": canonical_url,
+            "state": record.get("state"),
+        }
         for key in ("state_reason", "locked", "author_association"):
             if key in record:
                 result[key] = record[key]
@@ -811,7 +1040,9 @@ class GhClient:
         matches: list[dict[str, Any]] = []
         for page in pages:
             if not isinstance(page, list):
-                raise GhError("gh paginated Issue-comment response contained a non-list page")
+                raise GhError(
+                    "gh paginated Issue-comment response contained a non-list page"
+                )
             for comment in page:
                 if isinstance(comment, dict) and comment.get("body") == pr_url:
                     matches.append(comment)
@@ -823,16 +1054,28 @@ class GhClient:
         try:
             remote = self.verify_public_reference(issue_url)
         except GhError as exc:
-            return {"commentable": False, "reason": "issue_unavailable", "error": str(exc)}
+            return {
+                "commentable": False,
+                "reason": "issue_unavailable",
+                "error": str(exc),
+            }
         if not remote.get("verified"):
-            return {"commentable": False, "reason": str(remote.get("error", "issue_unverified")), "remote": remote}
+            return {
+                "commentable": False,
+                "reason": str(remote.get("error", "issue_unverified")),
+                "remote": remote,
+            }
         if remote.get("record_type") != "issue":
             return {"commentable": False, "reason": "not_an_issue", "remote": remote}
         if remote.get("locked") is True:
             return {"commentable": False, "reason": "issue_locked", "remote": remote}
         state_reason = normalize_label(remote.get("state_reason", ""))
         if state_reason == "not planned":
-            return {"commentable": False, "reason": "issue_not_planned", "remote": remote}
+            return {
+                "commentable": False,
+                "reason": "issue_not_planned",
+                "remote": remote,
+            }
         if has_normalized_label(remote.get("labels"), "duplicate"):
             return {"commentable": False, "reason": "issue_duplicate", "remote": remote}
         return {"commentable": True, "remote": remote}
@@ -866,11 +1109,30 @@ class GhClient:
             body_path.write_text(operation.body, encoding="utf-8")
             if operation.kind == "issue":
                 return self._invoke(
-                    ["issue", "create", "--repo", operation.repo, "--title", operation.title, "--body-file", str(body_path)]
+                    [
+                        "issue",
+                        "create",
+                        "--repo",
+                        operation.repo,
+                        "--title",
+                        operation.title,
+                        "--body-file",
+                        str(body_path),
+                    ]
                 ).strip()
             args = [
-                "pr", "create", "--repo", operation.repo, "--title", operation.title,
-                "--body-file", str(body_path), "--base", operation.base or "main", "--head", operation.head or "",
+                "pr",
+                "create",
+                "--repo",
+                operation.repo,
+                "--title",
+                operation.title,
+                "--body-file",
+                str(body_path),
+                "--base",
+                operation.base or "main",
+                "--head",
+                operation.head or "",
             ]
             if operation.draft:
                 args.append("--draft")

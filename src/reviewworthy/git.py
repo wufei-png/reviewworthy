@@ -6,7 +6,14 @@ from hashlib import sha256
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from .util import CommandOutputLimitError, CommandTimeoutError, canonical_json, relative_path, run_bounded, utc_now
+from .util import (
+    CommandOutputLimitError,
+    CommandTimeoutError,
+    canonical_json,
+    relative_path,
+    run_bounded,
+    utc_now,
+)
 
 
 PR_DIFF_FIELDS = (
@@ -92,7 +99,9 @@ def is_canonical_repository_relative_path(value: Any) -> bool:
 
 
 def _worktree_status(root: Path) -> list[str]:
-    completed = _run_git(root.resolve(), ["status", "--porcelain=v1", "--untracked-files=all"])
+    completed = _run_git(
+        root.resolve(), ["status", "--porcelain=v1", "--untracked-files=all"]
+    )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "git status failed").strip()
         raise GitError(detail)
@@ -113,7 +122,9 @@ def _decode_diff_path(value: bytes) -> str:
     except UnicodeError as exc:
         raise GitError("Git Diff path is not supported UTF-8 text") from exc
     if not is_canonical_repository_relative_path(path) or path == ".":
-        raise GitError(f"Git Diff path is outside the canonical repository-relative contract: {path!r}")
+        raise GitError(
+            f"Git Diff path is outside the canonical repository-relative contract: {path!r}"
+        )
     return path
 
 
@@ -136,25 +147,78 @@ def _parse_numstat(output: bytes) -> tuple[int, int]:
 
 
 def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str, Any]:
-    patch = _run_git(root, ["diff", "--binary", "--no-ext-diff", "--no-renames", start_sha, head_sha], text=False)
+    patch = _run_git(
+        root,
+        ["diff", "--binary", "--no-ext-diff", "--no-renames", start_sha, head_sha],
+        text=False,
+    )
     if patch.returncode != 0:
-        detail = (patch.stderr or patch.stdout or b"git diff failed").decode("utf-8", errors="replace").strip()
+        detail = (
+            (patch.stderr or patch.stdout or b"git diff failed")
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
         raise GitError(detail)
-    names = _run_git(root, ["diff", "--name-only", "-z", "--no-ext-diff", "--no-renames", start_sha, head_sha], text=False)
+    names = _run_git(
+        root,
+        [
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-ext-diff",
+            "--no-renames",
+            start_sha,
+            head_sha,
+        ],
+        text=False,
+    )
     if names.returncode != 0:
-        raise GitError((names.stderr or names.stdout or b"git diff --name-only failed").decode("utf-8", errors="replace").strip())
-    numstat = _run_git(root, ["diff", "--numstat", "-z", "--no-ext-diff", "--no-renames", start_sha, head_sha], text=False)
+        raise GitError(
+            (names.stderr or names.stdout or b"git diff --name-only failed")
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
+    numstat = _run_git(
+        root,
+        [
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-ext-diff",
+            "--no-renames",
+            start_sha,
+            head_sha,
+        ],
+        text=False,
+    )
     if numstat.returncode != 0:
-        raise GitError((numstat.stderr or numstat.stdout or b"git diff --numstat failed").decode("utf-8", errors="replace").strip())
+        raise GitError(
+            (numstat.stderr or numstat.stdout or b"git diff --numstat failed")
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
     additions, deletions = _parse_numstat(bytes(numstat.stdout))
     patch_bytes = bytes(patch.stdout)
     raw = _run_git(
         root,
-        ["diff", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-renames", start_sha, head_sha],
+        [
+            "diff",
+            "--raw",
+            "-z",
+            "--no-abbrev",
+            "--no-ext-diff",
+            "--no-renames",
+            start_sha,
+            head_sha,
+        ],
         text=False,
     )
     if raw.returncode != 0:
-        detail = (raw.stderr or raw.stdout or b"git diff --raw failed").decode("utf-8", errors="replace").strip()
+        detail = (
+            (raw.stderr or raw.stdout or b"git diff --raw failed")
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
         raise GitError(detail)
     parts = _nul_records(bytes(raw.stdout), "git diff --raw")
     entries: list[dict[str, str]] = []
@@ -184,7 +248,10 @@ def _capture_diff_between(root: Path, start_sha: str, head_sha: str) -> dict[str
         "subject_digest": subject_digest,
         "fingerprint_algorithm": FINGERPRINT_ALGORITHM,
         "patch_sha256": sha256(patch_bytes).hexdigest(),
-        "changed_files": sorted(_decode_diff_path(path) for path in _nul_records(bytes(names.stdout), "git diff --name-only")),
+        "changed_files": sorted(
+            _decode_diff_path(path)
+            for path in _nul_records(bytes(names.stdout), "git diff --name-only")
+        ),
         "additions": additions,
         "deletions": deletions,
         "captured_at": utc_now(),
@@ -201,7 +268,9 @@ def capture_pr_diff(root: Path, base: str, head: str) -> dict[str, Any]:
     head_sha = resolve_ref(root, head)
     completed = _run_git(root, ["merge-base", base_tip_sha, head_sha])
     if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "git merge-base failed").strip()
+        detail = (
+            completed.stderr or completed.stdout or "git merge-base failed"
+        ).strip()
         raise GitError(detail)
     merge_base_sha = str(completed.stdout).strip()
     if not merge_base_sha:
@@ -222,13 +291,17 @@ def capture_bindable_pr_diff(root: Path, base: str, head: str) -> dict[str, Any]
     expected_head = resolve_ref(root, head)
     head_before = current_head(root)
     if head_before != expected_head:
-        raise GitError(f"Working tree HEAD moved: expected {expected_head}, found {head_before}")
+        raise GitError(
+            f"Working tree HEAD moved: expected {expected_head}, found {head_before}"
+        )
     if _worktree_status(root):
         raise GitError("Diff binding requires a clean worktree")
     diff = capture_pr_diff(root, base, expected_head)
     head_after = current_head(root)
     if head_after != expected_head:
-        raise GitError(f"Working tree HEAD moved during Diff binding: expected {expected_head}, found {head_after}")
+        raise GitError(
+            f"Working tree HEAD moved during Diff binding: expected {expected_head}, found {head_after}"
+        )
     if _worktree_status(root):
         raise GitError("Diff binding requires a clean worktree")
     return diff
@@ -256,7 +329,9 @@ def run_verification(
     if not argv:
         raise ValueError("verification command must not be empty")
     if not is_canonical_repository_relative_path(cwd):
-        raise ValueError("verification cwd must use one canonical repository-relative POSIX spelling")
+        raise ValueError(
+            "verification cwd must use one canonical repository-relative POSIX spelling"
+        )
     if not check_id or not plan_digest or not subject_digest:
         raise ValueError("check_id, plan_digest, and subject_digest are required")
     command_root = (root / cwd).resolve()
@@ -265,7 +340,9 @@ def run_verification(
     expected_head = resolve_ref(root, head)
     head_before = current_head(root)
     if head_before != expected_head:
-        raise GitError(f"Working tree HEAD moved: expected {expected_head}, found {head_before}")
+        raise GitError(
+            f"Working tree HEAD moved: expected {expected_head}, found {head_before}"
+        )
     if _worktree_status(root):
         raise GitError("Verification requires a clean worktree before execution")
     started_at = utc_now()
