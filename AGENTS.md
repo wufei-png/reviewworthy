@@ -15,7 +15,7 @@ Reviewworthy is a Python 3.11+ CLI with no third-party runtime dependencies. Pac
 
 ## Coding Style & Naming Conventions
 
-Use four-space indentation, standard-library imports before local imports, type hints for public and nontrivial internal APIs, and concise module docstrings. Name modules, functions, and variables with `snake_case`; use `PascalCase` for classes and `UPPER_CASE` for constants. Keep provider access, persistence, and remote writes explicit; preserve the deterministic CLI boundary described in `docs/adr/`. The repository has no configured autoformatter or linter, so match nearby code and run `python -m compileall -q src tests` before submission.
+Use four-space indentation, standard-library imports before local imports, type hints for public and nontrivial internal APIs, and concise module docstrings. Name modules, functions, and variables with `snake_case`; use `PascalCase` for classes and `UPPER_CASE` for constants. Keep provider access, persistence, and remote writes explicit; preserve the deterministic CLI boundary described in `docs/adr/`. The repository pins Ruff 0.16.5 for lint and formatting. From the repository root, CI runs `ruff check --no-cache src tests` for lint and `ruff format --check .` for formatting; before submission, install Ruff with `python -m pip install ruff==0.16.5`, run both checks, match nearby code, and run `python -m compileall -q src tests`.
 
 ## Testing Guidelines
 
